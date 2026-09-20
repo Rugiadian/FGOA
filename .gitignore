@@ -1,7 +1,7 @@
 # Visual Studio / .NET Build Artifacts
 [Bb]in/
 [Oo]bj/
-[Pp]ublish/
+# [Pp]ublish/
 
 # Visual Studio files
 .vs/
