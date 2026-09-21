@@ -1,6 +1,6 @@
 {
-  "TargetProcessName": "plastic",
-  "TargetWindowTitle": "FGOA - Unity Version Control (11.0.16.10371)",
+  "TargetProcessName": "RD_AutoInputTool",
+  "TargetWindowTitle": "RD \uC624\uD1A0 \uC785\uB825 \uD234 (Auto Input Tool)",
   "CheckIntervalMs": 100,
   "AlwaysOnTop": false,
   "HotkeysDisabled": false,
