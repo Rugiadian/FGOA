@@ -1,19 +1,25 @@
 @echo off
 chcp 65001 > nul
-echo ===================================================
-echo   FGOA - 화면 인식 스마트 윈도우 오토 툴 시작
-echo ===================================================
+setlocal
+
+set PYTHONW_EXE=%LOCALAPPDATA%\Programs\Python\Python312\pythonw.exe
+
+if exist "%PYTHONW_EXE%" (
+    start "" "%PYTHONW_EXE%" "%~dp0main.py"
+    exit /b 0
+)
+
+where pythonw >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    start "" pythonw "%~dp0main.py"
+    exit /b 0
+)
 
 set PYTHON_EXE=%LOCALAPPDATA%\Programs\Python\Python312\python.exe
-
 if exist "%PYTHON_EXE%" (
-    "%PYTHON_EXE%" main.py
-) else (
-    python main.py
+    start "" "%PYTHON_EXE%" "%~dp0main.py"
+    exit /b 0
 )
 
-if %ERRORLEVEL% NEQ 0 (
-    echo.
-    echo 실행 중 오류가 발생했습니다.
-    pause
-)
+start "" python "%~dp0main.py"
+exit /b 0

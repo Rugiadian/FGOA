@@ -102,11 +102,51 @@ class TestCoreModels(unittest.TestCase):
         reconstructed = Scenario.from_dict(data)
 
         self.assertEqual(reconstructed.name, "테스트 시나리오")
+        self.assertEqual(reconstructed.scenario_number, 1)
         self.assertEqual(reconstructed.on_match, "jump")
         self.assertEqual(reconstructed.jump_target_on_match, "target_123")
         self.assertEqual(len(reconstructed.actions), 2)
         self.assertEqual(reconstructed.actions[0].mouse_button, "right")
         self.assertEqual(reconstructed.actions[1].delay_seconds, 3.0)
+
+    def test_scenario_unique_number_and_lookup(self):
+        proj = Project(name="Lookup Test")
+        s1 = Scenario(id="scen_a", step_number=1, scenario_number=101, name="Step A")
+        s2 = Scenario(id="scen_b", step_number=2, scenario_number=102, name="Step B")
+        proj.scenarios = [s1, s2]
+
+        self.assertEqual(proj.get_next_scenario_number(), 103)
+        self.assertEqual(proj.find_scenario_by_number(101), s1)
+    def test_loop_hierarchy_depths(self):
+        proj = Project(name="Loop Test")
+        s1 = Scenario(id="s1", name="루프1 시작", node_type="loop_start", loop_mode="count", loop_count=3)
+        s2 = Scenario(id="s2", name="자식 1")
+        s3 = Scenario(id="s3", name="자식 2")
+        s4 = Scenario(id="s4", name="루프1 종료", node_type="loop_end")
+        s5 = Scenario(id="s5", name="외부 시나리오")
+        proj.scenarios = [s1, s2, s3, s4, s5]
+
+        depths = proj.compute_hierarchy_depths()
+        self.assertEqual(depths, [0, 1, 1, 0, 0])
+
+        self.assertEqual(proj.find_matching_loop_end(0), 3)
+        self.assertEqual(proj.find_matching_loop_start(3), 0)
+
+    def test_gallery_usage_computation(self):
+        from ui.reference_gallery_dialog import ReferenceGalleryDialog
+        proj = Project(name="Gallery Test")
+        ref_path = "C:/fake/test_ref.png"
+        s1 = Scenario(
+            id="s1", scenario_number=1, name="배틀 시작",
+            condition=Condition(reference_image_path=ref_path, points=[ColorPoint(x=10, y=20)]),
+            actions=[Action(action_type="mouse_click", x=100, y=200)]
+        )
+        s2 = Scenario(id="s2", scenario_number=2, name="스킬")
+        proj.scenarios = [s1, s2]
+
+        usages = ReferenceGalleryDialog.compute_image_usages(ref_path, proj)
+        self.assertGreaterEqual(len(usages), 1)
+        self.assertTrue(any("배틀 시작" in u["scenario_name"] for u in usages))
 
 
 if __name__ == "__main__":

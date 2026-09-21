@@ -102,6 +102,9 @@ class ConditionEvaluator:
 
         return (matched, point_results)
 
+    # Alias for convenience and backward compatibility
+    evaluate_condition = evaluate
+
     @staticmethod
     def are_conditions_duplicate(cond1: Condition, cond2: Condition, coord_thresh: int = 2, color_thresh: int = 5) -> bool:
         """

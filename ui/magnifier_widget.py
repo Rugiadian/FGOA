@@ -3,9 +3,9 @@ Magnifier / Loupe widget for FGOA.
 Displays an enlarged pixel grid around the mouse cursor with RGB details.
 """
 from typing import Optional, Tuple
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QFrame
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QFrame, QPushButton
 from PyQt5.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPixmap, QImage
-from PyQt5.QtCore import Qt, QRect
+from PyQt5.QtCore import Qt, QRect, pyqtSignal
 
 
 class MagnifierCanvas(QWidget):
@@ -68,7 +68,8 @@ class MagnifierCanvas(QWidget):
 
 
 class MagnifierWidget(QFrame):
-    """Complete magnifier panel with enlarged canvas and coordinate/RGB readout."""
+    """Complete magnifier panel with enlarged canvas, coordinate/RGB readout, and 1px nudge controls."""
+    sig_nudge_requested = pyqtSignal(int, int)  # (dx, dy)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -108,6 +109,71 @@ class MagnifierWidget(QFrame):
         info_layout.addWidget(self.lbl_hex)
 
         layout.addLayout(info_layout)
+
+        # 1px Nudge Directional Pad (방향키 버튼)
+        dpad_frame = QFrame()
+        dpad_frame.setStyleSheet("""
+            QPushButton {
+                background-color: #334155;
+                color: #f8fafc;
+                border: 1px solid #475569;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 10pt;
+            }
+            QPushButton:hover {
+                background-color: #475569;
+                border-color: #38bdf8;
+            }
+            QPushButton:pressed {
+                background-color: #2563eb;
+            }
+        """)
+        dpad_layout = QVBoxLayout(dpad_frame)
+        dpad_layout.setContentsMargins(0, 4, 0, 2)
+        dpad_layout.setSpacing(3)
+
+        lbl_nudge = QLabel("🎯 1픽셀 정밀 미세조정")
+        lbl_nudge.setStyleSheet("font-size: 8pt; color: #94a3b8; font-weight: bold;")
+        lbl_nudge.setAlignment(Qt.AlignCenter)
+        dpad_layout.addWidget(lbl_nudge)
+
+        # Up
+        row_up = QHBoxLayout()
+        btn_up = QPushButton("▲")
+        btn_up.setFixedSize(32, 24)
+        btn_up.setToolTip("위로 1픽셀 이동 (Up Arrow)")
+        btn_up.clicked.connect(lambda: self.sig_nudge_requested.emit(0, -1))
+        row_up.addWidget(btn_up, 0, Qt.AlignCenter)
+        dpad_layout.addLayout(row_up)
+
+        # Left / Right
+        row_mid = QHBoxLayout()
+        row_mid.setSpacing(6)
+        row_mid.setAlignment(Qt.AlignCenter)
+        btn_left = QPushButton("◀")
+        btn_left.setFixedSize(32, 24)
+        btn_left.setToolTip("왼쪽으로 1픽셀 이동 (Left Arrow)")
+        btn_left.clicked.connect(lambda: self.sig_nudge_requested.emit(-1, 0))
+        row_mid.addWidget(btn_left)
+
+        btn_right = QPushButton("▶")
+        btn_right.setFixedSize(32, 24)
+        btn_right.setToolTip("오른쪽으로 1픽셀 이동 (Right Arrow)")
+        btn_right.clicked.connect(lambda: self.sig_nudge_requested.emit(1, 0))
+        row_mid.addWidget(btn_right)
+        dpad_layout.addLayout(row_mid)
+
+        # Down
+        row_down = QHBoxLayout()
+        btn_down = QPushButton("▼")
+        btn_down.setFixedSize(32, 24)
+        btn_down.setToolTip("아래로 1픽셀 이동 (Down Arrow)")
+        btn_down.clicked.connect(lambda: self.sig_nudge_requested.emit(0, 1))
+        row_down.addWidget(btn_down, 0, Qt.AlignCenter)
+        dpad_layout.addLayout(row_down)
+
+        layout.addWidget(dpad_frame)
 
     def set_position(self, image: Optional[QImage], x: int, y: int):
         self.canvas.update_pixel_data(image, x, y)

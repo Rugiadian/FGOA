@@ -131,19 +131,26 @@ class Action:
 class Scenario:
     """A workflow step combining Condition checking and Action execution."""
     id: str = field(default_factory=lambda: f"scen_{uuid.uuid4().hex[:6]}")
-    step_number: int = 1
+    step_number: int = 1          # 실행 순서 (1, 2, 3... 드래그/이동 시 재계산)
+    scenario_number: int = 1      # 시나리오 고유 번호 (위치가 바뀌어도 유지되는 불변 고유 식별 번호)
     name: str = "새 시나리오"
     enabled: bool = True
+    
+    # Node Type & Loop Controls
+    node_type: str = "normal"     # "normal", "loop_start", "loop_end"
+    loop_mode: str = "count"      # "count" (지정 횟수), "until_match" (조건 일치 시 탈출), "while_match" (조건 일치 동안 반복), "infinite" (무한)
+    loop_count: int = 5           # 반복 횟수 (또는 최대 안전 한도)
+    loop_target_id: str = ""      # loop_end일 때 대응되는 loop_start의 ID
     
     # Condition
     condition: Optional[Condition] = None  # None means unconditional execution
     
     # Branching on match
-    on_match: str = "execute"  # "execute" (run actions then next), "jump" (jump to target), "stop" (stop automation)
+    on_match: str = "execute"  # "execute" (run actions then next), "jump" (jump to target), "stop" (stop automation), "break_loop" (루프 탈출)
     jump_target_on_match: str = ""  # Scenario ID to jump to
     
     # Branching on mismatch
-    on_mismatch: str = "next"  # "next" (skip actions and go to next step), "jump", "stop", "retry"
+    on_mismatch: str = "next"  # "next" (skip actions and go to next step), "jump", "stop", "retry", "break_loop"
     jump_target_on_mismatch: str = ""  # Scenario ID to jump to
     retry_max_count: int = 3
     retry_interval_sec: float = 0.5
@@ -151,6 +158,30 @@ class Scenario:
     # Actions to execute when condition is met (or unconditional)
     actions: List[Action] = field(default_factory=list)
     post_delay_seconds: float = 0.2
+
+    def is_loop_start(self) -> bool:
+        return self.node_type == "loop_start"
+
+    def is_loop_end(self) -> bool:
+        return self.node_type == "loop_end"
+
+    def is_loop_node(self) -> bool:
+        return self.node_type in ("loop_start", "loop_end")
+
+    def get_loop_summary(self) -> str:
+        if self.node_type == "loop_start":
+            if self.loop_mode == "count":
+                return f"🔁 루프 시작: {self.loop_count}회 반복"
+            elif self.loop_mode == "until_match":
+                return f"🔁 루프 시작: 화면 조건 일치 시 탈출 (최대 {self.loop_count}회)"
+            elif self.loop_mode == "while_match":
+                return f"🔁 루프 시작: 화면 조건 일치 동안 반복"
+            elif self.loop_mode == "infinite":
+                return "🔁 루프 시작: 무한 반복"
+            return "🔁 루프 시작"
+        elif self.node_type == "loop_end":
+            return "🔁 루프 종료 (시작으로 복귀)"
+        return ""
 
     def get_actions_summary(self) -> str:
         """Returns summarized text of actions in this scenario."""
@@ -163,6 +194,15 @@ class Scenario:
 
     def get_condition_summary(self) -> str:
         """Returns summarized text of condition."""
+        if self.node_type == "loop_start":
+            if self.loop_mode in ("until_match", "while_match") and self.condition and self.condition.points:
+                pts = self.condition.points
+                mode_str = "일치 시 탈출" if self.loop_mode == "until_match" else "일치 동안 반복"
+                return f"루프 탈출 조건: 포인트 {len(pts)}개 ({mode_str})"
+            return f"횟수 제어 ({self.loop_count}회)"
+        elif self.node_type == "loop_end":
+            return "(루프 시작으로 복귀)"
+            
         if not self.condition or not self.condition.points:
             return "무조건 실행"
         pts = self.condition.points
@@ -172,8 +212,13 @@ class Scenario:
         return {
             "id": self.id,
             "step_number": self.step_number,
+            "scenario_number": self.scenario_number,
             "name": self.name,
             "enabled": self.enabled,
+            "node_type": self.node_type,
+            "loop_mode": self.loop_mode,
+            "loop_count": self.loop_count,
+            "loop_target_id": self.loop_target_id,
             "condition": self.condition.to_dict() if self.condition else None,
             "on_match": self.on_match,
             "jump_target_on_match": self.jump_target_on_match,
@@ -193,8 +238,13 @@ class Scenario:
         return cls(
             id=data.get("id", f"scen_{uuid.uuid4().hex[:6]}"),
             step_number=data.get("step_number", 1),
+            scenario_number=data.get("scenario_number", data.get("step_number", 1)),
             name=data.get("name", "시나리오"),
             enabled=data.get("enabled", True),
+            node_type=data.get("node_type", "normal"),
+            loop_mode=data.get("loop_mode", "count"),
+            loop_count=data.get("loop_count", 5),
+            loop_target_id=data.get("loop_target_id", ""),
             condition=condition,
             on_match=data.get("on_match", "execute"),
             jump_target_on_match=data.get("jump_target_on_match", ""),
@@ -221,10 +271,68 @@ class Project:
         """Update step_number for all scenarios sequentially starting at 1."""
         for idx, scen in enumerate(self.scenarios, start=1):
             scen.step_number = idx
+            if not hasattr(scen, "scenario_number") or scen.scenario_number is None or scen.scenario_number <= 0:
+                scen.scenario_number = idx
+
+    def get_next_scenario_number(self) -> int:
+        """Generate the next unique scenario number."""
+        nums = [getattr(s, "scenario_number", 0) for s in self.scenarios if getattr(s, "scenario_number", 0) > 0]
+        return max(nums, default=0) + 1
+
+    def compute_hierarchy_depths(self) -> List[int]:
+        """Calculate nesting hierarchy depth (0, 1, 2...) for each scenario."""
+        depths = []
+        current_depth = 0
+        for scen in self.scenarios:
+            if scen.node_type == "loop_end":
+                current_depth = max(0, current_depth - 1)
+                depths.append(current_depth)
+            elif scen.node_type == "loop_start":
+                depths.append(current_depth)
+                current_depth += 1
+            else:
+                depths.append(current_depth)
+        return depths
+
+    def find_matching_loop_end(self, start_idx: int) -> Optional[int]:
+        """Find corresponding loop_end index for a loop_start at start_idx."""
+        if start_idx < 0 or start_idx >= len(self.scenarios):
+            return None
+        depth = 0
+        for i in range(start_idx, len(self.scenarios)):
+            s = self.scenarios[i]
+            if s.node_type == "loop_start":
+                depth += 1
+            elif s.node_type == "loop_end":
+                depth -= 1
+                if depth == 0:
+                    return i
+        return None
+
+    def find_matching_loop_start(self, end_idx: int) -> Optional[int]:
+        """Find corresponding loop_start index for a loop_end at end_idx."""
+        if end_idx < 0 or end_idx >= len(self.scenarios):
+            return None
+        depth = 0
+        for i in range(end_idx, -1, -1):
+            s = self.scenarios[i]
+            if s.node_type == "loop_end":
+                depth += 1
+            elif s.node_type == "loop_start":
+                depth -= 1
+                if depth == 0:
+                    return i
+        return None
 
     def find_scenario_by_id(self, scen_id: str) -> Optional[Scenario]:
         for s in self.scenarios:
             if s.id == scen_id:
+                return s
+        return None
+
+    def find_scenario_by_number(self, num: int) -> Optional[Scenario]:
+        for s in self.scenarios:
+            if getattr(s, "scenario_number", None) == num:
                 return s
         return None
 

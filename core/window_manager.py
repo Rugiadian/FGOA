@@ -11,6 +11,17 @@ import win32gui
 import win32process
 import win32con
 
+def _attach_input_desktop():
+    try:
+        user32 = ctypes.windll.user32
+        h_input = user32.OpenInputDesktop(0, False, 0x01FF)
+        if h_input:
+            user32.SetThreadDesktop(h_input)
+    except Exception:
+        pass
+
+_attach_input_desktop()
+
 
 @dataclass
 class WindowInfo:
@@ -31,18 +42,16 @@ class WindowManager:
     """Manages Windows windows, client coordinate mapping and window selection."""
 
     @staticmethod
+    def ensure_input_desktop():
+        _attach_input_desktop()
+
+    @staticmethod
     def get_all_visible_windows() -> List[WindowInfo]:
-        """Enumerate all visible, non-empty top-level windows."""
+        """Enumerate all visible, non-empty top-level windows from interactive desktop."""
         windows: List[WindowInfo] = []
 
-        def enum_callback(hwnd, extra):
-            if not win32gui.IsWindow(hwnd):
-                return True
-            if not win32gui.IsWindowVisible(hwnd):
-                return True
-            
-            # Skip minimized windows
-            if win32gui.IsIconic(hwnd):
+        def enum_callback(hwnd):
+            if not win32gui.IsWindow(hwnd) or not win32gui.IsWindowVisible(hwnd) or win32gui.IsIconic(hwnd):
                 return True
 
             title = win32gui.GetWindowText(hwnd).strip()
@@ -53,32 +62,48 @@ class WindowManager:
             if title in ("Program Manager", "Settings", "Microsoft Text Input Application"):
                 return True
 
-            rect = win32gui.GetClientRect(hwnd)
-            width = rect[2] - rect[0]
-            height = rect[3] - rect[1]
-
-            if width < 50 or height < 50:
-                return True
-
             try:
+                rect = win32gui.GetClientRect(hwnd)
+                width = rect[2] - rect[0]
+                height = rect[3] - rect[1]
+
+                if width < 50 or height < 50:
+                    return True
+
                 screen_origin = win32gui.ClientToScreen(hwnd, (0, 0))
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+
+                windows.append(WindowInfo(
+                    hwnd=hwnd,
+                    title=title,
+                    client_width=width,
+                    client_height=height,
+                    screen_x=screen_origin[0],
+                    screen_y=screen_origin[1],
+                    pid=pid
+                ))
             except Exception:
-                return True
-
-            _, pid = win32process.GetWindowThreadProcessId(hwnd)
-
-            windows.append(WindowInfo(
-                hwnd=hwnd,
-                title=title,
-                client_width=width,
-                client_height=height,
-                screen_x=screen_origin[0],
-                screen_y=screen_origin[1],
-                pid=pid
-            ))
+                pass
             return True
 
-        win32gui.EnumWindows(enum_callback, None)
+        enumerated = False
+        try:
+            user32 = ctypes.windll.user32
+            h_input = user32.OpenInputDesktop(0, False, 0x01FF)
+            if h_input:
+                WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+                user32.EnumDesktopWindows(h_input, WNDENUMPROC(lambda hwnd, lp: enum_callback(hwnd)), 0)
+                user32.CloseDesktop(h_input)
+                enumerated = True
+        except Exception:
+            pass
+
+        if not enumerated or not windows:
+            try:
+                win32gui.EnumWindows(lambda hwnd, extra: enum_callback(hwnd), None)
+            except Exception:
+                pass
+
         # Sort by title
         windows.sort(key=lambda w: w.title.lower())
         return windows

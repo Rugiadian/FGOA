@@ -7,14 +7,14 @@ import os
 import copy
 from typing import Optional, List
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
     QComboBox, QSpinBox, QGroupBox, QSplitter, QMessageBox,
     QApplication, QInputDialog
 )
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt
-from PIL import Image
+from PIL import Image, ImageQt
 
 from core.models import Condition, ColorPoint, Project, Scenario
 from core.screen_capture import ScreenCapture
@@ -248,10 +248,17 @@ class ConditionEditorDialog(QDialog):
         if not ok:
             return
 
+        pil_ref = None
+        if self.canvas.qimage and not self.canvas.qimage.isNull():
+            try:
+                pil_ref = ImageQt.fromqimage(self.canvas.qimage)
+            except Exception:
+                pil_ref = None
+
         sampled_pts = ConditionEvaluator.sample_line_points(
             start_x=x1, start_y=y1, end_x=x2, end_y=y2,
             count=count,
-            image=None if not self.canvas.qimage else Image.fromqimage(self.canvas.qimage),
+            image=pil_ref,
             hwnd=self.target_hwnd
         )
         self.condition.points.extend(sampled_pts)
@@ -318,14 +325,16 @@ class ConditionEditorDialog(QDialog):
             self.condition.reference_image_path = path
             self.canvas.load_image_from_path(path)
 
-    def _on_capture_target_window(self):
+    def _on_capture_target_window(self, silent: bool = False):
         if not self.target_hwnd:
-            QMessageBox.warning(self, "경고", "타겟 창이 선택되지 않았습니다.")
+            if not silent:
+                QMessageBox.warning(self, "경고", "타겟 창이 선택되지 않았습니다.")
             return
 
         pil_img = ScreenCapture.capture_client_area(self.target_hwnd)
         if not pil_img:
-            QMessageBox.warning(self, "캡처 실패", "타겟 창의 클라이언트 영역을 캡처할 수 없습니다.")
+            if not silent:
+                QMessageBox.warning(self, "캡처 실패", "타겟 창의 클라이언트 영역을 캡처할 수 없습니다.")
             return
 
         # Save to temporary reference image in user's temp or project dir
@@ -336,7 +345,8 @@ class ConditionEditorDialog(QDialog):
 
         self.condition.reference_image_path = ref_path
         self.canvas.load_image_from_path(ref_path)
-        QMessageBox.information(self, "캡처 완료", f"타겟 창 화면을 레퍼런스로 등록했습니다.\n({ref_path})")
+        if not silent:
+            QMessageBox.information(self, "캡처 완료", f"타겟 창 화면을 레퍼런스로 등록했습니다.\n({ref_path})")
 
     def _on_paste_clipboard(self):
         clipboard = QApplication.clipboard()

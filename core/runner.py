@@ -73,6 +73,7 @@ class WorkflowRunner(QThread):
             # Execute scenarios starting at step 1
             current_index = 0
             scenarios = self.project.scenarios
+            loop_counters = {}  # {loop_start_id: int}
 
             while self._is_running and current_index < len(scenarios):
                 # Check pause
@@ -89,6 +90,66 @@ class WorkflowRunner(QThread):
                     current_index += 1
                     continue
 
+                # ----------------------------------------------------
+                # Loop Node: loop_start
+                # ----------------------------------------------------
+                if scen.node_type == "loop_start":
+                    if scen.id not in loop_counters:
+                        loop_counters[scen.id] = 0
+                    current_iter = loop_counters[scen.id]
+                    max_iter = scen.loop_count
+
+                    # 1. Check max iterations for count mode
+                    if scen.loop_mode == "count" and current_iter >= max_iter:
+                        end_idx = self.project.find_matching_loop_end(current_index)
+                        self.sig_log.emit("INFO", f"🔁 [루프 #{scen.scenario_number}] '{scen.name}': 지정 횟수({max_iter}회) 완료. 루프 종료.")
+                        if scen.id in loop_counters:
+                            del loop_counters[scen.id]
+                        current_index = (end_idx + 1) if end_idx is not None else (current_index + 1)
+                        continue
+
+                    # 2. Check screen recognition condition (until_match / while_match)
+                    if scen.loop_mode in ("until_match", "while_match") and scen.condition and scen.condition.points:
+                        matched, _ = ConditionEvaluator.evaluate(scen.condition, self.hwnd)
+                        if scen.loop_mode == "until_match" and matched:
+                            end_idx = self.project.find_matching_loop_end(current_index)
+                            self.sig_log.emit("SUCCESS", f"🔁 [루프 #{scen.scenario_number}] '{scen.name}': 탈출 인식 조건 충족! 루프 종료.")
+                            if scen.id in loop_counters:
+                                del loop_counters[scen.id]
+                            current_index = (end_idx + 1) if end_idx is not None else (current_index + 1)
+                            continue
+                        elif scen.loop_mode == "while_match" and not matched:
+                            end_idx = self.project.find_matching_loop_end(current_index)
+                            self.sig_log.emit("INFO", f"🔁 [루프 #{scen.scenario_number}] '{scen.name}': 지속 조건 불일치. 루프 종료.")
+                            if scen.id in loop_counters:
+                                del loop_counters[scen.id]
+                            current_index = (end_idx + 1) if end_idx is not None else (current_index + 1)
+                            continue
+
+                    limit_str = f"{max_iter}회" if scen.loop_mode != "infinite" else "무한"
+                    self.sig_log.emit("INFO", f"🔁 [루프 #{scen.scenario_number}] '{scen.name}': {current_iter + 1}/{limit_str} 회차 진입")
+                    if scen.actions:
+                        self._execute_actions(scen)
+                    current_index += 1
+                    continue
+
+                # ----------------------------------------------------
+                # Loop Node: loop_end
+                # ----------------------------------------------------
+                if scen.node_type == "loop_end":
+                    start_idx = self.project.find_matching_loop_start(current_index)
+                    if start_idx is not None:
+                        start_scen = scenarios[start_idx]
+                        loop_counters[start_scen.id] = loop_counters.get(start_scen.id, 0) + 1
+                        self.sig_log.emit("INFO", f"🔁 [루프 종료 #{scen.scenario_number}] → 루프 시작 #{start_scen.scenario_number}로 복귀 (누적 {loop_counters[start_scen.id]}회)")
+                        current_index = start_idx
+                    else:
+                        current_index += 1
+                    continue
+
+                # ----------------------------------------------------
+                # Standard Scenario Evaluation
+                # ----------------------------------------------------
                 self.sig_scenario_started.emit(scen.id)
                 self.sig_log.emit("INFO", f"[#{scen.step_number}] '{scen.name}' 조건 평가 중...")
 
@@ -123,6 +184,16 @@ class WorkflowRunner(QThread):
                             time.sleep(scen.post_delay_seconds)
                         current_index += 1
 
+                    elif scen.on_match == "break_loop":
+                        # Break out of containing loop
+                        end_idx = None
+                        for k in range(current_index + 1, len(scenarios)):
+                            if scenarios[k].node_type == "loop_end":
+                                end_idx = k
+                                break
+                        self.sig_log.emit("INFO", f"🛑 [#{scen.step_number}] 조건 일치로 현재 루프 즉시 탈출")
+                        current_index = (end_idx + 1) if end_idx is not None else len(scenarios)
+
                     elif scen.on_match == "jump":
                         target_scen = self._resolve_target_scenario(scen.jump_target_on_match)
                         if target_scen:
@@ -143,6 +214,15 @@ class WorkflowRunner(QThread):
 
                     if scen.on_mismatch in ("next", "retry"):
                         current_index += 1
+
+                    elif scen.on_mismatch == "break_loop":
+                        end_idx = None
+                        for k in range(current_index + 1, len(scenarios)):
+                            if scenarios[k].node_type == "loop_end":
+                                end_idx = k
+                                break
+                        self.sig_log.emit("INFO", f"🛑 [#{scen.step_number}] 조건 불일치로 현재 루프 즉시 탈출")
+                        current_index = (end_idx + 1) if end_idx is not None else len(scenarios)
 
                     elif scen.on_mismatch == "jump":
                         target_scen = self._resolve_target_scenario(scen.jump_target_on_mismatch)
@@ -234,11 +314,14 @@ class WorkflowRunner(QThread):
             if s.id == target_identifier:
                 return s
 
-        # Try by step number integer
+        # Try by scenario_number or step_number integer
         try:
-            step_num = int(target_identifier)
+            num = int(target_identifier)
             for s in self.project.scenarios:
-                if s.step_number == step_num:
+                if getattr(s, "scenario_number", None) == num:
+                    return s
+            for s in self.project.scenarios:
+                if s.step_number == num:
                     return s
         except ValueError:
             pass

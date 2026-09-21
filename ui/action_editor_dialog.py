@@ -18,12 +18,19 @@ from core.input_controller import InputController
 class SingleActionDialog(QDialog):
     """Dialog to create or edit a single action."""
 
-    def __init__(self, action: Optional[Action] = None, target_hwnd: int = 0, parent=None):
+    def __init__(
+        self,
+        action: Optional[Action] = None,
+        target_hwnd: int = 0,
+        reference_image_path: Optional[str] = None,
+        parent=None
+    ):
         super().__init__(parent)
         self.setWindowTitle("액션 속성 설정")
-        self.resize(420, 360)
+        self.resize(460, 390)
         self.action = copy.deepcopy(action) if action else Action()
         self.target_hwnd = target_hwnd
+        self.reference_image_path = reference_image_path
         self._init_ui()
 
     def _init_ui(self):
@@ -72,6 +79,11 @@ class SingleActionDialog(QDialog):
         coord_layout.addWidget(QLabel("Y:"))
         coord_layout.addWidget(self.spin_y)
 
+        btn_pick_click = QPushButton("🎯 레퍼런스로 지정...")
+        btn_pick_click.setToolTip("레퍼런스 이미지 또는 게임 화면에서 클릭 위치를 직접 선택합니다.")
+        btn_pick_click.clicked.connect(lambda: self._on_pick_coordinates_from_image(drag_mode=False))
+        coord_layout.addWidget(btn_pick_click)
+
         self.spin_repeat = QSpinBox()
         self.spin_repeat.setRange(1, 100)
         self.spin_repeat.setValue(self.action.repeat_count)
@@ -96,6 +108,11 @@ class SingleActionDialog(QDialog):
         end_layout.addWidget(self.spin_end_x)
         end_layout.addWidget(QLabel("끝 Y:"))
         end_layout.addWidget(self.spin_end_y)
+
+        btn_pick_drag = QPushButton("🎯 레퍼런스로 시작/끝 지정...")
+        btn_pick_drag.setToolTip("레퍼런스 이미지 또는 게임 화면에서 드래그 시작점과 종료점을 선택합니다.")
+        btn_pick_drag.clicked.connect(lambda: self._on_pick_coordinates_from_image(drag_mode=True))
+        end_layout.addWidget(btn_pick_drag)
 
         self.spin_drag_duration = QSpinBox()
         self.spin_drag_duration.setRange(50, 10000)
@@ -196,6 +213,27 @@ class SingleActionDialog(QDialog):
             self.action.delay_seconds = self.spin_delay.value()
 
         self.accept()
+
+    def _on_pick_coordinates_from_image(self, drag_mode: bool = False):
+        """Open CoordinatePickerDialog to pick coordinates interactively."""
+        from ui.coordinate_picker_dialog import CoordinatePickerDialog
+        dlg = CoordinatePickerDialog(
+            image_path=self.reference_image_path,
+            target_hwnd=self.target_hwnd,
+            initial_x=self.spin_x.value(),
+            initial_y=self.spin_y.value(),
+            drag_mode=drag_mode,
+            initial_end_x=self.spin_end_x.value() if drag_mode else 0,
+            initial_end_y=self.spin_end_y.value() if drag_mode else 0,
+            parent=self
+        )
+        if dlg.exec_() == CoordinatePickerDialog.Accepted:
+            x, y, ex, ey = dlg.get_coordinates()
+            self.spin_x.setValue(x)
+            self.spin_y.setValue(y)
+            if drag_mode:
+                self.spin_end_x.setValue(ex)
+                self.spin_end_y.setValue(ey)
 
 
 class ActionEditorDialog(QDialog):

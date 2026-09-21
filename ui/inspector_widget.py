@@ -1,0 +1,1166 @@
+"""
+Inspector Widget for FGOA.
+Unity Inspector-style always-open scenario and properties editor.
+Divided vertically into:
+  - Upper Pane: Color Detection & Branching Rules (Eye & Brain)
+  - Lower Pane: Action Sequences (Hand)
+Supports independent condition/action combining and compact high-density layout.
+"""
+from typing import Optional, List
+import copy
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox,
+    QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
+    QScrollArea, QFrame, QMessageBox, QStackedWidget, QSplitter,
+    QMenu
+)
+from PyQt5.QtGui import QColor, QFont
+from PyQt5.QtCore import Qt, pyqtSignal
+
+from core.models import Scenario, Project, Condition, ColorPoint, Action
+from core.screen_capture import ScreenCapture
+from core.input_controller import InputController
+from core.evaluator import ConditionEvaluator
+from ui.widgets.color_badge import ColorChipWidget
+from ui.condition_editor_dialog import ConditionEditorDialog
+from ui.action_editor_dialog import SingleActionDialog
+
+
+class InspectorWidget(QWidget):
+    """
+    Always-open Unity Inspector-like panel for viewing and editing
+    the currently selected scenario.
+    """
+    sig_scenario_changed = pyqtSignal(Scenario)
+    sig_log = pyqtSignal(str, str)  # level, msg
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current_scenario: Optional[Scenario] = None
+        self.project: Optional[Project] = None
+        self.target_hwnd: int = 0
+        self._is_loading = False
+
+        self._init_ui()
+
+    def _init_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Stacked widget: 0 = Empty State, 1 = Scenario Content
+        self.stack = QStackedWidget()
+        main_layout.addWidget(self.stack)
+
+        # 0: Empty state widget
+        self.empty_widget = self._create_empty_widget()
+        self.stack.addWidget(self.empty_widget)
+
+        # 1: Content widget
+        self.content_widget = QWidget()
+        cw_layout = QVBoxLayout(self.content_widget)
+        cw_layout.setContentsMargins(4, 4, 4, 4)
+        cw_layout.setSpacing(4)
+
+        # 1.0 Pane Title Header Bar
+        self.pane_header = QFrame()
+        self.pane_header.setObjectName("card_frame")
+        ph_layout = QHBoxLayout(self.pane_header)
+        ph_layout.setContentsMargins(8, 6, 8, 6)
+        lbl_inspector_title = QLabel("🔍 시나리오 인스펙터 (Inspector)")
+        lbl_inspector_title.setStyleSheet("font-weight: bold; font-size: 9.5pt;")
+        ph_layout.addWidget(lbl_inspector_title)
+        ph_layout.addStretch()
+        self.lbl_inspector_status = QLabel("시나리오 설정")
+        self.lbl_inspector_status.setStyleSheet("color: #64748b; font-size: 8.5pt;")
+        ph_layout.addWidget(self.lbl_inspector_status)
+        cw_layout.addWidget(self.pane_header)
+
+        # 1.1 Header Card (Compact: 실행 순서, 고유 번호, 활성, 이름)
+        self.header_card = self._create_header_card()
+        cw_layout.addWidget(self.header_card)
+
+        # 1.2 Vertical Splitter: [Top: 인식 조건 & 판단 (Eye & Brain)] / [Bottom: 액션 시퀀스 (Hand)]
+        self.v_splitter = QSplitter(Qt.Vertical)
+        self.v_splitter.setObjectName("inspector_v_splitter")
+
+        # Top Pane: 인식 조건 & Brain
+        upper_scroll = QScrollArea()
+        upper_scroll.setWidgetResizable(True)
+        upper_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        upper_container = QWidget()
+        upper_layout = QVBoxLayout(upper_container)
+        upper_layout.setContentsMargins(4, 4, 4, 4)
+        upper_layout.setSpacing(6)
+
+        self.condition_card = self._create_condition_card()
+        upper_layout.addWidget(self.condition_card)
+
+        self.branch_card = self._create_branch_card()
+        upper_layout.addWidget(self.branch_card)
+
+        upper_layout.addStretch()
+        upper_scroll.setWidget(upper_container)
+        self.v_splitter.addWidget(upper_scroll)
+
+        # Bottom Pane: 액션 시퀀스 Hand
+        lower_scroll = QScrollArea()
+        lower_scroll.setWidgetResizable(True)
+        lower_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        lower_container = QWidget()
+        lower_layout = QVBoxLayout(lower_container)
+        lower_layout.setContentsMargins(4, 4, 4, 4)
+        lower_layout.setSpacing(6)
+
+        self.action_card = self._create_action_card()
+        lower_layout.addWidget(self.action_card)
+
+        lower_layout.addStretch()
+        lower_scroll.setWidget(lower_container)
+        self.v_splitter.addWidget(lower_scroll)
+
+        # Splitter ratio: 54% upper, 46% lower
+        self.v_splitter.setStretchFactor(0, 54)
+        self.v_splitter.setStretchFactor(1, 46)
+        self.v_splitter.setSizes([340, 290])
+
+        cw_layout.addWidget(self.v_splitter, 1)
+
+        self.stack.addWidget(self.content_widget)
+        self.stack.setCurrentIndex(0)
+
+    def _create_empty_widget(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(10)
+
+        icon_lbl = QLabel("🛠️")
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setStyleSheet("font-size: 36pt;")
+        layout.addWidget(icon_lbl)
+
+        title_lbl = QLabel("시나리오 인스펙터")
+        title_lbl.setAlignment(Qt.AlignCenter)
+        title_lbl.setStyleSheet("font-size: 12pt; font-weight: bold; color: #334155;")
+        layout.addWidget(title_lbl)
+
+        desc_lbl = QLabel("왼쪽 시나리오 목록에서 항목을 클릭하면\n상세 조건(상단) 및 액션(하단) 편집기가 표시됩니다.\n빈 공간을 클릭해도 선택 상태가 유지됩니다.")
+        desc_lbl.setAlignment(Qt.AlignCenter)
+        desc_lbl.setStyleSheet("color: #64748b; font-size: 9pt; line-height: 140%;")
+        layout.addWidget(desc_lbl)
+
+        return w
+
+    # ==========================================
+    # Header Card (Identity)
+    # ==========================================
+    def _create_header_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("inspector_card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(4)
+
+        # Top Row: [실행 #1] [고유 #101] [v] 시나리오 활성화 | UUID
+        top_row = QHBoxLayout()
+        top_row.setSpacing(6)
+
+        self.lbl_step_badge = QLabel("실행 #1")
+        self.lbl_step_badge.setStyleSheet(
+            "background-color: #2563eb; color: white; font-weight: bold; "
+            "padding: 2px 6px; border-radius: 4px; font-size: 8.5pt;"
+        )
+        self.lbl_step_badge.setToolTip("시나리오 실행 순서 번호 (목록 순서 변경 시 자동 재계산)")
+        top_row.addWidget(self.lbl_step_badge)
+
+        lbl_uid_title = QLabel("고유 번호:")
+        lbl_uid_title.setStyleSheet("font-weight: bold; font-size: 8.5pt; color: #7c3aed;")
+        top_row.addWidget(lbl_uid_title)
+
+        self.spin_scen_num = QSpinBox()
+        self.spin_scen_num.setRange(1, 99999)
+        self.spin_scen_num.setValue(1)
+        self.spin_scen_num.setFixedWidth(65)
+        self.spin_scen_num.setStyleSheet("font-weight: bold; color: #7c3aed;")
+        self.spin_scen_num.setToolTip("시나리오 고유 번호 (순서가 바뀌어도 유지되는 고유 식별 번호)")
+        self.spin_scen_num.valueChanged.connect(self._on_scenario_number_changed)
+        top_row.addWidget(self.spin_scen_num)
+
+        top_row.addSpacing(6)
+
+        self.chk_enabled = QCheckBox("시나리오 활성화")
+        self.chk_enabled.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
+        self.chk_enabled.stateChanged.connect(self._on_field_changed)
+        top_row.addWidget(self.chk_enabled)
+
+        top_row.addStretch()
+
+        self.lbl_id = QLabel("ID: scen_...")
+        self.lbl_id.setStyleSheet("color: #64748b; font-family: monospace; font-size: 8pt;")
+        top_row.addWidget(self.lbl_id)
+        layout.addLayout(top_row)
+
+        # Name Row: 이름 [ QLineEdit ]
+        name_row = QHBoxLayout()
+        name_row.setSpacing(6)
+        lbl_n = QLabel("이름:")
+        lbl_n.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
+        name_row.addWidget(lbl_n)
+        self.txt_name = QLineEdit()
+        self.txt_name.setPlaceholderText("시나리오 설명 또는 목적 입력...")
+        self.txt_name.textChanged.connect(self._on_field_changed)
+        name_row.addWidget(self.txt_name, 1)
+        layout.addLayout(name_row)
+
+        # Node Type & Loop Control Row
+        node_row = QHBoxLayout()
+        node_row.setSpacing(6)
+        lbl_nt = QLabel("노드 유형:")
+        lbl_nt.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
+        node_row.addWidget(lbl_nt)
+
+        self.combo_node_type = QComboBox()
+        self.combo_node_type.addItem("📄 일반 시나리오 (조건/액션)", "normal")
+        self.combo_node_type.addItem("🔁 루프 시작 노드 (Loop Start)", "loop_start")
+        self.combo_node_type.addItem("🔁 루프 종료 노드 (Loop End)", "loop_end")
+        self.combo_node_type.currentIndexChanged.connect(self._on_node_type_changed)
+        node_row.addWidget(self.combo_node_type)
+
+        # Loop Controls Sub-widget
+        self.loop_container = QWidget()
+        l_sub = QHBoxLayout(self.loop_container)
+        l_sub.setContentsMargins(0, 0, 0, 0)
+        l_sub.setSpacing(6)
+
+        l_sub.addWidget(QLabel("루프 제어:"))
+        self.combo_loop_mode = QComboBox()
+        self.combo_loop_mode.addItem("지정 횟수 반복 (Count)", "count")
+        self.combo_loop_mode.addItem("조건 일치 시 탈출 (Break Until Match)", "until_match")
+        self.combo_loop_mode.addItem("조건 일치 동안 반복 (While Match)", "while_match")
+        self.combo_loop_mode.addItem("무한 반복 (Infinite)", "infinite")
+        self.combo_loop_mode.currentIndexChanged.connect(self._on_loop_mode_changed)
+        l_sub.addWidget(self.combo_loop_mode)
+
+        self.lbl_loop_cnt = QLabel("반복:")
+        l_sub.addWidget(self.lbl_loop_cnt)
+        self.spin_loop_cnt = QSpinBox()
+        self.spin_loop_cnt.setRange(1, 99999)
+        self.spin_loop_cnt.setValue(5)
+        self.spin_loop_cnt.setSuffix(" 회")
+        self.spin_loop_cnt.valueChanged.connect(self._on_field_changed)
+        l_sub.addWidget(self.spin_loop_cnt)
+
+        node_row.addWidget(self.loop_container)
+
+        self.lbl_loop_end_info = QLabel("🔁 대응되는 루프 시작점으로 복귀하여 다음 회차를 실행합니다.")
+        self.lbl_loop_end_info.setStyleSheet("color: #7c3aed; font-weight: bold; font-size: 8.5pt;")
+        self.lbl_loop_end_info.setVisible(False)
+        node_row.addWidget(self.lbl_loop_end_info)
+
+        node_row.addStretch()
+        layout.addLayout(node_row)
+
+        return card
+
+    # ==========================================
+    # Upper Section: 1. Condition & Eye Card
+    # ==========================================
+    def _create_condition_card(self) -> QGroupBox:
+        grp = QGroupBox("👁️ 색상 인식 조건 (Eye)")
+        layout = QVBoxLayout(grp)
+        layout.setContentsMargins(6, 10, 6, 6)
+        layout.setSpacing(4)
+
+        # Top row: [v] 조건 감지 활성화 | 일치 규칙: [AND/OR] | [📋 조건 가져오기...]
+        top_row = QHBoxLayout()
+        top_row.setSpacing(6)
+        self.chk_has_condition = QCheckBox("조건 감지 활성화")
+        self.chk_has_condition.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
+        self.chk_has_condition.setToolTip("체크 해제 시 조건 없이 무조건 액션을 실행합니다.")
+        self.chk_has_condition.stateChanged.connect(self._on_has_condition_toggled)
+        top_row.addWidget(self.chk_has_condition)
+
+        top_row.addStretch()
+
+        lbl_rule = QLabel("일치 규칙:")
+        lbl_rule.setStyleSheet("font-size: 8.5pt;")
+        top_row.addWidget(lbl_rule)
+
+        self.combo_cond_logic = QComboBox()
+        self.combo_cond_logic.addItem("모든 포인트 일치 (AND)", "AND")
+        self.combo_cond_logic.addItem("하나라도 일치 (OR)", "OR")
+        self.combo_cond_logic.currentIndexChanged.connect(self._on_field_changed)
+        top_row.addWidget(self.combo_cond_logic)
+
+        self.btn_copy_cond = QPushButton("📋 조건 가져오기...")
+        self.btn_copy_cond.setToolTip("다른 시나리오의 색상 인식 조건을 복사해와서 조합합니다.")
+        self.btn_copy_cond.clicked.connect(self._on_copy_condition_from_other)
+        top_row.addWidget(self.btn_copy_cond)
+
+        layout.addLayout(top_row)
+
+        # Points Table
+        self.tbl_points = QTableWidget()
+        self.tbl_points.setColumnCount(5)
+        self.tbl_points.setHorizontalHeaderLabels(["#", "상대 좌표 (X, Y)", "목표 색상", "허용 오차", "판정 모드"])
+        hdr_pts = self.tbl_points.horizontalHeader()
+        hdr_pts.setSectionResizeMode(0, QHeaderView.Fixed)
+        hdr_pts.resizeSection(0, 28)
+        hdr_pts.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        hdr_pts.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        hdr_pts.setSectionResizeMode(3, QHeaderView.Fixed)
+        hdr_pts.resizeSection(3, 70)
+        hdr_pts.setSectionResizeMode(4, QHeaderView.Stretch)
+        self.tbl_points.verticalHeader().setDefaultSectionSize(24)
+        self.tbl_points.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tbl_points.setMinimumHeight(80)
+        self.tbl_points.setMaximumHeight(150)
+        layout.addWidget(self.tbl_points)
+
+        # Points Action Buttons Row
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(4)
+        btn_open_canvas = QPushButton("🎯 이미지에서 좌표 지정")
+        btn_open_canvas.setObjectName("btn_primary")
+        btn_open_canvas.setToolTip("레퍼런스 이미지 또는 게임 화면을 열어 색상 인식 포인트 좌표를 시각적으로 지정합니다.")
+        btn_open_canvas.clicked.connect(self._on_open_canvas_editor)
+        btn_row.addWidget(btn_open_canvas)
+
+        btn_add_pt = QPushButton("➕ 포인트 추가")
+        btn_add_pt.clicked.connect(self._on_add_point)
+        btn_row.addWidget(btn_add_pt)
+
+        btn_del_pt = QPushButton("🗑️ 선택 삭제")
+        btn_del_pt.clicked.connect(self._on_delete_point)
+        btn_row.addWidget(btn_del_pt)
+
+        btn_test_cond = QPushButton("⚡ 판정 테스트")
+        btn_test_cond.setStyleSheet("color: #16a34a; font-weight: bold;")
+        btn_test_cond.clicked.connect(self._on_test_condition_now)
+        btn_row.addWidget(btn_test_cond)
+
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        # Live Test Result Label
+        self.lbl_cond_test_result = QLabel("")
+        self.lbl_cond_test_result.setStyleSheet("font-size: 8.5pt; font-weight: bold;")
+        self.lbl_cond_test_result.setVisible(False)
+        layout.addWidget(self.lbl_cond_test_result)
+
+        return grp
+
+    # ==========================================
+    # Upper Section: 2. Branching Card (Brain)
+    # ==========================================
+    def _create_branch_card(self) -> QGroupBox:
+        grp = QGroupBox("🧠 실행 분기 및 판단 규칙 (Brain)")
+        layout = QVBoxLayout(grp)
+        layout.setContentsMargins(6, 10, 6, 6)
+        layout.setSpacing(4)
+
+        # On Match
+        m_layout = QHBoxLayout()
+        m_layout.setSpacing(6)
+        lbl_match = QLabel("만약 [조건 일치] ➔")
+        lbl_match.setStyleSheet("color: #16a34a; font-weight: bold; font-size: 8.5pt;")
+        lbl_match.setFixedWidth(120)
+        m_layout.addWidget(lbl_match)
+
+        self.combo_on_match = QComboBox()
+        self.combo_on_match.addItem("액션 실행 후 다음 단계", "execute")
+        self.combo_on_match.addItem("다른 시나리오로 점프 (Jump)", "jump")
+        self.combo_on_match.addItem("오토 즉시 정지 (Stop)", "stop")
+        self.combo_on_match.currentIndexChanged.connect(self._on_match_branch_changed)
+        m_layout.addWidget(self.combo_on_match, 1)
+
+        self.combo_jump_match = QComboBox()
+        self.combo_jump_match.currentIndexChanged.connect(self._on_field_changed)
+        m_layout.addWidget(self.combo_jump_match, 1)
+        layout.addLayout(m_layout)
+
+        # On Mismatch
+        mm_layout = QHBoxLayout()
+        mm_layout.setSpacing(6)
+        lbl_mismatch = QLabel("만약 [조건 불일치] ➔")
+        lbl_mismatch.setStyleSheet("color: #dc2626; font-weight: bold; font-size: 8.5pt;")
+        lbl_mismatch.setFixedWidth(120)
+        mm_layout.addWidget(lbl_mismatch)
+
+        self.combo_on_mismatch = QComboBox()
+        self.combo_on_mismatch.addItem("다음 시나리오로 진행", "next")
+        self.combo_on_mismatch.addItem("다른 시나리오로 점프 (Jump)", "jump")
+        self.combo_on_mismatch.addItem("대기 후 조건 재시도 (Retry)", "retry")
+        self.combo_on_mismatch.addItem("오토 즉시 정지 (Stop)", "stop")
+        self.combo_on_mismatch.currentIndexChanged.connect(self._on_mismatch_branch_changed)
+        mm_layout.addWidget(self.combo_on_mismatch, 1)
+
+        self.combo_jump_mismatch = QComboBox()
+        self.combo_jump_mismatch.currentIndexChanged.connect(self._on_field_changed)
+        mm_layout.addWidget(self.combo_jump_mismatch, 1)
+        layout.addLayout(mm_layout)
+
+        # Retry & Post Delay options row
+        opt_layout = QHBoxLayout()
+        opt_layout.setSpacing(6)
+        self.lbl_retry_cnt = QLabel("재시도:")
+        self.lbl_retry_cnt.setStyleSheet("font-size: 8.5pt;")
+        self.spin_retries = QSpinBox()
+        self.spin_retries.setRange(1, 999)
+        self.spin_retries.setValue(5)
+        self.spin_retries.setSuffix(" 회")
+        self.spin_retries.valueChanged.connect(self._on_field_changed)
+
+        self.lbl_retry_sec = QLabel("간격:")
+        self.lbl_retry_sec.setStyleSheet("font-size: 8.5pt;")
+        self.spin_retry_sec = QDoubleSpinBox()
+        self.spin_retry_sec.setRange(0.1, 60.0)
+        self.spin_retry_sec.setValue(1.0)
+        self.spin_retry_sec.setSingleStep(0.2)
+        self.spin_retry_sec.setSuffix(" 초")
+        self.spin_retry_sec.valueChanged.connect(self._on_field_changed)
+
+        opt_layout.addWidget(self.lbl_retry_cnt)
+        opt_layout.addWidget(self.spin_retries)
+        opt_layout.addWidget(self.lbl_retry_sec)
+        opt_layout.addWidget(self.spin_retry_sec)
+
+        opt_layout.addSpacing(10)
+
+        lbl_delay = QLabel("완료 후 대기:")
+        lbl_delay.setStyleSheet("font-size: 8.5pt;")
+        opt_layout.addWidget(lbl_delay)
+        self.spin_post_delay = QDoubleSpinBox()
+        self.spin_post_delay.setRange(0.0, 60.0)
+        self.spin_post_delay.setValue(0.0)
+        self.spin_post_delay.setSingleStep(0.5)
+        self.spin_post_delay.setSuffix(" 초")
+        self.spin_post_delay.valueChanged.connect(self._on_field_changed)
+        opt_layout.addWidget(self.spin_post_delay)
+
+        opt_layout.addStretch()
+        layout.addLayout(opt_layout)
+
+        return grp
+
+    # ==========================================
+    # Lower Section: Action Sequence Card (Hand)
+    # ==========================================
+    def _create_action_card(self) -> QGroupBox:
+        grp = QGroupBox("✋ 액션 조건 및 시퀀스 (Hand - 실행 동작)")
+        layout = QVBoxLayout(grp)
+        layout.setContentsMargins(6, 10, 6, 6)
+        layout.setSpacing(4)
+
+        # Quick Add Buttons Bar + Copy from other scenario
+        add_bar = QHBoxLayout()
+        add_bar.setSpacing(4)
+
+        btn_add_click = QPushButton("🖱️+클릭")
+        btn_add_click.clicked.connect(lambda: self._on_quick_add_action("mouse_click"))
+        add_bar.addWidget(btn_add_click)
+
+        btn_add_drag = QPushButton("↔️+드래그")
+        btn_add_drag.clicked.connect(lambda: self._on_quick_add_action("mouse_drag"))
+        add_bar.addWidget(btn_add_drag)
+
+        btn_add_key = QPushButton("⌨️+키")
+        btn_add_key.clicked.connect(lambda: self._on_quick_add_action("key_press"))
+        add_bar.addWidget(btn_add_key)
+
+        btn_add_text = QPushButton("📝+텍스트")
+        btn_add_text.clicked.connect(lambda: self._on_quick_add_action("text_type"))
+        add_bar.addWidget(btn_add_text)
+
+        btn_add_delay = QPushButton("⏳+대기")
+        btn_add_delay.clicked.connect(lambda: self._on_quick_add_action("delay"))
+        add_bar.addWidget(btn_add_delay)
+
+        add_bar.addSpacing(4)
+
+        btn_record = QPushButton("⏺️ 조작 녹화")
+        btn_record.setStyleSheet("color: #dc2626; font-weight: bold;")
+        btn_record.setToolTip("타겟 게임 창에서 직접 마우스 클릭 및 드래그를 조작하여 실시간으로 액션을 녹화합니다.")
+        btn_record.clicked.connect(self._on_start_operation_recording)
+        add_bar.addWidget(btn_record)
+
+        add_bar.addStretch()
+
+        self.btn_copy_act = QPushButton("📋 가져오기...")
+        self.btn_copy_act.setToolTip("다른 시나리오의 액션 시퀀스를 복사해와서 조합합니다.")
+        self.btn_copy_act.clicked.connect(self._on_copy_actions_from_other)
+        add_bar.addWidget(self.btn_copy_act)
+
+        layout.addLayout(add_bar)
+
+        # Actions Table
+        self.tbl_actions = QTableWidget()
+        self.tbl_actions.setColumnCount(5)
+        self.tbl_actions.setHorizontalHeaderLabels(["#", "액션 유형", "좌표 / 키 / 텍스트", "상세 설정", "대기"])
+        hdr_act = self.tbl_actions.horizontalHeader()
+        hdr_act.setSectionResizeMode(0, QHeaderView.Fixed)
+        hdr_act.resizeSection(0, 28)
+        hdr_act.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        hdr_act.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        hdr_act.setSectionResizeMode(3, QHeaderView.Stretch)
+        hdr_act.setSectionResizeMode(4, QHeaderView.Fixed)
+        hdr_act.resizeSection(4, 50)
+        self.tbl_actions.verticalHeader().setDefaultSectionSize(24)
+        self.tbl_actions.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tbl_actions.setMinimumHeight(95)
+        self.tbl_actions.setMaximumHeight(180)
+        self.tbl_actions.cellDoubleClicked.connect(lambda r, c: self._on_edit_action())
+        layout.addWidget(self.tbl_actions)
+
+        # Actions Control Buttons Row
+        act_ctrl_row = QHBoxLayout()
+        act_ctrl_row.setSpacing(4)
+        btn_edit_act = QPushButton("✏️ 편집")
+        btn_edit_act.clicked.connect(self._on_edit_action)
+        act_ctrl_row.addWidget(btn_edit_act)
+
+        btn_pick_coord_act = QPushButton("🎯 레퍼런스로 좌표 지정...")
+        btn_pick_coord_act.setToolTip("선택한 액션의 좌표를 레퍼런스 이미지나 현재 게임 창 화면에서 직접 클릭하여 지정합니다.")
+        btn_pick_coord_act.clicked.connect(self._on_pick_coord_for_selected_action)
+        act_ctrl_row.addWidget(btn_pick_coord_act)
+
+        btn_del_act = QPushButton("🗑️ 삭제")
+        btn_del_act.clicked.connect(self._on_delete_action)
+        act_ctrl_row.addWidget(btn_del_act)
+
+        btn_up_act = QPushButton("⬆️ 위로")
+        btn_up_act.clicked.connect(self._on_move_action_up)
+        act_ctrl_row.addWidget(btn_up_act)
+
+        btn_down_act = QPushButton("⬇️ 아래로")
+        btn_down_act.clicked.connect(self._on_move_action_down)
+        act_ctrl_row.addWidget(btn_down_act)
+
+        act_ctrl_row.addSpacing(6)
+
+        btn_test_act = QPushButton("⚡ 선택 액션 즉시 실행")
+        btn_test_act.setStyleSheet("color: #2563eb; font-weight: bold;")
+        btn_test_act.clicked.connect(self._on_test_action_now)
+        act_ctrl_row.addWidget(btn_test_act)
+
+        act_ctrl_row.addStretch()
+        layout.addLayout(act_ctrl_row)
+
+        return grp
+
+    # ==========================================
+    # Data Loading & Syncing
+    # ==========================================
+    def set_target_hwnd(self, hwnd: int):
+        self.target_hwnd = hwnd
+
+    def set_scenario(self, scenario: Optional[Scenario], target_hwnd: int, project: Project):
+        """Bind and display a scenario in the inspector."""
+        self.current_scenario = scenario
+        self.target_hwnd = target_hwnd
+        self.project = project
+
+        if not scenario:
+            self.stack.setCurrentIndex(0)
+            return
+
+        self._is_loading = True
+        try:
+            self.stack.setCurrentIndex(1)
+            self._populate_jump_combos()
+
+            # 1. Header & Identity
+            self.lbl_inspector_status.setText(f"고유 #{scenario.scenario_number} [{scenario.name}]")
+            self.lbl_step_badge.setText(f"실행 #{scenario.step_number}")
+            self.spin_scen_num.blockSignals(True)
+            self.spin_scen_num.setValue(scenario.scenario_number)
+            self.spin_scen_num.blockSignals(False)
+            self.lbl_id.setText(f"ID: {scenario.id}")
+            self.txt_name.setText(scenario.name)
+            self.chk_enabled.setChecked(scenario.enabled)
+
+            # Node Type & Loop Settings
+            self.combo_node_type.blockSignals(True)
+            idx_nt = self.combo_node_type.findData(scenario.node_type)
+            self.combo_node_type.setCurrentIndex(idx_nt if idx_nt >= 0 else 0)
+            self.combo_node_type.blockSignals(False)
+
+            self.combo_loop_mode.blockSignals(True)
+            idx_lm = self.combo_loop_mode.findData(scenario.loop_mode)
+            self.combo_loop_mode.setCurrentIndex(idx_lm if idx_lm >= 0 else 0)
+            self.combo_loop_mode.blockSignals(False)
+
+            self.spin_loop_cnt.blockSignals(True)
+            self.spin_loop_cnt.setValue(scenario.loop_count)
+            self.spin_loop_cnt.blockSignals(False)
+
+            self._update_node_type_visibility()
+
+            # 2. Branching
+            idx_match = self.combo_on_match.findData(scenario.on_match)
+            if idx_match >= 0:
+                self.combo_on_match.setCurrentIndex(idx_match)
+            self._select_jump_target(self.combo_jump_match, scenario.jump_target_on_match)
+
+            idx_mismatch = self.combo_on_mismatch.findData(scenario.on_mismatch)
+            if idx_mismatch >= 0:
+                self.combo_on_mismatch.setCurrentIndex(idx_mismatch)
+            self._select_jump_target(self.combo_jump_mismatch, scenario.jump_target_on_mismatch)
+
+            self.spin_retries.setValue(scenario.retry_max_count)
+            self.spin_retry_sec.setValue(scenario.retry_interval_sec)
+            self.spin_post_delay.setValue(scenario.post_delay_seconds)
+
+            self._update_branch_visibility()
+
+            # 3. Condition
+            has_cond = (scenario.condition is not None and len(scenario.condition.points) > 0)
+            self.chk_has_condition.setChecked(scenario.condition is not None)
+            if scenario.condition:
+                idx_op = self.combo_cond_logic.findData(scenario.condition.logic_operator)
+                if idx_op >= 0:
+                    self.combo_cond_logic.setCurrentIndex(idx_op)
+            self._refresh_points_table()
+            self.lbl_cond_test_result.setVisible(False)
+
+            # 4. Actions
+            self._refresh_actions_table()
+
+        finally:
+            self._is_loading = False
+
+    def _populate_jump_combos(self):
+        for combo in [self.combo_jump_match, self.combo_jump_mismatch]:
+            combo.clear()
+            combo.addItem("(선택 안 함)", "")
+            if self.project:
+                for s in self.project.scenarios:
+                    if self.current_scenario and s.id == self.current_scenario.id:
+                        continue
+                    combo.addItem(f"고유 #{s.scenario_number} (실행 #{s.step_number}) [{s.name}]", s.id)
+
+    def _select_jump_target(self, combo: QComboBox, target_id: str):
+        idx = combo.findData(target_id)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        else:
+            combo.setCurrentIndex(0)
+
+    def _update_branch_visibility(self):
+        is_jump_match = (self.combo_on_match.currentData() == "jump")
+        self.combo_jump_match.setVisible(is_jump_match)
+
+        is_jump_mismatch = (self.combo_on_mismatch.currentData() == "jump")
+        self.combo_jump_mismatch.setVisible(is_jump_mismatch)
+
+        is_retry = (self.combo_on_mismatch.currentData() == "retry")
+        self.lbl_retry_cnt.setVisible(is_retry)
+        self.spin_retries.setVisible(is_retry)
+        self.lbl_retry_sec.setVisible(is_retry)
+        self.spin_retry_sec.setVisible(is_retry)
+
+    def _refresh_points_table(self):
+        if not self.current_scenario or not self.current_scenario.condition:
+            self.tbl_points.setRowCount(0)
+            return
+
+        pts = self.current_scenario.condition.points
+        self.tbl_points.setRowCount(len(pts))
+
+        for row, pt in enumerate(pts):
+            # 0. Number
+            it_no = QTableWidgetItem(str(row + 1))
+            it_no.setTextAlignment(Qt.AlignCenter)
+            self.tbl_points.setItem(row, 0, it_no)
+
+            # 1. Coordinates
+            it_coord = QTableWidgetItem(f"({pt.x}, {pt.y})")
+            it_coord.setTextAlignment(Qt.AlignCenter)
+            self.tbl_points.setItem(row, 1, it_coord)
+
+            # 2. Color Swatch + RGB
+            cell_w = QWidget()
+            c_lay = QHBoxLayout(cell_w)
+            c_lay.setContentsMargins(4, 1, 4, 1)
+            c_lay.setSpacing(5)
+            c_lay.addWidget(ColorChipWidget(pt.r, pt.g, pt.b, 15))
+            lbl_rgb = QLabel(f"RGB({pt.r},{pt.g},{pt.b})")
+            lbl_rgb.setStyleSheet("font-family: monospace; font-size: 8.5pt;")
+            c_lay.addWidget(lbl_rgb)
+            c_lay.addStretch()
+            self.tbl_points.setCellWidget(row, 2, cell_w)
+
+            # 3. Tolerance SpinBox (Inline edit)
+            spin_tol = QSpinBox()
+            spin_tol.setRange(0, 255)
+            spin_tol.setValue(pt.tolerance)
+            spin_tol.valueChanged.connect(lambda val, p=pt: self._on_point_tolerance_changed(p, val))
+            self.tbl_points.setCellWidget(row, 3, spin_tol)
+
+            # 4. Mode Combo (Inline edit)
+            combo_m = QComboBox()
+            combo_m.addItem("일치 (Match)", "match")
+            combo_m.addItem("불일치 (Invert)", "not_match")
+            combo_m.setCurrentIndex(1 if pt.match_mode == "not_match" else 0)
+            combo_m.currentIndexChanged.connect(lambda idx, p=pt: self._on_point_mode_changed(p, idx))
+            self.tbl_points.setCellWidget(row, 4, combo_m)
+
+    def _refresh_actions_table(self):
+        if not self.current_scenario:
+            self.tbl_actions.setRowCount(0)
+            return
+
+        actions = self.current_scenario.actions
+        self.tbl_actions.setRowCount(len(actions))
+
+        type_names = {
+            "mouse_click": "🖱️ 클릭",
+            "mouse_drag": "↔️ 드래그",
+            "key_press": "⌨️ 키 입력",
+            "text_type": "📝 텍스트",
+            "delay": "⏳ 대기",
+            "sound_beep": "🔔 비프음",
+            "log_message": "📋 로그"
+        }
+
+        for row, act in enumerate(actions):
+            # 0. Number
+            it_no = QTableWidgetItem(str(row + 1))
+            it_no.setTextAlignment(Qt.AlignCenter)
+            self.tbl_actions.setItem(row, 0, it_no)
+
+            # 1. Type
+            it_type = QTableWidgetItem(type_names.get(act.action_type, act.action_type))
+            it_type.setTextAlignment(Qt.AlignCenter)
+            self.tbl_actions.setItem(row, 1, it_type)
+
+            # 2. Target / Param
+            if act.action_type == "mouse_click":
+                target_str = f"({act.x}, {act.y})"
+                detail_str = f"{'더블' if act.click_type == 'double' else '단일'} {act.mouse_button}클릭"
+            elif act.action_type == "mouse_drag":
+                target_str = f"({act.x},{act.y}) ➔ ({act.end_x},{act.end_y})"
+                detail_str = f"{act.drag_duration_ms}ms"
+            elif act.action_type == "key_press":
+                target_str = f"키: [{act.key}]"
+                detail_str = f"조합: {', '.join(act.modifiers)}" if act.modifiers else "(단일)"
+            elif act.action_type == "text_type":
+                target_str = f"\"{act.text}\""
+                detail_str = "텍스트 타이핑"
+            elif act.action_type == "delay":
+                target_str = f"{act.delay_seconds:.1f}초"
+                detail_str = "정밀 일시 정지"
+            else:
+                target_str = "-"
+                detail_str = "-"
+
+            it_target = QTableWidgetItem(target_str)
+            it_target.setTextAlignment(Qt.AlignCenter)
+            self.tbl_actions.setItem(row, 2, it_target)
+
+            it_detail = QTableWidgetItem(detail_str)
+            self.tbl_actions.setItem(row, 3, it_detail)
+
+            # 4. Delay
+            it_delay = QTableWidgetItem(f"{act.delay_seconds:.1f}s" if act.delay_seconds > 0 else "-")
+            it_delay.setTextAlignment(Qt.AlignCenter)
+            self.tbl_actions.setItem(row, 4, it_delay)
+
+    # ==========================================
+    # Field Change Handlers
+    # ==========================================
+    def _on_scenario_number_changed(self, val: int):
+        if self._is_loading or not self.current_scenario:
+            return
+        self.current_scenario.scenario_number = val
+        self.sig_scenario_changed.emit(self.current_scenario)
+
+    def _on_field_changed(self):
+        if self._is_loading or not self.current_scenario:
+            return
+
+        self.current_scenario.name = self.txt_name.text()
+        self.current_scenario.enabled = self.chk_enabled.isChecked()
+
+        self.current_scenario.on_match = self.combo_on_match.currentData()
+        self.current_scenario.jump_target_on_match = self.combo_jump_match.currentData() if self.current_scenario.on_match == "jump" else ""
+
+        self.current_scenario.on_mismatch = self.combo_on_mismatch.currentData()
+        self.current_scenario.jump_target_on_mismatch = self.combo_jump_mismatch.currentData() if self.current_scenario.on_mismatch == "jump" else ""
+
+        self.current_scenario.retry_max_count = self.spin_retries.value()
+        self.current_scenario.retry_interval_sec = self.spin_retry_sec.value()
+        self.current_scenario.post_delay_seconds = self.spin_post_delay.value()
+
+        if self.current_scenario.condition:
+            self.current_scenario.condition.logic_operator = self.combo_cond_logic.currentData()
+
+        # Node type & Loop controls
+        if hasattr(self, "combo_node_type"):
+            self.current_scenario.node_type = self.combo_node_type.currentData() or "normal"
+        if hasattr(self, "combo_loop_mode"):
+            self.current_scenario.loop_mode = self.combo_loop_mode.currentData() or "count"
+        if hasattr(self, "spin_loop_cnt"):
+            self.current_scenario.loop_count = self.spin_loop_cnt.value()
+
+        self.sig_scenario_changed.emit(self.current_scenario)
+
+    def _on_node_type_changed(self):
+        if self._is_loading or not self.current_scenario:
+            return
+        nt = self.combo_node_type.currentData() or "normal"
+        self.current_scenario.node_type = nt
+        self._update_node_type_visibility()
+        self._on_field_changed()
+
+    def _on_loop_mode_changed(self):
+        if self._is_loading or not self.current_scenario:
+            return
+        lm = self.combo_loop_mode.currentData() or "count"
+        self.current_scenario.loop_mode = lm
+        if lm in ("until_match", "while_match") and not self.current_scenario.condition:
+            self.chk_has_condition.setChecked(True)
+        self._on_field_changed()
+
+    def _update_node_type_visibility(self):
+        if not self.current_scenario:
+            return
+        nt = self.combo_node_type.currentData() or "normal"
+        is_start = (nt == "loop_start")
+        is_end = (nt == "loop_end")
+
+        self.loop_container.setVisible(is_start)
+        self.lbl_loop_end_info.setVisible(is_end)
+
+        if is_start:
+            self.condition_card.setTitle("👁️ 루프 탈출 / 지속 인식 조건 (Eye)")
+            self.condition_card.setVisible(True)
+            self.branch_card.setVisible(False)
+            self.action_card.setVisible(True)
+        elif is_end:
+            self.condition_card.setVisible(False)
+            self.branch_card.setVisible(False)
+            self.action_card.setVisible(False)
+        else:
+            self.condition_card.setTitle("👁️ 색상 인식 조건 (Eye)")
+            self.condition_card.setVisible(True)
+            self.branch_card.setVisible(True)
+            self.action_card.setVisible(True)
+
+    def _on_match_branch_changed(self):
+        self._update_branch_visibility()
+        self._on_field_changed()
+
+    def _on_mismatch_branch_changed(self):
+        self._update_branch_visibility()
+        self._on_field_changed()
+
+    def _on_has_condition_toggled(self, state):
+        if self._is_loading or not self.current_scenario:
+            return
+
+        if state == Qt.Checked:
+            if not self.current_scenario.condition:
+                self.current_scenario.condition = Condition(
+                    name=f"{self.current_scenario.name} 조건",
+                    logic_operator=self.combo_cond_logic.currentData(),
+                    points=[]
+                )
+        else:
+            self.current_scenario.condition = None
+
+        self._refresh_points_table()
+        self._on_field_changed()
+
+    def _on_point_tolerance_changed(self, point: ColorPoint, val: int):
+        point.tolerance = val
+        self.sig_scenario_changed.emit(self.current_scenario)
+
+    def _on_point_mode_changed(self, point: ColorPoint, idx: int):
+        point.match_mode = "not_match" if idx == 1 else "match"
+        self.sig_scenario_changed.emit(self.current_scenario)
+
+    # ==========================================
+    # Condition Point Management & Combination
+    # ==========================================
+    def _on_copy_condition_from_other(self):
+        if not self.project or not self.current_scenario:
+            return
+        other_scenarios = [s for s in self.project.scenarios if s.id != self.current_scenario.id and s.condition and s.condition.points]
+        if not other_scenarios:
+            QMessageBox.information(self, "조건 가져오기", "가져올 수 있는 조건을 가진 다른 시나리오가 없습니다.")
+            return
+
+        menu = QMenu(self)
+        for s in other_scenarios:
+            action = menu.addAction(f"고유 #{s.scenario_number} [{s.name}] - {len(s.condition.points)}개 포인트 ({s.condition.logic_operator})")
+            action.triggered.connect(lambda checked, src=s: self._copy_condition_from(src))
+        menu.exec_(self.btn_copy_cond.mapToGlobal(self.btn_copy_cond.rect().bottomLeft()))
+
+    def _copy_condition_from(self, source_scenario: Scenario):
+        if not source_scenario.condition:
+            return
+        self.current_scenario.condition = copy.deepcopy(source_scenario.condition)
+        self.chk_has_condition.setChecked(True)
+        idx_op = self.combo_cond_logic.findData(self.current_scenario.condition.logic_operator)
+        if idx_op >= 0:
+            self.combo_cond_logic.setCurrentIndex(idx_op)
+        self._refresh_points_table()
+        self._on_field_changed()
+        self.sig_log.emit("INFO", f"[{self.current_scenario.name}] 고유 #{source_scenario.scenario_number} [{source_scenario.name}]의 인식 조건을 복사하여 조합했습니다.")
+
+    def _on_open_canvas_editor(self):
+        if not self.current_scenario:
+            return
+
+        try:
+            dlg = ConditionEditorDialog(
+                condition=self.current_scenario.condition,
+                project=self.project,
+                current_scenario_id=self.current_scenario.id,
+                target_hwnd=self.target_hwnd,
+                parent=self
+            )
+            if dlg.exec_() == ConditionEditorDialog.Accepted:
+                self.current_scenario.condition = dlg.get_condition()
+                self._refresh_points_table()
+                self._on_field_changed()
+        except Exception as e:
+            self.sig_log.emit("ERROR", f"캔버스 편집기 실행 오류: {e}")
+            QMessageBox.critical(self, "오류", f"캔버스 편집기를 여는 중 오류가 발생했습니다:\n{e}")
+
+    def _on_add_point(self):
+        if not self.current_scenario:
+            return
+        if not self.current_scenario.condition:
+            self.chk_has_condition.setChecked(True)
+
+        new_pt = ColorPoint(x=100, y=100, r=255, g=255, b=255, tolerance=20)
+        self.current_scenario.condition.points.append(new_pt)
+        self._refresh_points_table()
+        self.tbl_points.selectRow(len(self.current_scenario.condition.points) - 1)
+        self._on_field_changed()
+
+    def _on_delete_point(self):
+        if not self.current_scenario or not self.current_scenario.condition:
+            return
+        rows = self.tbl_points.selectionModel().selectedRows()
+        if not rows:
+            return
+        row = rows[0].row()
+        del self.current_scenario.condition.points[row]
+        self._refresh_points_table()
+        self._on_field_changed()
+
+    def _on_test_condition_now(self):
+        if not self.current_scenario or not self.current_scenario.condition:
+            QMessageBox.information(self, "조건 없음", "테스트할 조건이 없습니다.")
+            return
+
+        if not self.target_hwnd:
+            QMessageBox.warning(self, "타겟 창 필요", "상단에서 타겟 게임 창을 먼저 선택해주세요.")
+            return
+
+        try:
+            cond = self.current_scenario.condition
+            matched, details = ConditionEvaluator.evaluate(cond, self.target_hwnd)
+
+            self.lbl_cond_test_result.setVisible(True)
+            if matched:
+                self.lbl_cond_test_result.setText(f"✅ [일치] {len(cond.points)}개 포인트 검사 완료: 조건 부합!")
+                self.lbl_cond_test_result.setStyleSheet("color: #16a34a; font-weight: bold;")
+                self.sig_log.emit("SUCCESS", f"[{self.current_scenario.name}] 실시간 판정 테스트: 조건 일치!")
+            else:
+                fail_count = sum(1 for d in details if not d.get("passed", False))
+                self.lbl_cond_test_result.setText(f"❌ [불일치] 총 {len(cond.points)}개 중 {fail_count}개 포인트 불일치")
+                self.lbl_cond_test_result.setStyleSheet("color: #dc2626; font-weight: bold;")
+                self.sig_log.emit("WARN", f"[{self.current_scenario.name}] 실시간 판정 테스트: 불일치 ({fail_count}개 포인트 오차 초과)")
+        except Exception as e:
+            self.lbl_cond_test_result.setVisible(True)
+            self.lbl_cond_test_result.setText(f"⚠️ 판정 오류: {e}")
+            self.lbl_cond_test_result.setStyleSheet("color: #dc2626; font-weight: bold;")
+            self.sig_log.emit("ERROR", f"[{self.current_scenario.name}] 판정 테스트 오류: {e}")
+
+    # ==========================================
+    # Action Sequence Management & Combination
+    # ==========================================
+    def _on_copy_actions_from_other(self):
+        if not self.project or not self.current_scenario:
+            return
+        other_scenarios = [s for s in self.project.scenarios if s.id != self.current_scenario.id and s.actions]
+        if not other_scenarios:
+            QMessageBox.information(self, "액션 가져오기", "가져올 수 있는 액션을 가진 다른 시나리오가 없습니다.")
+            return
+
+        menu = QMenu(self)
+        for s in other_scenarios:
+            action = menu.addAction(f"고유 #{s.scenario_number} [{s.name}] - {len(s.actions)}개 액션 ({s.get_actions_summary()})")
+            action.triggered.connect(lambda checked, src=s: self._copy_actions_from(src))
+        menu.exec_(self.btn_copy_act.mapToGlobal(self.btn_copy_act.rect().bottomLeft()))
+
+    def _copy_actions_from(self, source_scenario: Scenario):
+        if not source_scenario.actions:
+            return
+        self.current_scenario.actions = copy.deepcopy(source_scenario.actions)
+        self._refresh_actions_table()
+        self._on_field_changed()
+        self.sig_log.emit("INFO", f"[{self.current_scenario.name}] 고유 #{source_scenario.scenario_number} [{source_scenario.name}]의 액션 시퀀스를 복사하여 조합했습니다.")
+
+    def _on_quick_add_action(self, action_type: str):
+        if not self.current_scenario:
+            return
+
+        act = Action(action_type=action_type)
+        if action_type == "mouse_click":
+            act.x, act.y = 100, 100
+            act.delay_seconds = 0.5
+        elif action_type == "mouse_drag":
+            act.x, act.y = 100, 100
+            act.end_x, act.end_y = 300, 300
+            act.drag_duration_ms = 500
+            act.delay_seconds = 0.5
+        elif action_type == "key_press":
+            act.key = "Enter"
+            act.delay_seconds = 0.5
+        elif action_type == "text_type":
+            act.text = "Hello"
+            act.delay_seconds = 0.5
+        elif action_type == "delay":
+            act.delay_seconds = 2.0
+
+        self.current_scenario.actions.append(act)
+        self._refresh_actions_table()
+        self.tbl_actions.selectRow(len(self.current_scenario.actions) - 1)
+        self._on_field_changed()
+
+    def _on_edit_action(self):
+        if not self.current_scenario:
+            return
+        rows = self.tbl_actions.selectionModel().selectedRows()
+        if not rows:
+            return
+        row = rows[0].row()
+        act = self.current_scenario.actions[row]
+
+        ref_path = self.current_scenario.condition.reference_image_path if self.current_scenario.condition else None
+        dlg = SingleActionDialog(
+            action=act,
+            target_hwnd=self.target_hwnd,
+            reference_image_path=ref_path,
+            parent=self
+        )
+        if dlg.exec_() == SingleActionDialog.Accepted:
+            self.current_scenario.actions[row] = dlg.get_action()
+            self._refresh_actions_table()
+            self.tbl_actions.selectRow(row)
+            self._on_field_changed()
+
+    def _on_start_operation_recording(self):
+        if not self.current_scenario:
+            return
+        if not self.target_hwnd:
+            QMessageBox.warning(self, "타겟 창 필요", "먼저 메인 창 상단에서 타겟 게임 창을 선택해주세요.")
+            return
+        from ui.recording_hud import RecordingHud
+        hud = RecordingHud(target_hwnd=self.target_hwnd, parent=self)
+        if hud.exec_() == RecordingHud.Accepted:
+            recorded = hud.recorder.recorded_actions
+            if recorded:
+                self.current_scenario.actions.extend(recorded)
+                self._refresh_actions_table()
+                self._on_field_changed()
+                self.sig_log.emit("INFO", f"⏺️ 조작 녹화 완료: {len(recorded)}개 액션이 시나리오에 추가되었습니다.")
+
+    def _on_pick_coord_for_selected_action(self):
+        if not self.current_scenario:
+            return
+        rows = self.tbl_actions.selectionModel().selectedRows()
+        if not rows:
+            QMessageBox.information(self, "액션 선택", "좌표를 지정할 액션을 먼저 표에서 선택해주세요.")
+            return
+        row = rows[0].row()
+        act = self.current_scenario.actions[row]
+        if act.action_type not in ("mouse_click", "mouse_drag"):
+            QMessageBox.information(self, "좌표 미지원", "마우스 클릭 또는 드래그 액션만 좌표를 지정할 수 있습니다.")
+            return
+
+        from ui.coordinate_picker_dialog import CoordinatePickerDialog
+        ref_path = self.current_scenario.condition.reference_image_path if self.current_scenario.condition else None
+        dlg = CoordinatePickerDialog(
+            image_path=ref_path,
+            target_hwnd=self.target_hwnd,
+            initial_x=act.x,
+            initial_y=act.y,
+            drag_mode=(act.action_type == "mouse_drag"),
+            initial_end_x=act.end_x if act.action_type == "mouse_drag" else 0,
+            initial_end_y=act.end_y if act.action_type == "mouse_drag" else 0,
+            parent=self
+        )
+        if dlg.exec_() == CoordinatePickerDialog.Accepted:
+            x, y, ex, ey = dlg.get_coordinates()
+            act.x = x
+            act.y = y
+            if act.action_type == "mouse_drag":
+                act.end_x = ex
+                act.end_y = ey
+            self._refresh_actions_table()
+            self._on_field_changed()
+            self.sig_log.emit("INFO", f"🎯 액션 #{row + 1} 좌표가 ({x}, {y})로 설정되었습니다.")
+
+    def _on_delete_action(self):
+        if not self.current_scenario:
+            return
+        rows = self.tbl_actions.selectionModel().selectedRows()
+        if not rows:
+            return
+        row = rows[0].row()
+        del self.current_scenario.actions[row]
+        self._refresh_actions_table()
+        self._on_field_changed()
+
+    def _on_move_action_up(self):
+        if not self.current_scenario:
+            return
+        rows = self.tbl_actions.selectionModel().selectedRows()
+        if not rows or rows[0].row() == 0:
+            return
+        r = rows[0].row()
+        acts = self.current_scenario.actions
+        acts[r - 1], acts[r] = acts[r], acts[r - 1]
+        self._refresh_actions_table()
+        self.tbl_actions.selectRow(r - 1)
+        self._on_field_changed()
+
+    def _on_move_action_down(self):
+        if not self.current_scenario:
+            return
+        rows = self.tbl_actions.selectionModel().selectedRows()
+        if not rows or rows[0].row() >= len(self.current_scenario.actions) - 1:
+            return
+        r = rows[0].row()
+        acts = self.current_scenario.actions
+        acts[r + 1], acts[r] = acts[r], acts[r + 1]
+        self._refresh_actions_table()
+        self.tbl_actions.selectRow(r + 1)
+        self._on_field_changed()
+
+    def _on_test_action_now(self):
+        if not self.current_scenario:
+            return
+        rows = self.tbl_actions.selectionModel().selectedRows()
+        if not rows:
+            QMessageBox.information(self, "선택 필요", "실행할 액션을 목록에서 선택해주세요.")
+            return
+        if not self.target_hwnd:
+            QMessageBox.warning(self, "타겟 창 필요", "상단에서 타겟 게임 창을 먼저 선택해주세요.")
+            return
+
+        act = self.current_scenario.actions[rows[0].row()]
+        try:
+            InputController.execute_action(act, self.target_hwnd)
+            self.sig_log.emit("ACTION", f"테스트 액션 실행 완료: [{act.action_type}]")
+        except Exception as e:
+            self.sig_log.emit("ERROR", f"액션 실행 실패: {e}")
+            QMessageBox.critical(self, "실행 오류", f"액션 실행 중 오류 발생:\n{e}")
