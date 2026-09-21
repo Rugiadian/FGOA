@@ -263,6 +263,8 @@ class Project:
     version: str = "1.0.0"
     name: str = "FGOA Auto Project"
     target_window_title: str = ""
+    target_client_width: int = 1600
+    target_client_height: int = 900
     loop_count: int = 1  # 0 means infinite loop
     loop_delay_seconds: float = 1.0
     scenarios: List[Scenario] = field(default_factory=list)
@@ -347,6 +349,8 @@ class Project:
             "version": self.version,
             "name": self.name,
             "target_window_title": self.target_window_title,
+            "target_client_width": self.target_client_width,
+            "target_client_height": self.target_client_height,
             "loop_count": self.loop_count,
             "loop_delay_seconds": self.loop_delay_seconds,
             "scenarios": [s.to_dict() for s in self.scenarios]
@@ -359,6 +363,8 @@ class Project:
             version=data.get("version", "1.0.0"),
             name=data.get("name", "FGOA Auto Project"),
             target_window_title=data.get("target_window_title", ""),
+            target_client_width=data.get("target_client_width", 1600),
+            target_client_height=data.get("target_client_height", 900),
             loop_count=data.get("loop_count", 1),
             loop_delay_seconds=data.get("loop_delay_seconds", 1.0),
             scenarios=scenarios

@@ -1,5 +1,8 @@
 {
   "theme": "light",
   "window_width": 1380,
-  "window_height": 880
+  "window_height": 880,
+  "last_target_title": "",
+  "last_target_width": 1600,
+  "last_target_height": 900
 }

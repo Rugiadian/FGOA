@@ -66,6 +66,7 @@ class MainWindow(QMainWindow):
         self._init_ui()
         self._apply_theme()
         self._refresh_scenario_table()
+        self._update_target_label(None)
         self._start_target_monitor_timer()
         self._init_code_watcher()
 
@@ -90,6 +91,10 @@ class MainWindow(QMainWindow):
                 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
                     self.current_theme = cfg.get("theme", "light")
+                    if hasattr(self.project, "target_client_width"):
+                        self.project.target_client_width = cfg.get("last_target_width", 1600)
+                        self.project.target_client_height = cfg.get("last_target_height", 900)
+                        self.project.target_window_title = cfg.get("last_target_title", "")
             except Exception:
                 pass
 
@@ -98,7 +103,10 @@ class MainWindow(QMainWindow):
             cfg = {
                 "theme": self.current_theme,
                 "window_width": self.width(),
-                "window_height": self.height()
+                "window_height": self.height(),
+                "last_target_title": getattr(self.project, "target_window_title", ""),
+                "last_target_width": getattr(self.project, "target_client_width", 1600),
+                "last_target_height": getattr(self.project, "target_client_height", 900),
             }
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2, ensure_ascii=False)
@@ -805,27 +813,57 @@ class MainWindow(QMainWindow):
     # Target Window Management
     # ==========================================
     def _on_select_target_window(self):
-        dlg = WindowPickerDialog(current_hwnd=self.target_hwnd, parent=self)
+        cur_w = getattr(self.project, "target_client_width", 1600)
+        cur_h = getattr(self.project, "target_client_height", 900)
+        cur_title = getattr(self.project, "target_window_title", "")
+        dlg = WindowPickerDialog(
+            current_hwnd=self.target_hwnd,
+            current_width=cur_w,
+            current_height=cur_h,
+            current_title=cur_title,
+            parent=self
+        )
         if dlg.exec_() == WindowPickerDialog.Accepted and dlg.selected_window:
             self.target_hwnd = dlg.selected_window.hwnd
             self.project.target_window_title = dlg.selected_window.title
+            self.project.target_client_width = dlg.selected_window.client_width
+            self.project.target_client_height = dlg.selected_window.client_height
+            self._save_app_config()
             self.inspector.set_target_hwnd(self.target_hwnd)
             self._update_target_label(dlg.selected_window)
+            self._append_log("INFO", f"타겟 지정 완료: '{dlg.selected_window.title}' ({dlg.selected_window.client_width}×{dlg.selected_window.client_height})")
 
     def _on_focus_target_window(self):
         if self.target_hwnd:
             WindowManager.bring_to_foreground(self.target_hwnd)
+        else:
+            QMessageBox.information(
+                self, "창 활성화 안내",
+                "현재 실행 중인 특정 윈도우 창이 선택되지 않았습니다.\n(직접 지정 해상도 모드에서는 활성화할 윈도우가 없습니다.)"
+            )
 
     def _update_target_label(self, win: Optional[WindowInfo]):
         pal = get_theme_colors(self.current_theme)
         if win:
-            self.lbl_target_info.setText(
-                f"'{win.title}' (HWND: 0x{win.hwnd:X}, 해상도: {win.client_width}×{win.client_height})"
-            )
+            if win.hwnd:
+                self.lbl_target_info.setText(
+                    f"'{win.title}' (HWND: 0x{win.hwnd:X}, 해상도: {win.client_width}×{win.client_height})"
+                )
+            else:
+                self.lbl_target_info.setText(
+                    f"📐 직접 지정 해상도: {win.client_width}×{win.client_height} ('{win.title}')"
+                )
             self.lbl_target_info.setStyleSheet(f"font-weight: bold; color: {pal['info']};")
         else:
-            self.lbl_target_info.setText("선택된 창 없음 (창 선택 버튼을 클릭하세요)")
-            self.lbl_target_info.setStyleSheet(f"font-weight: bold; color: {pal['warning']};")
+            w = getattr(self.project, "target_client_width", 0)
+            h = getattr(self.project, "target_client_height", 0)
+            title = getattr(self.project, "target_window_title", "")
+            if w > 0 and h > 0:
+                self.lbl_target_info.setText(f"📐 기억된 해상도: {w}×{h} ('{title or '가상 타겟'}')")
+                self.lbl_target_info.setStyleSheet(f"font-weight: bold; color: {pal['info']};")
+            else:
+                self.lbl_target_info.setText("선택된 창 없음 (창 선택 버튼을 클릭하세요)")
+                self.lbl_target_info.setStyleSheet(f"font-weight: bold; color: {pal['warning']};")
 
     def _start_target_monitor_timer(self):
         self.timer_monitor = QTimer(self)

@@ -20,6 +20,7 @@ class CanvasView(QWidget):
     sig_point_added = pyqtSignal(int, int, int, int, int)  # (x, y, r, g, b)
     sig_line_points_added = pyqtSignal(int, int, int, int)  # (x1, y1, x2, y2)
     sig_point_selected = pyqtSignal(str)  # point_id
+    sig_nudge_requested = pyqtSignal(int, int)  # (dx, dy)
 
     MODE_POINT = 0
     MODE_LINE = 1
@@ -67,26 +68,52 @@ class CanvasView(QWidget):
         if not pix.isNull():
             self.pixmap = pix
             self.qimage = pix.toImage()
-            self.reset_view()
+            self.fit_to_view()
             self.update()
 
     def set_qimage(self, qimg: QImage):
         if not qimg.isNull():
             self.qimage = qimg
             self.pixmap = QPixmap.fromImage(qimg)
-            self.reset_view()
+            self.fit_to_view()
             self.update()
 
     def set_points(self, points: List[ColorPoint]):
         self.points = points
         self.update()
 
-    def reset_view(self):
-        """Fit target window area nicely in view."""
-        self.zoom = 1.0
-        self.pan_x = 30.0
-        self.pan_y = 30.0
+    def fit_to_view(self):
+        """Fit target resolution or reference image completely into the visible canvas area."""
+        img_w = self.pixmap.width() if self.pixmap else self.target_width
+        img_h = self.pixmap.height() if self.pixmap else self.target_height
+
+        avail_w = max(50, self.width() - 30)
+        avail_h = max(50, self.height() - 30)
+
+        if img_w <= 0 or img_h <= 0 or avail_w <= 50:
+            return
+
+        scale_x = avail_w / img_w
+        scale_y = avail_h / img_h
+        # Fit fully inside canvas
+        best_zoom = min(scale_x, scale_y)
+        self.zoom = max(0.05, best_zoom)
+
+        # Center in canvas
+        self.pan_x = max(10.0, (self.width() - img_w * self.zoom) / 2.0)
+        self.pan_y = max(10.0, (self.height() - img_h * self.zoom) / 2.0)
         self.update()
+
+    def zoom_100(self):
+        """Reset view to 100% 1:1 pixel scale."""
+        self.zoom = 1.0
+        self.pan_x = 20.0
+        self.pan_y = 20.0
+        self.update()
+
+    def reset_view(self):
+        """Reset view to fit target resolution."""
+        self.fit_to_view()
 
     # Coordinate mapping
     def client_to_screen_pos(self, cx: float, cy: float) -> QPointF:
@@ -311,3 +338,20 @@ class CanvasView(QWidget):
         painter.drawRoundedRect(badge_rect, 3, 3)
         painter.setPen(QColor(255, 255, 255))
         painter.drawText(badge_rect, Qt.AlignCenter, label_text)
+
+    def keyPressEvent(self, event):
+        step = 5 if (event.modifiers() & Qt.ShiftModifier) else 1
+        if event.key() == Qt.Key_Left:
+            self.sig_nudge_requested.emit(-step, 0)
+            event.accept()
+        elif event.key() == Qt.Key_Right:
+            self.sig_nudge_requested.emit(step, 0)
+            event.accept()
+        elif event.key() == Qt.Key_Up:
+            self.sig_nudge_requested.emit(0, -step)
+            event.accept()
+        elif event.key() == Qt.Key_Down:
+            self.sig_nudge_requested.emit(0, step)
+            event.accept()
+        else:
+            super().keyPressEvent(event)

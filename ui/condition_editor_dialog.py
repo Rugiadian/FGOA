@@ -10,10 +10,10 @@ from PyQt5.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
     QComboBox, QSpinBox, QGroupBox, QSplitter, QMessageBox,
-    QApplication, QInputDialog
+    QApplication, QInputDialog, QButtonGroup
 )
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PIL import Image, ImageQt
 
 from core.models import Condition, ColorPoint, Project, Scenario
@@ -22,6 +22,7 @@ from core.evaluator import ConditionEvaluator
 from ui.canvas_view import CanvasView
 from ui.magnifier_widget import MagnifierWidget
 from ui.widgets.color_badge import ColorChipWidget, WarningBadge
+from ui.reference_gallery_dialog import ReferenceGalleryDialog
 
 
 class ConditionEditorDialog(QDialog):
@@ -30,8 +31,8 @@ class ConditionEditorDialog(QDialog):
     def __init__(self, condition: Optional[Condition], project: Project,
                  current_scenario_id: str, target_hwnd: int, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("실행 조건 & 컬러 피커 프리셋 편집기")
-        self.resize(1180, 780)
+        self.setWindowTitle("이미지에서 좌표 지정 작업창")
+        self.resize(1260, 820)
 
         self.project = project
         self.current_scenario_id = current_scenario_id
@@ -49,47 +50,101 @@ class ConditionEditorDialog(QDialog):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(8)
 
+        # Initialize Interactive Canvas early so toolbar buttons can bind to it
+        self.canvas = CanvasView(self)
+        self.canvas.sig_pixel_hovered.connect(self._on_canvas_pixel_hovered)
+        self.canvas.sig_point_added.connect(self._on_canvas_point_added)
+        self.canvas.sig_line_points_added.connect(self._on_canvas_line_added)
+        self.canvas.sig_point_selected.connect(self._on_canvas_point_selected)
+        self.canvas.sig_nudge_requested.connect(self._on_nudge_point)
+
         # 1. Top Header Toolbar: Reference Image & Tools
         top_bar = QHBoxLayout()
-        top_bar.setSpacing(8)
+        top_bar.setSpacing(6)
 
         # Image Load Buttons
-        btn_open_img = QPushButton("📁 레퍼런스 이미지 열기")
+        btn_open_img = QPushButton("📁 레퍼런스 열기")
         btn_open_img.clicked.connect(self._on_open_image_file)
         top_bar.addWidget(btn_open_img)
 
-        btn_capture_win = QPushButton("📸 타겟 창에서 캡처")
+        btn_gallery = QPushButton("🖼️ 갤러리에서 선택...")
+        btn_gallery.clicked.connect(self._on_open_gallery)
+        top_bar.addWidget(btn_gallery)
+
+        btn_capture_win = QPushButton("📸 타겟 창 캡처")
         btn_capture_win.clicked.connect(self._on_capture_target_window)
         top_bar.addWidget(btn_capture_win)
 
-        btn_paste_clip = QPushButton("📋 클립보드 붙여넣기")
+        btn_paste_clip = QPushButton("📋 붙여넣기")
         btn_paste_clip.clicked.connect(self._on_paste_clipboard)
         top_bar.addWidget(btn_paste_clip)
 
-        top_bar.addSpacing(15)
+        top_bar.addSpacing(12)
 
-        # Mode Selection Buttons
-        top_bar.addWidget(QLabel("도구 모드:"))
-        self.combo_mode = QComboBox()
-        self.combo_mode.addItems(["🔴 단일 점 피커 (Point)", "📏 선 모양 연속 피커 (Line)", "👆 선택 / 이동 (Select)"])
-        self.combo_mode.currentIndexChanged.connect(self._on_tool_mode_changed)
-        top_bar.addWidget(self.combo_mode)
+        # Mode Selection Buttons (Direct Icon Buttons)
+        mode_box = QHBoxLayout()
+        mode_box.setSpacing(3)
+        mode_style = """
+            QPushButton {
+                padding: 4px 10px;
+                border: 1px solid #94a3b8;
+                border-radius: 4px;
+            }
+            QPushButton:checked {
+                background-color: #2563eb;
+                color: #ffffff;
+                font-weight: bold;
+                border: 1px solid #1d4ed8;
+            }
+        """
 
-        top_bar.addSpacing(15)
+        self.btn_group_mode = QButtonGroup(self)
+        self.btn_group_mode.setExclusive(True)
 
-        # Logic Operator
-        top_bar.addWidget(QLabel("판정 논리:"))
-        self.combo_logic = QComboBox()
-        self.combo_logic.addItems(["AND (모든 포인트 일치)", "OR (하나 이상 일치)"])
-        self.combo_logic.currentIndexChanged.connect(self._on_logic_changed)
-        top_bar.addWidget(self.combo_logic)
+        self.btn_mode_point = QPushButton("🔴 점 피커")
+        self.btn_mode_point.setCheckable(True)
+        self.btn_mode_point.setChecked(True)
+        self.btn_mode_point.setStyleSheet(mode_style)
+        self.btn_mode_point.setToolTip("단일 점을 클릭하여 좌표와 색상을 추출합니다.")
+        self.btn_group_mode.addButton(self.btn_mode_point)
+        self.btn_mode_point.clicked.connect(lambda: self._set_tool_mode(0))
+        mode_box.addWidget(self.btn_mode_point)
+
+        self.btn_mode_line = QPushButton("📏 선 피커")
+        self.btn_mode_line.setCheckable(True)
+        self.btn_mode_line.setStyleSheet(mode_style)
+        self.btn_mode_line.setToolTip("드래그하여 선을 긋고 연속 샘플 포인트를 균등 생성합니다.")
+        self.btn_group_mode.addButton(self.btn_mode_line)
+        self.btn_mode_line.clicked.connect(lambda: self._set_tool_mode(1))
+        mode_box.addWidget(self.btn_mode_line)
+
+        self.btn_mode_select = QPushButton("👆 선택/이동")
+        self.btn_mode_select.setCheckable(True)
+        self.btn_mode_select.setStyleSheet(mode_style)
+        self.btn_mode_select.setToolTip("기존 등록된 포인트를 마우스로 선택하거나 드래그하여 이동합니다.")
+        self.btn_group_mode.addButton(self.btn_mode_select)
+        self.btn_mode_select.clicked.connect(lambda: self._set_tool_mode(2))
+        mode_box.addWidget(self.btn_mode_select)
+
+        top_bar.addLayout(mode_box)
 
         top_bar.addStretch()
 
-        # Reset zoom button
-        btn_reset_zoom = QPushButton("🔍 뷰 리셋")
-        btn_reset_zoom.clicked.connect(lambda: self.canvas.reset_view())
-        top_bar.addWidget(btn_reset_zoom)
+        # Canvas View Controls: Fit, 1:1, Fullscreen
+        btn_fit = QPushButton("📐 화면 맞춤")
+        btn_fit.setToolTip("타겟 해상도 또는 이미지가 화면에 딱 맞도록 자동 축소/확대")
+        btn_fit.clicked.connect(lambda: self.canvas.fit_to_view())
+        top_bar.addWidget(btn_fit)
+
+        btn_100 = QPushButton("1:1 원본")
+        btn_100.setToolTip("100% 원본 배율로 보기")
+        btn_100.clicked.connect(lambda: self.canvas.zoom_100())
+        top_bar.addWidget(btn_100)
+
+        self.btn_fullscreen = QPushButton("⛶ 전체 화면")
+        self.btn_fullscreen.setToolTip("창을 최대화하거나 원래 크기로 복원합니다.")
+        self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
+        top_bar.addWidget(self.btn_fullscreen)
 
         main_layout.addLayout(top_bar)
 
@@ -103,56 +158,71 @@ class ConditionEditorDialog(QDialog):
         main_layout.addWidget(self.lbl_warning_banner)
 
         # 2. Main Content Splitter: Canvas (Left) + Sidebar (Right)
-        splitter = QSplitter(Qt.Horizontal)
+        self.splitter = QSplitter(Qt.Horizontal)
 
         # Left: Interactive Canvas
-        self.canvas = CanvasView(self)
-        self.canvas.sig_pixel_hovered.connect(self._on_canvas_pixel_hovered)
-        self.canvas.sig_point_added.connect(self._on_canvas_point_added)
-        self.canvas.sig_line_points_added.connect(self._on_canvas_line_added)
-        self.canvas.sig_point_selected.connect(self._on_canvas_point_selected)
-        splitter.addWidget(self.canvas)
+        self.splitter.addWidget(self.canvas)
 
         # Right Sidebar: Magnifier + Points Table + Controls
         sidebar = QWidget()
+        sidebar.setMinimumWidth(260)
+        # No setMaximumWidth so user can expand it freely
         side_layout = QVBoxLayout(sidebar)
-        side_layout.setContentsMargins(6, 0, 0, 0)
-        side_layout.setSpacing(8)
+        side_layout.setContentsMargins(4, 0, 0, 0)
+        side_layout.setSpacing(6)
 
         # Magnifier Widget
         self.magnifier = MagnifierWidget(self)
+        self.magnifier.sig_nudge_requested.connect(self._on_nudge_point)
         side_layout.addWidget(self.magnifier)
 
         # Points Table Group
         grp_points = QGroupBox("추출된 컬러 피커 포인트 목록")
         grp_layout = QVBoxLayout(grp_points)
-        grp_layout.setContentsMargins(6, 12, 6, 6)
+        grp_layout.setContentsMargins(4, 8, 4, 4)
 
         self.tbl_points = QTableWidget()
         self.tbl_points.setColumnCount(6)
-        self.tbl_points.setHorizontalHeaderLabels(["#", "상대좌표", "색상 (RGB)", "오차", "모드", "삭제"])
-        self.tbl_points.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.tbl_points.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.tbl_points.setHorizontalHeaderLabels(["#", "좌표", "색상", "오차", "모드", "삭제"])
+        self.tbl_points.verticalHeader().setVisible(False)  # Remove duplicate vertical row numbering!
+        self.tbl_points.verticalHeader().setDefaultSectionSize(26)
         self.tbl_points.setSelectionBehavior(QTableWidget.SelectRows)
         self.tbl_points.itemSelectionChanged.connect(self._on_table_row_selected)
+
+        # Precision column sizing so coordinates are fully visible with no horizontal scrolling
+        hdr = self.tbl_points.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.Fixed)
+        self.tbl_points.setColumnWidth(0, 32)
+        hdr.setSectionResizeMode(1, QHeaderView.Stretch)  # Coordinates take all flexible room
+        hdr.setSectionResizeMode(2, QHeaderView.Fixed)
+        self.tbl_points.setColumnWidth(2, 38)
+        hdr.setSectionResizeMode(3, QHeaderView.Fixed)
+        self.tbl_points.setColumnWidth(3, 50)
+        hdr.setSectionResizeMode(4, QHeaderView.Fixed)
+        self.tbl_points.setColumnWidth(4, 58)
+        hdr.setSectionResizeMode(5, QHeaderView.Fixed)
+        self.tbl_points.setColumnWidth(5, 28)
+
         grp_layout.addWidget(self.tbl_points)
 
         # Table buttons
         btn_row_layout = QHBoxLayout()
-        btn_del_point = QPushButton("선택 포인트 삭제")
+        btn_row_layout.setSpacing(4)
+        btn_del_point = QPushButton("선택 삭제")
         btn_del_point.clicked.connect(self._on_delete_selected_point)
-        btn_clear_all = QPushButton("전체 포인트 비우기")
+        btn_clear_all = QPushButton("전체 비우기")
         btn_clear_all.clicked.connect(self._on_clear_all_points)
         btn_row_layout.addWidget(btn_del_point)
         btn_row_layout.addWidget(btn_clear_all)
         grp_layout.addLayout(btn_row_layout)
 
         side_layout.addWidget(grp_points)
-        splitter.addWidget(sidebar)
+        self.splitter.addWidget(sidebar)
 
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        main_layout.addWidget(splitter)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 0)
+        self.splitter.setSizes([940, 320])
+        main_layout.addWidget(self.splitter)
 
         # 3. Bottom Action Buttons: Save / Cancel
         bottom_bar = QHBoxLayout()
@@ -172,16 +242,16 @@ class ConditionEditorDialog(QDialog):
     def _load_condition_data(self):
         # Set target resolution on canvas
         from core.window_manager import WindowManager
-        target_info = WindowManager.get_window_info(self.target_hwnd)
-        if target_info:
+        target_info = WindowManager.get_window_info(self.target_hwnd) if self.target_hwnd else None
+        if target_info and target_info.client_width > 0:
             self.canvas.set_target_resolution(target_info.client_width, target_info.client_height)
+        elif hasattr(self.project, "target_client_width") and self.project.target_client_width > 0:
+            self.canvas.set_target_resolution(self.project.target_client_width, self.project.target_client_height)
 
         # Load reference image if exists
         if self.condition.reference_image_path and os.path.exists(self.condition.reference_image_path):
             self.canvas.load_image_from_path(self.condition.reference_image_path)
 
-        # Set logic combo
-        self.combo_logic.setCurrentIndex(0 if self.condition.logic_operator == "AND" else 1)
 
         # Set canvas points
         self.canvas.set_points(self.condition.points)
@@ -239,8 +309,12 @@ class ConditionEditorDialog(QDialog):
             point_type="single"
         )
         self.condition.points.append(new_pt)
+        self.canvas.selected_point_id = new_pt.id
         self.canvas.set_points(self.condition.points)
         self._refresh_points_table()
+        new_row = len(self.condition.points) - 1
+        self.tbl_points.selectRow(new_row)
+        self.magnifier.set_position(self.canvas.qimage, x, y)
 
     def _on_canvas_line_added(self, x1: int, y1: int, x2: int, y2: int):
         # Prompt user for number of points along the line
@@ -269,6 +343,7 @@ class ConditionEditorDialog(QDialog):
         for row, pt in enumerate(self.condition.points):
             if pt.id == point_id:
                 self.tbl_points.selectRow(row)
+                self.magnifier.set_position(self.canvas.qimage, pt.x, pt.y)
                 break
 
     def _on_table_row_selected(self):
@@ -278,13 +353,66 @@ class ConditionEditorDialog(QDialog):
             if row < len(self.condition.points):
                 pt = self.condition.points[row]
                 self.canvas.selected_point_id = pt.id
+                self.magnifier.set_position(self.canvas.qimage, pt.x, pt.y)
                 self.canvas.update()
 
-    def _on_tool_mode_changed(self, index: int):
-        self.canvas.current_mode = index
+    def _on_nudge_point(self, dx: int, dy: int):
+        if not self.condition.points:
+            return
 
-    def _on_logic_changed(self, index: int):
-        self.condition.logic_operator = "AND" if index == 0 else "OR"
+        selected_point = None
+        selected_row = -1
+
+        # 1. Match by selected_point_id
+        if self.canvas.selected_point_id:
+            for row, pt in enumerate(self.condition.points):
+                if pt.id == self.canvas.selected_point_id:
+                    selected_point = pt
+                    selected_row = row
+                    break
+
+        # 2. Match by table selection
+        if not selected_point:
+            selected_rows = self.tbl_points.selectionModel().selectedRows()
+            if selected_rows:
+                selected_row = selected_rows[0].row()
+                if 0 <= selected_row < len(self.condition.points):
+                    selected_point = self.condition.points[selected_row]
+                    self.canvas.selected_point_id = selected_point.id
+
+        # 3. Fallback to last point
+        if not selected_point:
+            selected_row = len(self.condition.points) - 1
+            selected_point = self.condition.points[selected_row]
+            self.canvas.selected_point_id = selected_point.id
+
+        max_w = max(1, self.canvas.target_width)
+        max_h = max(1, self.canvas.target_height)
+        new_x = max(0, min(max_w - 1, selected_point.x + dx))
+        new_y = max(0, min(max_h - 1, selected_point.y + dy))
+
+        selected_point.x = new_x
+        selected_point.y = new_y
+
+        color = self.canvas.get_pixel_color_at(new_x, new_y)
+        if color:
+            selected_point.r = color.red()
+            selected_point.g = color.green()
+            selected_point.b = color.blue()
+
+        if 0 <= selected_row < self.tbl_points.rowCount():
+            it_coord = self.tbl_points.item(selected_row, 1)
+            if it_coord:
+                it_coord.setText(f"({new_x}, {new_y})")
+            badge = ColorChipWidget(selected_point.r, selected_point.g, selected_point.b, size=16)
+            self.tbl_points.setCellWidget(selected_row, 2, badge)
+
+        self.magnifier.set_position(self.canvas.qimage, new_x, new_y)
+        self.canvas.update()
+        self._check_uniqueness()
+
+    def _set_tool_mode(self, mode: int):
+        self.canvas.current_mode = mode
 
     def _on_point_tolerance_changed(self, pt: ColorPoint, val: int):
         pt.tolerance = val
@@ -363,6 +491,32 @@ class ConditionEditorDialog(QDialog):
         self.condition.reference_image_path = ref_path
         self.canvas.load_image_from_path(ref_path)
         QMessageBox.information(self, "붙여넣기 완료", "클립보드 이미지를 레퍼런스로 등록했습니다.")
+
+    def _on_open_gallery(self):
+        dlg = ReferenceGalleryDialog(self.project, target_hwnd=self.target_hwnd, picker_mode=True, parent=self)
+        if dlg.exec_() == QDialog.Accepted:
+            sel_path = dlg.get_selected_image_path()
+            if sel_path and os.path.exists(sel_path):
+                self.condition.reference_image_path = sel_path
+                self.canvas.load_image_from_path(sel_path)
+                QTimer.singleShot(60, self.canvas.fit_to_view)
+
+    def _toggle_fullscreen(self):
+        if self.isMaximized():
+            self.showNormal()
+            self.btn_fullscreen.setText("⛶ 전체 화면")
+            self.splitter.setSizes([940, 320])
+        else:
+            self.showMaximized()
+            self.btn_fullscreen.setText("🗗 창 크기 복원")
+            avail_w = self.width()
+            self.splitter.setSizes([max(600, avail_w - 320), 320])
+        QTimer.singleShot(100, self.canvas.fit_to_view)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.splitter.setSizes([940, 320])
+        QTimer.singleShot(60, self.canvas.fit_to_view)
 
     def _check_uniqueness(self):
         """Check if current condition's points are duplicate of other scenarios."""

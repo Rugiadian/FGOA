@@ -30,13 +30,15 @@ class ReferenceGalleryDialog(QDialog):
     clearly indicating which scenarios (Eye conditions / Hand actions) use each image.
     """
 
-    def __init__(self, project: Project, target_hwnd: int = 0, parent=None):
+    def __init__(self, project: Project, target_hwnd: int = 0, picker_mode: bool = False, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("🖼️ 레퍼런스 갤러리 (참조 이미지 및 사용처 관리)")
+        self.setWindowTitle("🖼️ 레퍼런스 갤러리 (이미지 선택)" if picker_mode else "🖼️ 레퍼런스 갤러리 (참조 이미지 및 사용처 관리)")
         self.resize(1080, 720)
 
         self.project = project
         self.target_hwnd = target_hwnd
+        self.picker_mode = picker_mode
+        self.selected_path: Optional[str] = None
         self.image_entries: List[Dict[str, Any]] = []
 
         os.makedirs(REFS_DIR, exist_ok=True)
@@ -98,6 +100,7 @@ class ReferenceGalleryDialog(QDialog):
         self.list_widget = QListWidget()
         self.list_widget.setIconSize(QSize(72, 48))
         self.list_widget.currentItemChanged.connect(self._on_item_selected)
+        self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         l_layout.addWidget(self.list_widget)
         splitter.addWidget(left_container)
 
@@ -138,6 +141,11 @@ class ReferenceGalleryDialog(QDialog):
         # 4. Action buttons
         btn_box = QHBoxLayout()
         btn_box.setSpacing(8)
+
+        self.btn_select_this = QPushButton("✅ 이 이미지 선택")
+        self.btn_select_this.setObjectName("btn_primary")
+        self.btn_select_this.clicked.connect(self._on_select_current_image)
+        btn_box.addWidget(self.btn_select_this)
 
         self.btn_pick_from_img = QPushButton("🎯 이 이미지에서 좌표 찍기...")
         self.btn_pick_from_img.clicked.connect(self._on_open_coord_picker)
@@ -390,3 +398,28 @@ class ReferenceGalleryDialog(QDialog):
             self.refresh_gallery()
         except Exception as ex:
             QMessageBox.critical(self, "삭제 실패", f"파일 삭제 오류: {ex}")
+
+    def _on_select_current_image(self):
+        item = self.list_widget.currentItem()
+        if not item:
+            QMessageBox.warning(self, "선택 필요", "선택된 이미지가 없습니다.")
+            return
+        entry = item.data(Qt.UserRole)
+        if entry and os.path.exists(entry["path"]):
+            self.selected_path = entry["path"]
+            self.accept()
+
+    def _on_item_double_clicked(self, item: QListWidgetItem):
+        if not item:
+            return
+        entry = item.data(Qt.UserRole)
+        if not entry:
+            return
+        if self.picker_mode:
+            self._on_select_current_image()
+        else:
+            self._on_open_coord_picker()
+
+    def get_selected_image_path(self) -> Optional[str]:
+        return self.selected_path
+
