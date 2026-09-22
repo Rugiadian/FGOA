@@ -7,7 +7,6 @@ from typing import Optional
 from PyQt5.QtGui import QImage, QPainter, QColor, QPen, QBrush, QFont, QPixmap
 from PyQt5.QtCore import Qt, QRect, QPoint
 from PIL import Image
-from ui.qt_image_utils import qimage_to_pil
 
 
 def create_dummy_canvas_qimage(width: int = 1600, height: int = 900) -> QImage:
@@ -184,6 +183,7 @@ def create_dummy_canvas_pixmap(width: int = 1600, height: int = 900) -> QPixmap:
 
 def create_dummy_canvas_pil(width: int = 1600, height: int = 900) -> Image.Image:
     """Creates dummy canvas as PIL RGBA Image."""
+    from ui.qt_image_utils import qimage_to_pil
     qimg = create_dummy_canvas_qimage(width, height)
     pil_img = qimage_to_pil(qimg)
     if pil_img is None:
