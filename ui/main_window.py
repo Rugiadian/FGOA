@@ -17,19 +17,22 @@ from PyQt5.QtWidgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QToolBar,
     QFileDialog, QMessageBox, QSplitter, QTextEdit, QStatusBar,
-    QFrame, QAbstractItemView, QShortcut
+    QFrame, QAbstractItemView, QShortcut, QDockWidget, QMenu,
+    QAction, QInputDialog, QSizePolicy
 )
 from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence
-from PyQt5.QtCore import Qt, QTimer, QFileSystemWatcher, QProcess
+from PyQt5.QtCore import Qt, QTimer, QFileSystemWatcher, QProcess, QByteArray
 
 from core.models import Project, Scenario, Condition, Action, ColorPoint
 from core.window_manager import WindowManager, WindowInfo
 from core.evaluator import ConditionEvaluator
 from core.runner import WorkflowRunner
+from core.preset_manager import PresetManager
 from ui.theme import get_stylesheet, get_theme_colors
 from ui.window_picker_dialog import WindowPickerDialog
 from ui.inspector_widget import InspectorWidget
 from ui.widgets.color_badge import WarningBadge
+from ui.preset_dialog import SavePresetDialog, PresetManagerDialog
 
 
 CONFIG_FILE = "fgoa_config.json"
@@ -54,6 +57,10 @@ class MainWindow(QMainWindow):
         self.current_project_path: Optional[str] = None
         self.current_theme: str = "light"  # Default to light mode
 
+        self.custom_layouts: Dict[str, str] = {}
+        self.current_layout_name: str = "기본 3열 (Default)"
+        self._saved_dock_state: Optional[str] = None
+
         # Load user settings
         self._load_app_config()
 
@@ -64,6 +71,7 @@ class MainWindow(QMainWindow):
         self._init_sample_project()
 
         self._init_ui()
+        self._init_layout_and_docks()
         self._apply_theme()
         self._refresh_scenario_table()
         self._update_target_label(None)
@@ -96,6 +104,9 @@ class MainWindow(QMainWindow):
                 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
                     self.current_theme = cfg.get("theme", "light")
+                    self.current_layout_name = cfg.get("layout_name", "기본 3열 (Default)")
+                    self.custom_layouts = cfg.get("custom_layouts", {})
+                    self._saved_dock_state = cfg.get("dock_layout_state", None)
                     if hasattr(self.project, "target_client_width"):
                         self.project.target_client_width = cfg.get("last_target_width", 1600)
                         self.project.target_client_height = cfg.get("last_target_height", 900)
@@ -119,7 +130,14 @@ class MainWindow(QMainWindow):
                 "last_target_title": getattr(self.project, "target_window_title", ""),
                 "last_target_width": getattr(self.project, "target_client_width", 1600),
                 "last_target_height": getattr(self.project, "target_client_height", 900),
+                "layout_name": getattr(self, "current_layout_name", "기본 3열 (Default)"),
+                "custom_layouts": getattr(self, "custom_layouts", {}),
             })
+            if hasattr(self, "saveState"):
+                try:
+                    cfg["dock_layout_state"] = self.saveState().toHex().data().decode()
+                except Exception:
+                    pass
             from ui.coordinate_picker_dialog import CoordinatePickerDialog
             last_img = CoordinatePickerDialog.get_last_used_image_path()
             if last_img:
@@ -193,16 +211,21 @@ class MainWindow(QMainWindow):
             self.project.renumber_steps()
 
     def _init_ui(self):
-        central_widget = QWidget()
-        central_widget.setObjectName("central_widget")
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(8, 8, 8, 8)
-        main_layout.setSpacing(6)
+        # 0. Setup Window Docking Features (Unity style)
+        self.setDockNestingEnabled(True)
+        self.setCorner(Qt.TopLeftCorner, Qt.LeftDockWidgetArea)
+        self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)
+        self.setCorner(Qt.TopRightCorner, Qt.RightDockWidgetArea)
+        self.setCorner(Qt.BottomRightCorner, Qt.RightDockWidgetArea)
 
-        # 1. Top Target Window Selector Bar
+        dummy_central = QWidget()
+        dummy_central.setMaximumSize(0, 0)
+        self.setCentralWidget(dummy_central)
+
+        # 1. Top Target Window & Layout Selector Bar
         target_frame = QFrame()
         target_frame.setObjectName("card_frame")
+        target_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         t_layout = QHBoxLayout(target_frame)
         t_layout.setContentsMargins(10, 6, 10, 6)
 
@@ -224,6 +247,22 @@ class MainWindow(QMainWindow):
         btn_gallery.setToolTip("참조 이미지 보관함 및 어느 조건/액션에서 사용 중인지 확인합니다.")
         btn_gallery.clicked.connect(self._on_open_reference_gallery)
         t_layout.addWidget(btn_gallery)
+
+        t_layout.addSpacing(10)
+
+        # Unity-style Dynamic Layout Selector
+        t_layout.addWidget(QLabel("📐 레이아웃:"))
+        self.combo_layout = QComboBox()
+        self.combo_layout.setObjectName("combo_layout")
+        self.combo_layout.setMinimumWidth(135)
+        self.combo_layout.setToolTip("유니티 스타일 유동적 레이아웃 전환 (기본/와이드/세로/탭/인스펙터 전면 등)")
+        self.combo_layout.currentTextChanged.connect(self._on_layout_combo_changed)
+        t_layout.addWidget(self.combo_layout)
+
+        # Unity-style Window/Panels Menu
+        self.btn_panels_menu = QPushButton("🪟 패널 표시 ▼")
+        self.btn_panels_menu.setToolTip("패널(시나리오 목록, 인스펙터, 실행 로그) 표시/숨김 상태 제어")
+        t_layout.addWidget(self.btn_panels_menu)
 
         t_layout.addSpacing(10)
 
@@ -252,15 +291,17 @@ class MainWindow(QMainWindow):
         self._update_theme_toggle_btn()
         t_layout.addWidget(self.btn_theme_toggle)
 
-        main_layout.addWidget(target_frame)
-
-        # 2. Main 3-Pane Horizontal Splitter [Left: Table | Center: Inspector | Right: Log]
-        self.main_h_splitter = QSplitter(Qt.Horizontal)
-        self.main_h_splitter.setObjectName("main_h_splitter")
+        # Top ToolBar
+        self.top_toolbar = QToolBar("Target & Tools", self)
+        self.top_toolbar.setObjectName("TopToolBar")
+        self.top_toolbar.setMovable(False)
+        self.top_toolbar.setFloatable(False)
+        self.top_toolbar.setStyleSheet("border: none; padding: 0px; margin: 2px 4px;")
+        self.top_toolbar.addWidget(target_frame)
+        self.addToolBar(Qt.TopToolBarArea, self.top_toolbar)
 
         # ==========================================
         # Pane 1: Left (Scenario Table & Sequence Toolbar)
-        # Wrap in QFrame#card_frame to eliminate black OS background
         # ==========================================
         left_pane = QFrame()
         left_pane.setObjectName("card_frame")
@@ -312,6 +353,33 @@ class MainWindow(QMainWindow):
         btn_down.clicked.connect(self._on_move_down)
         tb_layout.addWidget(btn_down)
 
+        tb_layout.addSpacing(4)
+
+        # PRESET BUTTON
+        self.btn_preset = QPushButton("📦 프리셋 ▼")
+        self.btn_preset.setObjectName("btn_preset")
+        self.btn_preset.setToolTip("시나리오 프리셋 선택 저장 및 불러오기 (단축키: Ctrl+L / Ctrl+Shift+S)")
+        menu_preset = QMenu(self)
+
+        act_load_preset = menu_preset.addAction("📥 프리셋 불러오기... (Ctrl+L)")
+        act_load_preset.triggered.connect(self._on_open_preset_manager)
+
+        act_save_preset = menu_preset.addAction("💾 선택한 시나리오 프리셋 저장... (Ctrl+Shift+S)")
+        act_save_preset.triggered.connect(self._on_save_preset)
+
+        menu_preset.addSeparator()
+
+        sub_quick = menu_preset.addMenu("⚡ 빠른 기본 프리셋 추가")
+        act_q1 = sub_quick.addAction("[기본] 전투 사이클 템플릿")
+        act_q1.triggered.connect(lambda: self._on_quick_load_preset("preset_battle_cycle"))
+        act_q2 = sub_quick.addAction("[기본] 단순 반복 클릭 및 딜레이")
+        act_q2.triggered.connect(lambda: self._on_quick_load_preset("preset_click_delay"))
+        act_q3 = sub_quick.addAction("[기본] 5회 카운트 루프 블록")
+        act_q3.triggered.connect(lambda: self._on_quick_load_preset("preset_loop_block"))
+
+        self.btn_preset.setMenu(menu_preset)
+        tb_layout.addWidget(self.btn_preset)
+
         tb_layout.addStretch()
 
         btn_save_proj = QPushButton("💾 저장")
@@ -349,11 +417,21 @@ class MainWindow(QMainWindow):
         self.tbl_scenarios.verticalHeader().setDefaultSectionSize(26)
 
         self.tbl_scenarios.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.tbl_scenarios.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tbl_scenarios.setAlternatingRowColors(True)
         self.tbl_scenarios.itemSelectionChanged.connect(self._on_table_selection_changed)
+        self.tbl_scenarios.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tbl_scenarios.customContextMenuRequested.connect(self._on_scenario_context_menu)
         l_layout.addWidget(self.tbl_scenarios, 1)
 
-        self.main_h_splitter.addWidget(left_pane)
+        # Dock 1: Left Pane (Scenarios)
+        self.dock_scenarios = QDockWidget("📜 시나리오 목록 (Hierarchy)", self)
+        self.dock_scenarios.setObjectName("DockScenarios")
+        self.dock_scenarios.setFeatures(
+            QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetClosable
+        )
+        self.dock_scenarios.setWidget(left_pane)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
 
         # ==========================================
         # Pane 2: Center (Unity-Style Always-Open Inspector)
@@ -361,7 +439,15 @@ class MainWindow(QMainWindow):
         self.inspector = InspectorWidget(self)
         self.inspector.sig_scenario_changed.connect(self._on_inspector_scenario_changed)
         self.inspector.sig_log.connect(self._append_log)
-        self.main_h_splitter.addWidget(self.inspector)
+
+        # Dock 2: Center Pane (Inspector)
+        self.dock_inspector = QDockWidget("🔍 인스펙터 (Inspector)", self)
+        self.dock_inspector.setObjectName("DockInspector")
+        self.dock_inspector.setFeatures(
+            QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetClosable
+        )
+        self.dock_inspector.setWidget(self.inspector)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_inspector)
 
         # ==========================================
         # Pane 3: Right (Real-time Log Window & Diagnostics)
@@ -394,19 +480,38 @@ class MainWindow(QMainWindow):
         self.txt_log.setReadOnly(True)
         r_layout.addWidget(self.txt_log, 1)
 
-        self.main_h_splitter.addWidget(right_log_pane)
+        # Dock 3: Right Pane (Log)
+        self.dock_log = QDockWidget("📋 실시간 실행 로그 (Console)", self)
+        self.dock_log.setObjectName("DockLog")
+        self.dock_log.setFeatures(
+            QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetClosable
+        )
+        self.dock_log.setWidget(right_log_pane)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.dock_log)
 
-        # Splitter sizing ratios: Left ~38%, Center ~42%, Right ~20%
-        self.main_h_splitter.setStretchFactor(0, 38)
-        self.main_h_splitter.setStretchFactor(1, 42)
-        self.main_h_splitter.setStretchFactor(2, 20)
-        self.main_h_splitter.setSizes([540, 560, 280])
+        # Panels toggle menu
+        menu_panels = QMenu(self)
+        act_dock_scen = self.dock_scenarios.toggleViewAction()
+        act_dock_scen.setText("📜 시나리오 목록 (Hierarchy)")
+        menu_panels.addAction(act_dock_scen)
 
-        main_layout.addWidget(self.main_h_splitter, 1)
+        act_dock_insp = self.dock_inspector.toggleViewAction()
+        act_dock_insp.setText("🔍 인스펙터 (Inspector)")
+        menu_panels.addAction(act_dock_insp)
+
+        act_dock_log = self.dock_log.toggleViewAction()
+        act_dock_log.setText("📋 실시간 실행 로그 (Console)")
+        menu_panels.addAction(act_dock_log)
+
+        self.btn_panels_menu.setMenu(menu_panels)
+
+        # Compatibility placeholder for legacy splitter
+        self.main_h_splitter = None
 
         # 3. Execution Controller Bottom Bar
         ctrl_frame = QFrame()
         ctrl_frame.setObjectName("card_frame")
+        ctrl_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         c_layout = QHBoxLayout(ctrl_frame)
         c_layout.setContentsMargins(10, 6, 10, 6)
 
@@ -463,7 +568,14 @@ class MainWindow(QMainWindow):
         self.lbl_run_status.setStyleSheet("font-weight: bold; font-size: 10pt;")
         c_layout.addWidget(self.lbl_run_status)
 
-        main_layout.addWidget(ctrl_frame)
+        # Bottom ToolBar
+        self.bottom_toolbar = QToolBar("Execution Controls", self)
+        self.bottom_toolbar.setObjectName("BottomToolBar")
+        self.bottom_toolbar.setMovable(False)
+        self.bottom_toolbar.setFloatable(False)
+        self.bottom_toolbar.setStyleSheet("border: none; padding: 0px; margin: 2px 4px;")
+        self.bottom_toolbar.addWidget(ctrl_frame)
+        self.addToolBar(Qt.BottomToolBarArea, self.bottom_toolbar)
 
         # Status Bar
         self.status_bar = QStatusBar()
@@ -476,6 +588,12 @@ class MainWindow(QMainWindow):
 
         self.sc_f8 = QShortcut(QKeySequence("F8"), self)
         self.sc_f8.activated.connect(self._reload_application)
+
+        self.sc_preset_load = QShortcut(QKeySequence("Ctrl+L"), self)
+        self.sc_preset_load.activated.connect(self._on_open_preset_manager)
+
+        self.sc_preset_save = QShortcut(QKeySequence("Ctrl+Shift+S"), self)
+        self.sc_preset_save.activated.connect(self._on_save_preset)
 
     # ==========================================
     # Code Watcher & Live Reload
@@ -730,6 +848,258 @@ class MainWindow(QMainWindow):
             self.inspector.chk_enabled.blockSignals(True)
             self.inspector.chk_enabled.setChecked(scenario.enabled)
             self.inspector.chk_enabled.blockSignals(False)
+
+    # ==========================================
+    # Unity-Style Dynamic Layout Management
+    # ==========================================
+    def _init_layout_and_docks(self):
+        """Initializes dock arrangement from saved state or default preset."""
+        self._refresh_layout_combo()
+        if getattr(self, "_saved_dock_state", None):
+            try:
+                success = self.restoreState(QByteArray.fromHex(self._saved_dock_state.encode()))
+                if success:
+                    return
+            except Exception:
+                pass
+        self.apply_layout(getattr(self, "current_layout_name", "기본 3열 (Default)"), save_current=False)
+
+    def _refresh_layout_combo(self, select_name: Optional[str] = None):
+        """Populates the layout switcher dropdown with built-ins and custom layouts."""
+        if not hasattr(self, "combo_layout"):
+            return
+        self.combo_layout.blockSignals(True)
+        self.combo_layout.clear()
+
+        builtins = [
+            "기본 3열 (Default)",
+            "와이드 (하단 콘솔)",
+            "세로 분할 (Tall)",
+            "2 by 3 (Unity 스타일)",
+            "탭 묶음 (Tabbed)",
+            "인스펙터 전면 (Inspector Focus)"
+        ]
+        for b in builtins:
+            self.combo_layout.addItem(b)
+
+        # Custom layouts if any
+        if hasattr(self, "custom_layouts") and self.custom_layouts:
+            self.combo_layout.insertSeparator(self.combo_layout.count())
+            for c_name in sorted(self.custom_layouts.keys()):
+                self.combo_layout.addItem(f"⭐ {c_name}")
+
+        self.combo_layout.insertSeparator(self.combo_layout.count())
+        self.combo_layout.addItem("💾 현재 레이아웃 저장...")
+        self.combo_layout.addItem("🔄 기본 레이아웃으로 초기화")
+
+        target = select_name or getattr(self, "current_layout_name", "기본 3열 (Default)")
+        idx = self.combo_layout.findText(target)
+        if idx >= 0:
+            self.combo_layout.setCurrentIndex(idx)
+        else:
+            self.combo_layout.setCurrentIndex(0)
+        self.combo_layout.blockSignals(False)
+
+    def _on_layout_combo_changed(self, text: str):
+        if not text:
+            return
+        if text == "💾 현재 레이아웃 저장...":
+            self._on_save_custom_layout()
+        elif text == "🔄 기본 레이아웃으로 초기화":
+            self._on_reset_layout()
+        elif text.startswith("───"):
+            idx = self.combo_layout.findText(self.current_layout_name)
+            if idx >= 0:
+                self.combo_layout.blockSignals(True)
+                self.combo_layout.setCurrentIndex(idx)
+                self.combo_layout.blockSignals(False)
+        else:
+            self.apply_layout(text)
+
+    def apply_layout(self, layout_name: str, save_current: bool = True):
+        """Applies requested dock layout preset with Unity-like docking behavior."""
+        self.current_layout_name = layout_name
+        if hasattr(self, "combo_layout"):
+            self.combo_layout.blockSignals(True)
+            idx = self.combo_layout.findText(layout_name)
+            if idx >= 0:
+                self.combo_layout.setCurrentIndex(idx)
+            self.combo_layout.blockSignals(False)
+
+        # Custom layout check
+        pure_name = layout_name.replace("⭐ ", "")
+        if hasattr(self, "custom_layouts") and pure_name in self.custom_layouts:
+            try:
+                hex_data = self.custom_layouts[pure_name]
+                self.restoreState(QByteArray.fromHex(hex_data.encode()))
+                self.status_bar.showMessage(f"📐 사용자 레이아웃 '{pure_name}'이(가) 적용되었습니다.", 3000)
+                return
+            except Exception:
+                pass
+
+        # Ensure all docks are unfloated and shown
+        for dock in (self.dock_scenarios, self.dock_inspector, self.dock_log):
+            dock.setFloating(False)
+            dock.show()
+
+        if layout_name == "기본 3열 (Default)":
+            self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
+            self.splitDockWidget(self.dock_scenarios, self.dock_inspector, Qt.Horizontal)
+            self.splitDockWidget(self.dock_inspector, self.dock_log, Qt.Horizontal)
+            self.resizeDocks([self.dock_scenarios, self.dock_inspector, self.dock_log], [480, 560, 280], Qt.Horizontal)
+
+        elif layout_name == "와이드 (하단 콘솔)":
+            self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
+            self.splitDockWidget(self.dock_scenarios, self.dock_inspector, Qt.Horizontal)
+            self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_log)
+            self.resizeDocks([self.dock_scenarios, self.dock_inspector], [500, 700], Qt.Horizontal)
+            self.resizeDocks([self.dock_scenarios, self.dock_log], [550, 200], Qt.Vertical)
+
+        elif layout_name in ("세로 분할 (Tall)", "2 by 3 (Unity 스타일)"):
+            self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
+            self.splitDockWidget(self.dock_scenarios, self.dock_log, Qt.Vertical)
+            self.addDockWidget(Qt.RightDockWidgetArea, self.dock_inspector)
+            self.resizeDocks([self.dock_scenarios, self.dock_inspector], [450, 750], Qt.Horizontal)
+            self.resizeDocks([self.dock_scenarios, self.dock_log], [500, 280], Qt.Vertical)
+
+        elif layout_name == "탭 묶음 (Tabbed)":
+            self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
+            self.addDockWidget(Qt.RightDockWidgetArea, self.dock_inspector)
+            self.tabifyDockWidget(self.dock_inspector, self.dock_log)
+            self.dock_inspector.raise_()
+            self.resizeDocks([self.dock_scenarios, self.dock_inspector], [450, 750], Qt.Horizontal)
+
+        elif layout_name == "인스펙터 전면 (Inspector Focus)":
+            self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
+            self.addDockWidget(Qt.RightDockWidgetArea, self.dock_inspector)
+            self.tabifyDockWidget(self.dock_inspector, self.dock_log)
+            self.dock_inspector.raise_()
+            self.resizeDocks([self.dock_scenarios, self.dock_inspector], [320, 950], Qt.Horizontal)
+
+        self.status_bar.showMessage(f"📐 레이아웃이 '{layout_name}'(으)로 변경되었습니다.", 3000)
+
+    def _on_save_custom_layout(self):
+        """Saves current dock arrangement as a custom layout."""
+        name, ok = QInputDialog.getText(
+            self, "레이아웃 저장", "현재 패널 배치를 저장할 레이아웃 이름을 입력하세요:"
+        )
+        if ok and name.strip():
+            clean_name = name.strip()
+            state_hex = self.saveState().toHex().data().decode()
+            if not hasattr(self, "custom_layouts"):
+                self.custom_layouts = {}
+            self.custom_layouts[clean_name] = state_hex
+            self._refresh_layout_combo(f"⭐ {clean_name}")
+            self.status_bar.showMessage(f"💾 사용자 레이아웃 '{clean_name}'이(가) 저장되었습니다.", 4000)
+
+    def _on_reset_layout(self):
+        """Resets layout to Default 3-column configuration."""
+        self.apply_layout("기본 3열 (Default)")
+        self.status_bar.showMessage("🔄 레이아웃이 기본 3열 배치로 초기화되었습니다.", 3000)
+
+    # ==========================================
+    # Scenario Preset Handlers
+    # ==========================================
+    def _on_save_preset(self):
+        """Saves selected scenario(s) in table as a reusable preset."""
+        selected_rows = [r.row() for r in self.tbl_scenarios.selectionModel().selectedRows()]
+        if not selected_rows:
+            curr = self.tbl_scenarios.currentRow()
+            if 0 <= curr < len(self.project.scenarios):
+                selected_rows = [curr]
+
+        if not selected_rows:
+            QMessageBox.warning(self, "선택 필요", "프리셋으로 저장할 시나리오를 1개 이상 선택해주세요.")
+            return
+
+        selected_scens = [
+            self.project.scenarios[r]
+            for r in sorted(selected_rows)
+            if 0 <= r < len(self.project.scenarios)
+        ]
+
+        dlg = SavePresetDialog(selected_scens, parent=self)
+        if dlg.exec_() == QDialog.Accepted and dlg.saved_filepath:
+            self.status_bar.showMessage(f"💾 프리셋이 저장되었습니다: {os.path.basename(dlg.saved_filepath)}", 5000)
+
+    def _on_open_preset_manager(self):
+        """Opens preset manager dialog to browse, export, import, and load presets."""
+        curr_row = self.tbl_scenarios.currentRow()
+        dlg = PresetManagerDialog(current_selection_index=curr_row, parent=self)
+        dlg.sig_scenarios_imported.connect(self._apply_imported_scenarios)
+        dlg.exec_()
+
+    def _on_quick_load_preset(self, preset_id: str):
+        """Quick loads a starter preset by ID into the scenario sequence."""
+        presets = PresetManager.list_presets()
+        target_preset = None
+        for p in presets:
+            if p.get("id") == preset_id:
+                target_preset = p
+                break
+
+        if not target_preset:
+            QMessageBox.warning(self, "프리셋 없음", f"프리셋 '{preset_id}'을(를) 찾을 수 없습니다.")
+            return
+
+        scenarios = PresetManager.instantiate_preset_scenarios(target_preset)
+        if not scenarios:
+            return
+
+        curr_row = self.tbl_scenarios.currentRow()
+        mode = "after_selected" if curr_row >= 0 else "append"
+        self._apply_imported_scenarios(scenarios, mode)
+
+    def _apply_imported_scenarios(self, scenarios: List[Scenario], mode: str):
+        """Applies imported scenarios into project with automatic step renumbering."""
+        if not scenarios:
+            return
+
+        if mode == "replace":
+            self.project.scenarios = scenarios
+            insert_idx = 0
+        elif mode == "after_selected":
+            curr_row = self.tbl_scenarios.currentRow()
+            if 0 <= curr_row < len(self.project.scenarios):
+                insert_idx = curr_row + 1
+                self.project.scenarios[insert_idx:insert_idx] = scenarios
+            else:
+                insert_idx = len(self.project.scenarios)
+                self.project.scenarios.extend(scenarios)
+        else:  # "append"
+            insert_idx = len(self.project.scenarios)
+            self.project.scenarios.extend(scenarios)
+
+        self.project.renumber_steps()
+        self._refresh_scenario_table()
+
+        # Select first inserted scenario
+        if 0 <= insert_idx < len(self.project.scenarios):
+            self.tbl_scenarios.selectRow(insert_idx)
+
+        self.status_bar.showMessage(f"✅ 프리셋에서 시나리오 {len(scenarios)}건을 성공적으로 불러왔습니다.", 4000)
+        self._append_log("SUCCESS", f"📦 프리셋 시나리오 {len(scenarios)}건 불러오기 완료 (적용 모드: {mode})")
+
+    def _on_scenario_context_menu(self, pos):
+        """Right-click context menu for scenario table rows."""
+        menu = QMenu(self)
+        act_save_preset = menu.addAction("💾 선택한 시나리오 프리셋 저장...")
+        act_save_preset.triggered.connect(self._on_save_preset)
+        act_load_preset = menu.addAction("📥 프리셋 보관함에서 불러오기...")
+        act_load_preset.triggered.connect(self._on_open_preset_manager)
+        menu.addSeparator()
+        act_add = menu.addAction("➕ 새 시나리오 추가")
+        act_add.triggered.connect(self._on_add_scenario)
+        act_dup = menu.addAction("📋 시나리오 복제")
+        act_dup.triggered.connect(self._on_duplicate_scenario)
+        act_del = menu.addAction("🗑️ 시나리오 삭제")
+        act_del.triggered.connect(self._on_delete_scenario)
+        menu.addSeparator()
+        act_up = menu.addAction("⬆️ 위로 이동")
+        act_up.triggered.connect(self._on_move_up)
+        act_dn = menu.addAction("⬇️ 아래로 이동")
+        act_dn.triggered.connect(self._on_move_down)
+        menu.exec_(self.tbl_scenarios.viewport().mapToGlobal(pos))
 
     # ==========================================
     # Toolbar Actions
@@ -996,8 +1366,14 @@ class MainWindow(QMainWindow):
             "USER": pal["log_user"]
         }
         color = color_map.get(level, pal["text_primary"])
-        prefix_color = "#64748b" if pal["is_light"] else "#8da4c4"
-        html = f"<span style='color: {prefix_color};'>[{level}]</span> <span style='color: {color};'>{msg}</span>"
+        if level == "USER":
+            # Distinctive user log styling with fuchsia/pink accent and bold text
+            prefix_html = f"<span style='color: {color}; font-weight: bold;'>[사용자 로그]</span>"
+            msg_html = f"<span style='color: {color}; font-weight: bold;'>{msg}</span>"
+            html = f"{prefix_html} {msg_html}"
+        else:
+            prefix_color = "#64748b" if pal["is_light"] else "#8da4c4"
+            html = f"<span style='color: {prefix_color};'>[{level}]</span> <span style='color: {color};'>{msg}</span>"
         self.txt_log.append(html)
         if self.chk_autoscroll.isChecked():
             sb = self.txt_log.verticalScrollBar()

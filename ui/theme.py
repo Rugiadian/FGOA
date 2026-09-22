@@ -345,6 +345,69 @@ QSplitter::handle:vertical {{
 QSplitter::handle:vertical:hover {{
     background-color: #94a3b8;
 }}
+
+QDockWidget {{
+    background-color: #f1f5f9;
+    color: #1e293b;
+    font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+    font-size: 9.5pt;
+}}
+
+QDockWidget::title {{
+    text-align: left;
+    background-color: #e2e8f0;
+    color: #1e293b;
+    padding: 6px 10px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    border-bottom: 1px solid #cbd5e1;
+    font-weight: bold;
+}}
+
+QDockWidget::close-button, QDockWidget::float-button {{
+    border: none;
+    background: transparent;
+    padding: 2px;
+}}
+
+QDockWidget::close-button:hover, QDockWidget::float-button:hover {{
+    background-color: #cbd5e1;
+    border-radius: 3px;
+}}
+
+QTabBar::tab {{
+    background-color: #e2e8f0;
+    color: #475569;
+    padding: 6px 14px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    border: 1px solid #cbd5e1;
+    border-bottom: none;
+    margin-right: 2px;
+    font-weight: 500;
+}}
+
+QTabBar::tab:selected {{
+    background-color: #ffffff;
+    color: #2563eb;
+    font-weight: bold;
+    border-bottom: 2px solid #2563eb;
+}}
+
+QTabBar::tab:hover:!selected {{
+    background-color: #f8fafc;
+    color: #1e293b;
+}}
+
+QMainWindow::separator {{
+    background-color: #e2e8f0;
+    width: 6px;
+    height: 6px;
+}}
+
+QMainWindow::separator:hover {{
+    background-color: #3b82f6;
+}}
 """
 
 DARK_STYLESHEET = f"""
@@ -682,6 +745,69 @@ QSplitter::handle:vertical {{
 QSplitter::handle:vertical:hover {{
     background-color: #3d3d4d;
 }}
+
+QDockWidget {{
+    background-color: #1a1a20;
+    color: #e0e0e6;
+    font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+    font-size: 9.5pt;
+}}
+
+QDockWidget::title {{
+    text-align: left;
+    background-color: #262633;
+    color: #f0f0f5;
+    padding: 6px 10px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    border-bottom: 1px solid #363644;
+    font-weight: bold;
+}}
+
+QDockWidget::close-button, QDockWidget::float-button {{
+    border: none;
+    background: transparent;
+    padding: 2px;
+}}
+
+QDockWidget::close-button:hover, QDockWidget::float-button:hover {{
+    background-color: #383848;
+    border-radius: 3px;
+}}
+
+QTabBar::tab {{
+    background-color: #23232e;
+    color: #94a3b8;
+    padding: 6px 14px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    border: 1px solid #363644;
+    border-bottom: none;
+    margin-right: 2px;
+    font-weight: 500;
+}}
+
+QTabBar::tab:selected {{
+    background-color: #2d2d3c;
+    color: #60a5fa;
+    font-weight: bold;
+    border-bottom: 2px solid #60a5fa;
+}}
+
+QTabBar::tab:hover:!selected {{
+    background-color: #292936;
+    color: #e0e0e6;
+}}
+
+QMainWindow::separator {{
+    background-color: #363644;
+    width: 6px;
+    height: 6px;
+}}
+
+QMainWindow::separator:hover {{
+    background-color: #60a5fa;
+}}
 """
 
 
@@ -713,5 +839,5 @@ def get_theme_colors(theme: str) -> dict:
         "log_success": "#15803d" if is_light else "#a5d6a7",
         "log_warn": "#b45309" if is_light else "#ffe082",
         "log_error": "#b91c1c" if is_light else "#ef9a9a",
-        "log_user": "#0f766e" if is_light else "#80deea"
+        "log_user": "#c026d3" if is_light else "#f472b6"
     }

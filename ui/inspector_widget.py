@@ -6,6 +6,7 @@ Divided vertically into:
   - Lower Pane: Action Sequences (Hand)
 Supports independent condition/action combining and compact high-density layout.
 """
+import os
 from typing import Optional, List
 import copy
 import time
@@ -17,7 +18,7 @@ from PyQt5.QtWidgets import (
     QScrollArea, QFrame, QMessageBox, QStackedWidget, QSplitter,
     QMenu, QApplication
 )
-from PyQt5.QtGui import QColor, QFont
+from PyQt5.QtGui import QColor, QFont, QPixmap
 from PyQt5.QtCore import Qt, pyqtSignal
 
 from core.models import Scenario, Project, Condition, ColorPoint, Action
@@ -27,6 +28,50 @@ from core.evaluator import ConditionEvaluator
 from ui.widgets.color_badge import ColorChipWidget
 from ui.condition_editor_dialog import ConditionEditorDialog
 from ui.action_editor_dialog import SingleActionDialog
+
+
+class ClickableThumbnailLabel(QLabel):
+    """
+    Compact clickable 50px thumbnail widget for reference images.
+    Preserves aspect ratio and scales smoothly to width 50px.
+    """
+    clicked = pyqtSignal()
+
+    def __init__(self, border_color: str = "#3b82f6", tooltip: str = "", parent=None):
+        super().__init__(parent)
+        self.border_color = border_color
+        self.setFixedWidth(50)
+        self.setFixedHeight(30)
+        self.setAlignment(Qt.AlignCenter)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(tooltip)
+        self.setStyleSheet(
+            f"QLabel {{ border: 1.5px solid {self.border_color}; border-radius: 4px; background-color: #0f172a; }} "
+            f"QLabel:hover {{ border: 2px solid #60a5fa; background-color: #1e293b; }}"
+        )
+        self.image_path: Optional[str] = None
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def set_image(self, path: Optional[str]) -> bool:
+        """Sets and scales reference image to width 50px."""
+        self.image_path = path
+        if path and os.path.isfile(path):
+            pix = QPixmap(path)
+            if not pix.isNull():
+                # Scale width strictly to 50px, keep aspect ratio
+                scaled = pix.scaledToWidth(50, Qt.SmoothTransformation)
+                if scaled.height() > 32:
+                    scaled = scaled.scaled(50, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.setPixmap(scaled)
+                self.show()
+                return True
+        self.clear()
+        self.hide()
+        return False
 
 
 class InspectorWidget(QWidget):
@@ -69,11 +114,37 @@ class InspectorWidget(QWidget):
         self.pane_header = QFrame()
         self.pane_header.setObjectName("card_frame")
         ph_layout = QHBoxLayout(self.pane_header)
-        ph_layout.setContentsMargins(8, 6, 8, 6)
-        lbl_inspector_title = QLabel("🔍 시나리오 인스펙터 (Inspector)")
+        ph_layout.setContentsMargins(8, 5, 8, 5)
+        ph_layout.setSpacing(8)
+        lbl_inspector_title = QLabel("🔍 시나리오 인스펙터")
         lbl_inspector_title.setStyleSheet("font-weight: bold; font-size: 9.5pt;")
         ph_layout.addWidget(lbl_inspector_title)
+
+        # 50px Reference Thumbnail Container (Eye / Hand reference images)
+        self.ref_thumb_container = QWidget()
+        ref_layout = QHBoxLayout(self.ref_thumb_container)
+        ref_layout.setContentsMargins(0, 0, 0, 0)
+        ref_layout.setSpacing(6)
+
+        self.lbl_thumb_cond = ClickableThumbnailLabel(
+            border_color="#3b82f6",
+            tooltip="👁️ 인식 조건 레퍼런스 이미지 (가로 50px)\n클릭 시 조건 편집기(캔버스) 열기"
+        )
+        self.lbl_thumb_cond.clicked.connect(self._on_open_canvas_editor)
+
+        self.lbl_thumb_act = ClickableThumbnailLabel(
+            border_color="#10b981",
+            tooltip="🎯 액션 조건 레퍼런스 이미지 (가로 50px)\n클릭 시 액션 좌표 지정창 열기"
+        )
+        self.lbl_thumb_act.clicked.connect(self._on_pick_coord_for_selected_action)
+
+        ref_layout.addWidget(self.lbl_thumb_cond)
+        ref_layout.addWidget(self.lbl_thumb_act)
+        self.ref_thumb_container.hide()
+
         ph_layout.addStretch()
+        ph_layout.addWidget(self.ref_thumb_container)
+
         self.lbl_inspector_status = QLabel("시나리오 설정")
         self.lbl_inspector_status.setStyleSheet("color: #64748b; font-size: 8.5pt;")
         ph_layout.addWidget(self.lbl_inspector_status)
@@ -593,7 +664,7 @@ class InspectorWidget(QWidget):
     def set_target_hwnd(self, hwnd: int):
         self.target_hwnd = hwnd
 
-    def set_scenario(self, scenario: Optional[Scenario], target_hwnd: int, project: Project):
+    def set_scenario(self, scenario: Optional[Scenario], target_hwnd: int = 0, project: Optional[Project] = None):
         """Bind and display a scenario in the inspector."""
         self.current_scenario = scenario
         self.target_hwnd = target_hwnd
@@ -675,8 +746,52 @@ class InspectorWidget(QWidget):
             self.chk_action_log.blockSignals(False)
             self.txt_action_log.blockSignals(False)
 
+            # 6. Update 50px Reference Thumbnails at top
+            self._update_reference_thumbnails()
+
         finally:
             self._is_loading = False
+
+    def _update_reference_thumbnails(self):
+        """
+        Updates the 50px reference image thumbnails at the top of the inspector.
+        Displays reference image used for color condition detection (Eye) and
+        action sequence coordinate picking (Hand) with 50px width.
+        """
+        if not self.current_scenario:
+            self.ref_thumb_container.hide()
+            return
+
+        cond_path = None
+        if self.current_scenario.condition and getattr(self.current_scenario.condition, "reference_image_path", None):
+            cond_path = self.current_scenario.condition.reference_image_path
+
+        act_path = getattr(self.current_scenario, "last_action_image_path", None)
+        if not act_path and self.current_scenario.actions:
+            for act in self.current_scenario.actions:
+                if getattr(act, "reference_image_path", None):
+                    act_path = act.reference_image_path
+                    break
+
+        has_cond = self.lbl_thumb_cond.set_image(cond_path)
+        has_act = self.lbl_thumb_act.set_image(act_path)
+
+        if has_cond and cond_path:
+            fname = os.path.basename(cond_path)
+            self.lbl_thumb_cond.setToolTip(
+                f"👁️ 인식 조건 레퍼런스 (가로 50px)\n클릭 시 조건/색상 편집기 열기\n파일: {fname}"
+            )
+
+        if has_act and act_path:
+            fname = os.path.basename(act_path)
+            self.lbl_thumb_act.setToolTip(
+                f"🎯 액션 좌표 지정 레퍼런스 (가로 50px)\n클릭 시 액션 좌표 지정 작업창 열기\n파일: {fname}"
+            )
+
+        if has_cond or has_act:
+            self.ref_thumb_container.show()
+        else:
+            self.ref_thumb_container.hide()
 
     def _on_action_log_toggled(self, checked: bool):
         self.txt_action_log.setEnabled(checked)
@@ -863,6 +978,7 @@ class InspectorWidget(QWidget):
         if hasattr(self, "spin_loop_cnt"):
             self.current_scenario.loop_count = self.spin_loop_cnt.value()
 
+        self._update_reference_thumbnails()
         self.sig_scenario_changed.emit(self.current_scenario)
 
     def _on_node_type_changed(self):
@@ -984,6 +1100,7 @@ class InspectorWidget(QWidget):
             if dlg.exec_() == ConditionEditorDialog.Accepted:
                 self.current_scenario.condition = dlg.get_condition()
                 self._refresh_points_table()
+                self._update_reference_thumbnails()
                 self._on_field_changed()
         except Exception as e:
             self.sig_log.emit("ERROR", f"캔버스 편집기 실행 오류: {e}")
