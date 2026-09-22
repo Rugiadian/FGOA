@@ -70,6 +70,11 @@ class MainWindow(QMainWindow):
         self._start_target_monitor_timer()
         self._init_code_watcher()
 
+        # Check if previous crash log exists
+        from core.logger import CRASH_LOG_PATH
+        if os.path.exists(CRASH_LOG_PATH) and os.path.getsize(CRASH_LOG_PATH) > 0:
+            self.status_bar.showMessage("⚠️ 이전 크래시 로그가 기록되어 있습니다. 상단 [📋 에러 로그] 버튼으로 확인하세요.", 8000)
+
         # Initial selection to first scenario
         if self.project.scenarios:
             self.tbl_scenarios.selectRow(0)
@@ -213,7 +218,7 @@ class MainWindow(QMainWindow):
 
         # Hot Reload Controls
         self.chk_hot_reload = QCheckBox("코드 자동 리로드")
-        self.chk_hot_reload.setChecked(True)
+        self.chk_hot_reload.setChecked(False)
         self.chk_hot_reload.setToolTip("코드(.py) 파일 수정 저장 시 프로그램을 즉시 자동 재시작합니다.")
         t_layout.addWidget(self.chk_hot_reload)
 
@@ -221,6 +226,11 @@ class MainWindow(QMainWindow):
         btn_reload.setToolTip("프로그램을 즉시 리로드합니다. (단축키: Ctrl+R / F8)")
         btn_reload.clicked.connect(self._reload_application)
         t_layout.addWidget(btn_reload)
+
+        btn_error_log = QPushButton("📋 에러 로그")
+        btn_error_log.setToolTip("오류 발생 기록(fgoa_crash.log)을 텍스트 편집기로 엽니다.")
+        btn_error_log.clicked.connect(self._on_open_crash_log)
+        t_layout.addWidget(btn_error_log)
 
         t_layout.addSpacing(10)
 
@@ -455,24 +465,32 @@ class MainWindow(QMainWindow):
         """Watches python source files for changes to support editing code while app runs."""
         self.code_watcher = QFileSystemWatcher(self)
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        watch_dirs = [base_dir, os.path.join(base_dir, "ui"), os.path.join(base_dir, "core")]
-        for d in watch_dirs:
-            if os.path.isdir(d):
-                self.code_watcher.addPath(d)
-                for fname in os.listdir(d):
+
+        main_py = os.path.join(base_dir, "main.py")
+        if os.path.exists(main_py):
+            self.code_watcher.addPath(main_py)
+
+        for sub in ("ui", "core"):
+            sub_dir = os.path.join(base_dir, sub)
+            if os.path.isdir(sub_dir):
+                for fname in os.listdir(sub_dir):
                     if fname.endswith(".py"):
-                        self.code_watcher.addPath(os.path.join(d, fname))
+                        self.code_watcher.addPath(os.path.join(sub_dir, fname))
 
         self.reload_timer = QTimer(self)
         self.reload_timer.setSingleShot(True)
-        self.reload_timer.setInterval(400)  # 400ms debounce
+        self.reload_timer.setInterval(600)  # 600ms debounce
         self.reload_timer.timeout.connect(self._on_code_changed_timeout)
 
         self.code_watcher.fileChanged.connect(self._on_code_file_changed)
-        self.code_watcher.directoryChanged.connect(self._on_code_file_changed)
 
     def _on_code_file_changed(self, path: str):
+        if not path.endswith(".py"):
+            return
         if getattr(self, "chk_hot_reload", None) and self.chk_hot_reload.isChecked():
+            # Re-add path in case file was replaced atomically by editor
+            if os.path.exists(path) and path not in self.code_watcher.files():
+                self.code_watcher.addPath(path)
             self.reload_timer.start()
 
     def _on_code_changed_timeout(self):
@@ -492,6 +510,10 @@ class MainWindow(QMainWindow):
         # Launch detached new process
         QProcess.startDetached(sys.executable, sys.argv)
         self.close()
+
+    def _on_open_crash_log(self):
+        from core.logger import open_log_file
+        open_log_file()
 
     # ==========================================
     # Theme Support

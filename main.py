@@ -13,6 +13,7 @@ sys.dont_write_bytecode = True
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPalette, QColor
+from core.logger import install_crash_handler
 from ui.main_window import MainWindow
 
 
@@ -33,6 +34,9 @@ def configure_high_dpi():
 
 
 def main():
+    # Install crash exception hook and rotating debug logging
+    install_crash_handler()
+
     from core.window_manager import WindowManager
     WindowManager.ensure_input_desktop()
 
