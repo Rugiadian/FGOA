@@ -6,9 +6,16 @@ Integration and regression tests for new features:
 4. Reference Gallery & Usage Detection
 5. Scenario List Hierarchy Formatting
 """
+import os
+import sys
 import unittest
 import time
 from unittest.mock import MagicMock, patch
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
 from core.models import Project, Scenario, Condition, ColorPoint, Action
 from core.runner import WorkflowRunner
 from core.recorder import ActionRecorder

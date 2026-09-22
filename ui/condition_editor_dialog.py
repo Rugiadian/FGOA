@@ -503,7 +503,15 @@ class ConditionEditorDialog(QDialog):
         # Save to temporary reference image in user's temp or project dir
         save_dir = os.path.join(os.path.expanduser("~"), ".fgoa_refs")
         os.makedirs(save_dir, exist_ok=True)
-        ref_path = os.path.join(save_dir, f"capture_{self.current_scenario_id}.png")
+        import datetime
+        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        fname = f"capture_{now_str}.png"
+        ref_path = os.path.join(save_dir, fname)
+        if os.path.exists(ref_path):
+            idx = 1
+            while os.path.exists(os.path.join(save_dir, f"capture_{now_str}_{idx}.png")):
+                idx += 1
+            ref_path = os.path.join(save_dir, f"capture_{now_str}_{idx}.png")
         pil_img.save(ref_path)
 
         self.condition.reference_image_path = ref_path
@@ -520,7 +528,9 @@ class ConditionEditorDialog(QDialog):
 
         save_dir = os.path.join(os.path.expanduser("~"), ".fgoa_refs")
         os.makedirs(save_dir, exist_ok=True)
-        ref_path = os.path.join(save_dir, f"clip_{self.current_scenario_id}.png")
+        import datetime
+        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        ref_path = os.path.join(save_dir, f"clip_{now_str}.png")
         pix.save(ref_path, "PNG")
 
         self.condition.reference_image_path = ref_path

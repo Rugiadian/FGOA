@@ -130,6 +130,14 @@ class ScenarioEditorDialog(QDialog):
         delay_layout.addStretch()
         layout.addLayout(delay_layout)
 
+        # Action Custom Log
+        log_layout = QHBoxLayout()
+        log_layout.addWidget(QLabel("액션 실행 시 로그 출력:"))
+        self.txt_custom_log = QLineEdit()
+        self.txt_custom_log.setPlaceholderText("원하는 로그 문장을 입력하세요 (선택 사항)")
+        log_layout.addWidget(self.txt_custom_log)
+        layout.addLayout(log_layout)
+
         # Bottom Buttons
         bottom_bar = QHBoxLayout()
         bottom_bar.addStretch()
@@ -175,6 +183,7 @@ class ScenarioEditorDialog(QDialog):
         self.spin_retries.setValue(self.scenario.retry_max_count)
         self.spin_retry_sec.setValue(self.scenario.retry_interval_sec)
         self.spin_post_delay.setValue(self.scenario.post_delay_seconds)
+        self.txt_custom_log.setText(getattr(self.scenario, "custom_log", ""))
 
         self._update_summaries()
         self._on_branch_mode_changed()
@@ -202,9 +211,14 @@ class ScenarioEditorDialog(QDialog):
             self._update_summaries()
 
     def _on_edit_actions(self):
+        ref_path = getattr(self.scenario, "last_action_image_path", None) or (
+            self.scenario.condition.reference_image_path if self.scenario.condition else None
+        )
         dlg = ActionEditorDialog(
             actions=self.scenario.actions,
             target_hwnd=self.target_hwnd,
+            reference_image_path=ref_path,
+            scenario=self.scenario,
             parent=self
         )
         if dlg.exec_() == QDialog.Accepted:
@@ -221,4 +235,5 @@ class ScenarioEditorDialog(QDialog):
         self.scenario.retry_max_count = self.spin_retries.value()
         self.scenario.retry_interval_sec = self.spin_retry_sec.value()
         self.scenario.post_delay_seconds = self.spin_post_delay.value()
+        self.scenario.custom_log = self.txt_custom_log.text().strip()
         self.accept()

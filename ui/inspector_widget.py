@@ -481,6 +481,10 @@ class InspectorWidget(QWidget):
         btn_add_delay.clicked.connect(lambda: self._on_quick_add_action("delay"))
         add_bar_row1.addWidget(btn_add_delay)
 
+        btn_add_log = QPushButton("💬+로그")
+        btn_add_log.clicked.connect(lambda: self._on_quick_add_action("log_message"))
+        add_bar_row1.addWidget(btn_add_log)
+
         add_bar_row1.addStretch()
         layout.addLayout(add_bar_row1)
 
@@ -567,6 +571,20 @@ class InspectorWidget(QWidget):
         act_ctrl_row2.addStretch()
         layout.addLayout(act_ctrl_row2)
 
+        # Row 3: Action Custom Log Option
+        log_bar = QHBoxLayout()
+        log_bar.setSpacing(6)
+        self.chk_action_log = QCheckBox("액션 실행 시 로그 출력:")
+        self.chk_action_log.setToolTip("이 시나리오의 액션들이 실행될 때 로그 창에 원하는 문장을 출력합니다.")
+        self.txt_action_log = QLineEdit()
+        self.txt_action_log.setPlaceholderText("원하는 로그 문장을 입력하세요 (예: 1라운드 스킬 발동 완료)")
+        self.txt_action_log.setEnabled(False)
+        self.chk_action_log.toggled.connect(self._on_action_log_toggled)
+        self.txt_action_log.textChanged.connect(self._on_action_log_text_changed)
+        log_bar.addWidget(self.chk_action_log)
+        log_bar.addWidget(self.txt_action_log, 1)
+        layout.addLayout(log_bar)
+
         return grp
 
     # ==========================================
@@ -647,8 +665,29 @@ class InspectorWidget(QWidget):
             # 4. Actions
             self._refresh_actions_table()
 
+            # 5. Action Custom Log
+            custom_log = getattr(scenario, "custom_log", "")
+            self.chk_action_log.blockSignals(True)
+            self.txt_action_log.blockSignals(True)
+            self.chk_action_log.setChecked(bool(custom_log))
+            self.txt_action_log.setText(custom_log)
+            self.txt_action_log.setEnabled(bool(custom_log))
+            self.chk_action_log.blockSignals(False)
+            self.txt_action_log.blockSignals(False)
+
         finally:
             self._is_loading = False
+
+    def _on_action_log_toggled(self, checked: bool):
+        self.txt_action_log.setEnabled(checked)
+        if not self._is_loading and self.current_scenario:
+            self.current_scenario.custom_log = self.txt_action_log.text().strip() if checked else ""
+            self._on_field_changed()
+
+    def _on_action_log_text_changed(self, text: str):
+        if not self._is_loading and self.current_scenario:
+            self.current_scenario.custom_log = text.strip() if self.chk_action_log.isChecked() else ""
+            self._on_field_changed()
 
     def _populate_jump_combos(self):
         for combo in [self.combo_jump_match, self.combo_jump_mismatch]:
@@ -1048,6 +1087,9 @@ class InspectorWidget(QWidget):
             act.delay_seconds = 0.5
         elif action_type == "delay":
             act.delay_seconds = 2.0
+        elif action_type == "log_message":
+            act.log_text = "액션 실행 완료"
+            act.delay_seconds = 0.2
 
         self.current_scenario.actions.append(act)
         self._refresh_actions_table()
@@ -1063,15 +1105,22 @@ class InspectorWidget(QWidget):
         row = rows[0].row()
         act = self.current_scenario.actions[row]
 
-        ref_path = self.current_scenario.condition.reference_image_path if self.current_scenario.condition else None
+        from ui.coordinate_picker_dialog import CoordinatePickerDialog
+        cond_ref = self.current_scenario.condition.reference_image_path if (self.current_scenario and self.current_scenario.condition) else None
+        last_action_img = getattr(self.current_scenario, "last_action_image_path", None) if self.current_scenario else None
+        ref_path = last_action_img or cond_ref or CoordinatePickerDialog.get_last_used_image_path()
         dlg = SingleActionDialog(
             action=act,
             target_hwnd=self.target_hwnd,
             reference_image_path=ref_path,
+            scenario=self.current_scenario,
             parent=self
         )
         if dlg.exec_() == SingleActionDialog.Accepted:
             self.current_scenario.actions[row] = dlg.get_action()
+            if hasattr(dlg, "reference_image_path") and dlg.reference_image_path:
+                self.current_scenario.last_action_image_path = dlg.reference_image_path
+                CoordinatePickerDialog.set_last_used_image_path(dlg.reference_image_path)
             self._refresh_actions_table()
             self.tbl_actions.selectRow(row)
             self._on_field_changed()
@@ -1100,7 +1149,9 @@ class InspectorWidget(QWidget):
         act = self.current_scenario.actions[row] if (self.current_scenario.actions and 0 <= row < len(self.current_scenario.actions)) else None
 
         from ui.coordinate_picker_dialog import CoordinatePickerDialog
-        ref_path = self.current_scenario.condition.reference_image_path if self.current_scenario.condition else None
+        cond_ref = self.current_scenario.condition.reference_image_path if (self.current_scenario and self.current_scenario.condition) else None
+        last_action_img = getattr(self.current_scenario, "last_action_image_path", None) if self.current_scenario else None
+        ref_path = last_action_img or cond_ref or CoordinatePickerDialog.get_last_used_image_path()
         dlg = CoordinatePickerDialog(
             image_path=ref_path,
             target_hwnd=self.target_hwnd,
@@ -1111,10 +1162,15 @@ class InspectorWidget(QWidget):
             initial_end_y=act.end_y if (act and act.action_type == "mouse_drag") else 0,
             actions=self.current_scenario.actions,
             selected_action_index=row if act else 0,
+            scenario=self.current_scenario,
+            project=self.project,
             parent=self
         )
         if dlg.exec_() == CoordinatePickerDialog.Accepted:
             self.current_scenario.actions = dlg.get_actions()
+            if dlg.current_image_path:
+                self.current_scenario.last_action_image_path = dlg.current_image_path
+                CoordinatePickerDialog.set_last_used_image_path(dlg.current_image_path)
             self._refresh_actions_table()
             self._on_field_changed()
             self.sig_log.emit("INFO", "🎯 액션 시퀀스 좌표 및 목록이 업데이트되었습니다.")

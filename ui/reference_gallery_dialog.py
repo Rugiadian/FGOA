@@ -335,9 +335,16 @@ class ReferenceGalleryDialog(QDialog):
             QMessageBox.warning(self, "캡처 실패", "타겟 창을 캡처할 수 없습니다.")
             return
 
-        import uuid
-        fname = f"capture_{uuid.uuid4().hex[:8]}.png"
+        import datetime
+        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        fname = f"capture_{now_str}.png"
         save_path = os.path.join(REFS_DIR, fname)
+        if os.path.exists(save_path):
+            idx = 1
+            while os.path.exists(os.path.join(REFS_DIR, f"capture_{now_str}_{idx}.png")):
+                idx += 1
+            fname = f"capture_{now_str}_{idx}.png"
+            save_path = os.path.join(REFS_DIR, fname)
         img.save(save_path, "PNG")
         self.refresh_gallery()
         QMessageBox.information(self, "캡처 완료", f"현재 게임창이 갤러리에 추가되었습니다:\n{fname}")

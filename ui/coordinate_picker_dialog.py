@@ -531,6 +531,55 @@ class CoordinatePickerDialog(QDialog):
     (Action Sequence Image Coordinate Picker Dialog)
     """
 
+    _last_used_image_path: Optional[str] = None
+
+    @classmethod
+    def get_last_used_image_path(cls) -> Optional[str]:
+        if cls._last_used_image_path and os.path.exists(cls._last_used_image_path):
+            return cls._last_used_image_path
+        config_file = "fgoa_config.json"
+        if os.path.exists(config_file):
+            try:
+                import json
+                with open(config_file, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    p = cfg.get("last_picker_image_path")
+                    if p and os.path.exists(p):
+                        cls._last_used_image_path = p
+                        return p
+            except Exception:
+                pass
+        return None
+
+    @classmethod
+    def set_last_used_image_path(cls, path: str):
+        if not path or not os.path.exists(path):
+            return
+        cls._last_used_image_path = path
+        config_file = "fgoa_config.json"
+        try:
+            import json
+            cfg = {}
+            if os.path.exists(config_file):
+                with open(config_file, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+            cfg["last_picker_image_path"] = path
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _save_last_used_image(self, path: str):
+        if path and os.path.exists(path):
+            CoordinatePickerDialog.set_last_used_image_path(path)
+            if hasattr(self, "scenario") and self.scenario is not None:
+                self.scenario.last_action_image_path = path
+
+    def accept(self):
+        if self.current_image_path and os.path.exists(self.current_image_path):
+            self._save_last_used_image(self.current_image_path)
+        super().accept()
+
     def __init__(
         self,
         image_path: Optional[str] = None,
@@ -553,7 +602,24 @@ class CoordinatePickerDialog(QDialog):
 
         self.target_hwnd = target_hwnd
         self.project = project or Project()
-        self.current_image_path = image_path
+        self.scenario = scenario
+
+        # Determine initial image:
+        # 1. image_path argument if valid
+        # 2. scenario's last_action_image_path (if exists)
+        # 3. scenario's condition.reference_image_path ("'색상 인지 조건 지정창'에 등록된 이미지를 초기값으로 가져오고")
+        # 4. If scenario is provided but has neither, fallback to last used image ("마지막에 사용한 이미지를 기억해둘것")
+        resolved_img = None
+        if image_path and os.path.exists(image_path):
+            resolved_img = image_path
+        elif scenario and getattr(scenario, "last_action_image_path", None) and os.path.exists(scenario.last_action_image_path):
+            resolved_img = scenario.last_action_image_path
+        elif scenario and scenario.condition and scenario.condition.reference_image_path and os.path.exists(scenario.condition.reference_image_path):
+            resolved_img = scenario.condition.reference_image_path
+        elif scenario and CoordinatePickerDialog.get_last_used_image_path():
+            resolved_img = CoordinatePickerDialog.get_last_used_image_path()
+
+        self.current_image_path = resolved_img
         self.drag_mode = drag_mode
 
         # Recording mode on image state
@@ -576,7 +642,7 @@ class CoordinatePickerDialog(QDialog):
         self.selected_action_index = max(0, min(selected_action_index, len(self.actions) - 1)) if self.actions else -1
 
         self._init_ui()
-        self._load_initial_image(image_path)
+        self._load_initial_image(self.current_image_path)
         self._refresh_actions_table()
 
     def _init_ui(self):
@@ -743,6 +809,10 @@ class CoordinatePickerDialog(QDialog):
         btn_add_delay.clicked.connect(lambda: self._on_add_quick_action("delay"))
         act_add_bar.addWidget(btn_add_delay)
 
+        btn_add_log = QPushButton("💬+로그")
+        btn_add_log.clicked.connect(lambda: self._on_add_quick_action("log_message"))
+        act_add_bar.addWidget(btn_add_log)
+
         act_add_bar.addSpacing(4)
 
         self.btn_record = QPushButton("⏺️ 조작 녹화")
@@ -847,9 +917,16 @@ class CoordinatePickerDialog(QDialog):
 
     def _load_initial_image(self, image_path: Optional[str]):
         loaded = False
-        if image_path and os.path.exists(image_path):
+        target_path = image_path
+        if not target_path or not os.path.exists(target_path):
+            if getattr(self, "scenario", None) and CoordinatePickerDialog.get_last_used_image_path():
+                target_path = CoordinatePickerDialog.get_last_used_image_path()
+
+        if target_path and os.path.exists(target_path):
             try:
-                self.canvas.load_image_from_path(image_path)
+                self.canvas.load_image_from_path(target_path)
+                self.current_image_path = target_path
+                self._save_last_used_image(target_path)
                 loaded = True
             except Exception:
                 pass
@@ -889,6 +966,7 @@ class CoordinatePickerDialog(QDialog):
         )
         if path and os.path.exists(path):
             self.current_image_path = path
+            self._save_last_used_image(path)
             self.canvas.load_image_from_path(path)
 
     def _open_gallery(self):
@@ -898,29 +976,41 @@ class CoordinatePickerDialog(QDialog):
             sel_path = dlg.get_selected_image_path()
             if sel_path and os.path.exists(sel_path):
                 self.current_image_path = sel_path
+                self._save_last_used_image(sel_path)
                 self.canvas.load_image_from_path(sel_path)
 
     def _capture_target_window(self, silent: bool = True):
         if not self.target_hwnd:
             if not silent:
                 self.lbl_guide.setText("⚠️ 타겟 게임 창이 선택되어 있지 않습니다.")
-            return
+            return False
 
         pil_img = ScreenCapture.capture_client_area(self.target_hwnd)
         if pil_img:
             save_dir = os.path.join(os.path.expanduser("~"), ".fgoa_refs")
             os.makedirs(save_dir, exist_ok=True)
-            ref_path = os.path.join(save_dir, "capture_action_picker.png")
+            import datetime
+            now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            fname = f"capture_{now_str}.png"
+            ref_path = os.path.join(save_dir, fname)
+            if os.path.exists(ref_path):
+                idx = 1
+                while os.path.exists(os.path.join(save_dir, f"capture_{now_str}_{idx}.png")):
+                    idx += 1
+                ref_path = os.path.join(save_dir, f"capture_{now_str}_{idx}.png")
             try:
                 pil_img.save(ref_path)
                 self.current_image_path = ref_path
+                self._save_last_used_image(ref_path)
             except Exception:
                 pass
             self.canvas.set_pil_image(pil_img)
             if not silent:
                 self.lbl_guide.setText("📸 타겟 게임 창의 화면을 새로 캡처하여 배경에 로드했습니다.")
+            return True
         elif not silent:
             self.lbl_guide.setText("⚠️ 타겟 창의 클라이언트 영역을 캡처할 수 없습니다.")
+        return False
 
     def _paste_clipboard(self):
         clipboard = QApplication.clipboard()
@@ -931,9 +1021,12 @@ class CoordinatePickerDialog(QDialog):
 
         save_dir = os.path.join(os.path.expanduser("~"), ".fgoa_refs")
         os.makedirs(save_dir, exist_ok=True)
-        ref_path = os.path.join(save_dir, "clip_action_picker.png")
+        import datetime
+        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        ref_path = os.path.join(save_dir, f"clip_{now_str}.png")
         pix.save(ref_path, "PNG")
         self.current_image_path = ref_path
+        self._save_last_used_image(ref_path)
         self.canvas.load_image_from_path(ref_path)
         self.lbl_guide.setText("📋 클립보드 이미지를 배경으로 로드했습니다.")
 
@@ -1091,6 +1184,8 @@ class CoordinatePickerDialog(QDialog):
             act = Action(action_type="mouse_drag", x=cx, y=cy, end_x=cx + 100, end_y=cy + 100)
         elif action_type == "delay":
             act = Action(action_type="delay", delay_seconds=1.0)
+        elif action_type == "log_message":
+            act = Action(action_type="log_message", log_text="액션 실행 완료", delay_seconds=0.2)
         else:
             act = Action(action_type=action_type)
 
@@ -1106,6 +1201,7 @@ class CoordinatePickerDialog(QDialog):
                 action=act,
                 target_hwnd=self.target_hwnd,
                 reference_image_path=self.current_image_path,
+                scenario=self.scenario,
                 parent=self
             )
             if dlg.exec_() == SingleActionDialog.Accepted:

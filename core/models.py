@@ -96,6 +96,7 @@ class Action:
 
     # Log / Beep
     log_text: str = ""
+    custom_log: str = ""  # Action execution custom log message
     beep_freq: int = 1000
     beep_duration_ms: int = 200
 
@@ -161,6 +162,10 @@ class Scenario:
     # Actions to execute when condition is met (or unconditional)
     actions: List[Action] = field(default_factory=list)
     post_delay_seconds: float = 0.2
+
+    # Custom log and last action image path
+    custom_log: str = ""  # 액션 실행 시 출력할 사용자 지정 로그 문장
+    last_action_image_path: Optional[str] = None  # 액션 좌표 지정에 마지막으로 사용한 이미지
 
     def is_loop_start(self) -> bool:
         return self.node_type == "loop_start"
@@ -230,7 +235,9 @@ class Scenario:
             "retry_max_count": self.retry_max_count,
             "retry_interval_sec": self.retry_interval_sec,
             "actions": [a.to_dict() for a in self.actions],
-            "post_delay_seconds": self.post_delay_seconds
+            "post_delay_seconds": self.post_delay_seconds,
+            "custom_log": self.custom_log,
+            "last_action_image_path": self.last_action_image_path
         }
 
     @classmethod
@@ -256,7 +263,9 @@ class Scenario:
             retry_max_count=data.get("retry_max_count", 3),
             retry_interval_sec=data.get("retry_interval_sec", 0.5),
             actions=actions,
-            post_delay_seconds=data.get("post_delay_seconds", 0.2)
+            post_delay_seconds=data.get("post_delay_seconds", 0.2),
+            custom_log=data.get("custom_log", ""),
+            last_action_image_path=data.get("last_action_image_path")
         )
 
 

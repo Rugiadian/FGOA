@@ -105,14 +105,25 @@ class MainWindow(QMainWindow):
 
     def _save_app_config(self):
         try:
-            cfg = {
+            cfg = {}
+            if os.path.exists(CONFIG_FILE):
+                try:
+                    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                        cfg = json.load(f)
+                except Exception:
+                    pass
+            cfg.update({
                 "theme": self.current_theme,
                 "window_width": self.width(),
                 "window_height": self.height(),
                 "last_target_title": getattr(self.project, "target_window_title", ""),
                 "last_target_width": getattr(self.project, "target_client_width", 1600),
                 "last_target_height": getattr(self.project, "target_client_height", 900),
-            }
+            })
+            from ui.coordinate_picker_dialog import CoordinatePickerDialog
+            last_img = CoordinatePickerDialog.get_last_used_image_path()
+            if last_img:
+                cfg["last_picker_image_path"] = last_img
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2, ensure_ascii=False)
         except Exception:
@@ -580,7 +591,6 @@ class MainWindow(QMainWindow):
     # ==========================================
     def _refresh_scenario_table(self):
         self.project.renumber_steps()
-        warnings_map = ConditionEvaluator.check_project_uniqueness(self.project)
         depths = self.project.compute_hierarchy_depths()
 
         if hasattr(self, "lbl_scen_count"):
@@ -596,7 +606,7 @@ class MainWindow(QMainWindow):
 
         for row, scen in enumerate(self.project.scenarios):
             depth = depths[row] if row < len(depths) else 0
-            self._update_table_row(row, scen, warnings_map, depth)
+            self._update_table_row(row, scen, depth)
 
         self.tbl_scenarios.blockSignals(False)
 
@@ -606,9 +616,7 @@ class MainWindow(QMainWindow):
         elif self.project.scenarios:
             self.tbl_scenarios.selectRow(0)
 
-    def _update_table_row(self, row: int, scen: Scenario, warnings_map: Optional[dict] = None, depth: int = 0):
-        if warnings_map is None:
-            warnings_map = ConditionEvaluator.check_project_uniqueness(self.project)
+    def _update_table_row(self, row: int, scen: Scenario, depth: int = 0):
 
         # 0. Step # (실행 순서 번호)
         it_num = QTableWidgetItem(str(scen.step_number))
@@ -658,24 +666,14 @@ class MainWindow(QMainWindow):
         it_name.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
         self.tbl_scenarios.setItem(row, 3, it_name)
 
-        # 4. Condition Summary + Warning
+        # 4. Condition Summary (시나리오 목록에서 인식조건 중복 표기 제거)
         cond_summary = scen.get_condition_summary()
-        if scen.node_type == "normal" and scen.id in warnings_map:
-            w_widget = QWidget()
-            w_layout = QHBoxLayout(w_widget)
-            w_layout.setContentsMargins(4, 0, 4, 0)
-            w_layout.addWidget(QLabel(cond_summary))
-            w_badge = WarningBadge("\n".join(warnings_map[scen.id]))
-            w_layout.addWidget(w_badge)
-            w_layout.addStretch()
-            self.tbl_scenarios.setCellWidget(row, 4, w_widget)
-        else:
-            self.tbl_scenarios.setCellWidget(row, 4, None)
-            it_cond = QTableWidgetItem(cond_summary)
-            if scen.node_type != "normal":
-                it_cond.setForeground(QColor("#64748b"))
-            it_cond.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            self.tbl_scenarios.setItem(row, 4, it_cond)
+        self.tbl_scenarios.setCellWidget(row, 4, None)
+        it_cond = QTableWidgetItem(cond_summary)
+        if scen.node_type != "normal":
+            it_cond.setForeground(QColor("#64748b"))
+        it_cond.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        self.tbl_scenarios.setItem(row, 4, it_cond)
 
         # 5. Branch Summary (On Match / On Mismatch / Loop)
         if scen.node_type == "loop_start":

@@ -4,7 +4,7 @@ Allows editing mouse clicks, drags, delays, keystrokes, and text inputs for a sc
 """
 import copy
 import time
-from typing import List, Optional
+from typing import List, Optional, Any
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox,
@@ -24,14 +24,16 @@ class SingleActionDialog(QDialog):
         action: Optional[Action] = None,
         target_hwnd: int = 0,
         reference_image_path: Optional[str] = None,
+        scenario: Optional[Any] = None,
         parent=None
     ):
         super().__init__(parent)
         self.setWindowTitle("액션 속성 설정")
-        self.resize(460, 390)
+        self.resize(480, 440)
         self.action = copy.deepcopy(action) if action else Action()
         self.target_hwnd = target_hwnd
         self.reference_image_path = reference_image_path
+        self.scenario = scenario
         self._init_ui()
 
     def _init_ui(self):
@@ -160,7 +162,28 @@ class SingleActionDialog(QDialog):
         l_delay.addRow("대기 시간:", self.spin_delay)
         form.addRow(self.grp_delay)
 
-        # 6. Anti-ban options
+        # 6. Log Message fields
+        self.grp_log = QGroupBox("로그 메시지 설정")
+        l_log = QFormLayout(self.grp_log)
+        self.txt_log = QLineEdit(self.action.log_text)
+        self.txt_log.setPlaceholderText("출력할 로그 문장 입력 (예: 보구 사용 시작)")
+        l_log.addRow("로그 문장:", self.txt_log)
+        form.addRow(self.grp_log)
+
+        # 7. Custom log output option for all actions
+        self.grp_custom_log = QGroupBox("💬 액션 로그 출력 옵션")
+        l_cl = QFormLayout(self.grp_custom_log)
+        self.chk_custom_log = QCheckBox("이 액션 실행 시 원하는 문장으로 로그 출력")
+        self.txt_custom_log = QLineEdit(getattr(self.action, "custom_log", ""))
+        self.txt_custom_log.setPlaceholderText("로그에 출력할 문장 입력 (예: 1라운드 스킬 발동)")
+        self.chk_custom_log.setChecked(bool(getattr(self.action, "custom_log", "")))
+        self.txt_custom_log.setEnabled(self.chk_custom_log.isChecked())
+        self.chk_custom_log.toggled.connect(self.txt_custom_log.setEnabled)
+        l_cl.addRow(self.chk_custom_log)
+        l_cl.addRow("로그 문장:", self.txt_custom_log)
+        form.addRow(self.grp_custom_log)
+
+        # 8. Anti-ban options
         self.grp_antiban = QGroupBox("🛡️ 안티밴 설정")
         l_ab = QFormLayout(self.grp_antiban)
         self.chk_anti_ban = QCheckBox("이 액션에 안티밴 적용 (좌표 ±10px / 0.15~1.0초 가변 지연)")
@@ -193,6 +216,8 @@ class SingleActionDialog(QDialog):
         self.grp_key.setVisible(current_type == "key_press")
         self.grp_text.setVisible(current_type == "text_type")
         self.grp_delay.setVisible(current_type == "delay")
+        self.grp_log.setVisible(current_type == "log_message")
+        self.grp_custom_log.setVisible(current_type != "log_message")
 
     def _on_ok(self):
         self.action.action_type = self.combo_type.currentData()
@@ -221,24 +246,42 @@ class SingleActionDialog(QDialog):
         elif self.action.action_type == "delay":
             self.action.delay_seconds = self.spin_delay.value()
 
+        elif self.action.action_type == "log_message":
+            self.action.log_text = self.txt_log.text().strip()
+
         self.action.anti_ban = True if self.chk_anti_ban.isChecked() else None
+        self.action.custom_log = self.txt_custom_log.text().strip() if self.chk_custom_log.isChecked() else ""
 
         self.accept()
 
     def _on_pick_coordinates_from_image(self, drag_mode: bool = False):
         """Open CoordinatePickerDialog to pick coordinates interactively."""
         from ui.coordinate_picker_dialog import CoordinatePickerDialog
+        ref_path = self.reference_image_path
+        if not ref_path and hasattr(self, "scenario") and self.scenario:
+            ref_path = getattr(self.scenario, "last_action_image_path", None) or (
+                self.scenario.condition.reference_image_path if self.scenario.condition else None
+            ) or CoordinatePickerDialog.get_last_used_image_path()
+        elif not ref_path:
+            ref_path = CoordinatePickerDialog.get_last_used_image_path()
+
         dlg = CoordinatePickerDialog(
-            image_path=self.reference_image_path,
+            image_path=ref_path,
             target_hwnd=self.target_hwnd,
             initial_x=self.spin_x.value(),
             initial_y=self.spin_y.value(),
             drag_mode=drag_mode,
             initial_end_x=self.spin_end_x.value() if drag_mode else 0,
             initial_end_y=self.spin_end_y.value() if drag_mode else 0,
+            scenario=getattr(self, "scenario", None),
             parent=self
         )
         if dlg.exec_() == CoordinatePickerDialog.Accepted:
+            if dlg.current_image_path:
+                self.reference_image_path = dlg.current_image_path
+                CoordinatePickerDialog.set_last_used_image_path(dlg.current_image_path)
+                if hasattr(self, "scenario") and self.scenario:
+                    self.scenario.last_action_image_path = dlg.current_image_path
             x, y, ex, ey = dlg.get_coordinates()
             self.spin_x.setValue(x)
             self.spin_y.setValue(y)
@@ -254,12 +297,21 @@ class SingleActionDialog(QDialog):
 class ActionEditorDialog(QDialog):
     """Sequence Editor for Scenario Actions."""
 
-    def __init__(self, actions: List[Action], target_hwnd: int, parent=None):
+    def __init__(
+        self,
+        actions: List[Action],
+        target_hwnd: int,
+        reference_image_path: Optional[str] = None,
+        scenario: Optional[Any] = None,
+        parent=None
+    ):
         super().__init__(parent)
         self.setWindowTitle("액션 시퀀스 편집기")
         self.resize(680, 520)
         self.actions = [copy.deepcopy(a) for a in actions]
         self.target_hwnd = target_hwnd
+        self.reference_image_path = reference_image_path
+        self.scenario = scenario
 
         self._init_ui()
         self._refresh_table()
@@ -359,9 +411,16 @@ class ActionEditorDialog(QDialog):
             self.tbl_actions.setItem(row, 3, QTableWidgetItem(act.get_summary()))
 
     def _on_add_action(self):
-        dlg = SingleActionDialog(target_hwnd=self.target_hwnd, parent=self)
+        dlg = SingleActionDialog(
+            target_hwnd=self.target_hwnd,
+            reference_image_path=self.reference_image_path,
+            scenario=self.scenario,
+            parent=self
+        )
         if dlg.exec_() == QDialog.Accepted:
             self.actions.append(dlg.action)
+            if hasattr(dlg, "reference_image_path") and dlg.reference_image_path:
+                self.reference_image_path = dlg.reference_image_path
             self._refresh_table()
 
     def _on_edit_action(self):
@@ -369,9 +428,17 @@ class ActionEditorDialog(QDialog):
         if not rows:
             return
         idx = rows[0].row()
-        dlg = SingleActionDialog(action=self.actions[idx], target_hwnd=self.target_hwnd, parent=self)
+        dlg = SingleActionDialog(
+            action=self.actions[idx],
+            target_hwnd=self.target_hwnd,
+            reference_image_path=self.reference_image_path,
+            scenario=self.scenario,
+            parent=self
+        )
         if dlg.exec_() == QDialog.Accepted:
             self.actions[idx] = dlg.action
+            if hasattr(dlg, "reference_image_path") and dlg.reference_image_path:
+                self.reference_image_path = dlg.reference_image_path
             self._refresh_table()
 
     def _on_delete_action(self):

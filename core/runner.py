@@ -268,6 +268,9 @@ class WorkflowRunner(QThread):
         offset_range = getattr(self.project, "anti_ban_offset", 10)
         min_del = getattr(self.project, "anti_ban_min_delay", 0.15)
         max_del = getattr(self.project, "anti_ban_max_delay", 1.0)
+        scen_log = getattr(scenario, "custom_log", "")
+        if scen_log:
+            self.sig_log.emit("USER", f"  [액션 로그] {scen_log}")
 
         for act in scenario.actions:
             if not self._is_running:
@@ -294,6 +297,8 @@ class WorkflowRunner(QThread):
 
             if act.action_type == "log_message":
                 self.sig_log.emit("USER", f"  [사용자 로그] {act.log_text}")
+            elif getattr(act, "custom_log", ""):
+                self.sig_log.emit("USER", f"  [사용자 로그] {act.custom_log}")
 
             InputController.execute_action(
                 action=act,
