@@ -7,7 +7,7 @@ Divided vertically into:
 Supports independent condition/action combining and compact high-density layout.
 """
 import os
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import copy
 import time
 import random
@@ -16,9 +16,9 @@ from PyQt5.QtWidgets import (
     QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
     QScrollArea, QFrame, QMessageBox, QStackedWidget, QSplitter,
-    QMenu, QApplication
+    QMenu, QApplication, QShortcut
 )
-from PyQt5.QtGui import QColor, QFont, QPixmap
+from PyQt5.QtGui import QColor, QFont, QPixmap, QKeySequence
 from PyQt5.QtCore import Qt, pyqtSignal
 
 from core.models import Scenario, Project, Condition, ColorPoint, Action
@@ -79,17 +79,35 @@ class InspectorWidget(QWidget):
     Always-open Unity Inspector-like panel for viewing and editing
     the currently selected scenario.
     """
+    sig_scenario_saved = pyqtSignal(Scenario)
     sig_scenario_changed = pyqtSignal(Scenario)
     sig_log = pyqtSignal(str, str)  # level, msg
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.current_scenario: Optional[Scenario] = None
+        self.original_scenario: Optional[Scenario] = None
+        self.current_scenario: Optional[Scenario] = None  # Working draft
         self.project: Optional[Project] = None
         self.target_hwnd: int = 0
         self._is_loading = False
+        self._is_undoing_redoing = False
+        self.is_dirty = False
+        self.inspector_undo_stack: List[Dict[str, Any]] = []
+        self.inspector_redo_stack: List[Dict[str, Any]] = []
 
         self._init_ui()
+        self._init_shortcuts()
+
+    def _init_shortcuts(self):
+        """Register keyboard shortcuts for inspector actions."""
+        self.sc_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self.sc_undo.activated.connect(self._on_undo_inspector)
+        self.sc_redo_y = QShortcut(QKeySequence("Ctrl+Y"), self)
+        self.sc_redo_y.activated.connect(self._on_redo_inspector)
+        self.sc_redo_shift_z = QShortcut(QKeySequence("Ctrl+Shift+Z"), self)
+        self.sc_redo_shift_z.activated.connect(self._on_redo_inspector)
+        self.sc_save = QShortcut(QKeySequence("Ctrl+S"), self)
+        self.sc_save.activated.connect(self._on_save_inspector)
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -110,40 +128,54 @@ class InspectorWidget(QWidget):
         cw_layout.setContentsMargins(4, 4, 4, 4)
         cw_layout.setSpacing(4)
 
-        # 1.0 Pane Title Header Bar
+        # 1.0 Pane Title Header Bar with Save, Cancel, Undo, Redo controls
         self.pane_header = QFrame()
         self.pane_header.setObjectName("card_frame")
         ph_layout = QHBoxLayout(self.pane_header)
-        ph_layout.setContentsMargins(8, 5, 8, 5)
-        ph_layout.setSpacing(8)
+        ph_layout.setContentsMargins(8, 4, 8, 4)
+        ph_layout.setSpacing(6)
+
         lbl_inspector_title = QLabel("🔍 시나리오 인스펙터")
         lbl_inspector_title.setStyleSheet("font-weight: bold; font-size: 9.5pt;")
         ph_layout.addWidget(lbl_inspector_title)
 
-        # 50px Reference Thumbnail Container (Eye / Hand reference images)
-        self.ref_thumb_container = QWidget()
-        ref_layout = QHBoxLayout(self.ref_thumb_container)
-        ref_layout.setContentsMargins(0, 0, 0, 0)
-        ref_layout.setSpacing(6)
-
-        self.lbl_thumb_cond = ClickableThumbnailLabel(
-            border_color="#3b82f6",
-            tooltip="👁️ 인식 조건 레퍼런스 이미지 (가로 50px)\n클릭 시 조건 편집기(캔버스) 열기"
-        )
-        self.lbl_thumb_cond.clicked.connect(self._on_open_canvas_editor)
-
-        self.lbl_thumb_act = ClickableThumbnailLabel(
-            border_color="#10b981",
-            tooltip="🎯 액션 조건 레퍼런스 이미지 (가로 50px)\n클릭 시 액션 좌표 지정창 열기"
-        )
-        self.lbl_thumb_act.clicked.connect(self._on_pick_coord_for_selected_action)
-
-        ref_layout.addWidget(self.lbl_thumb_cond)
-        ref_layout.addWidget(self.lbl_thumb_act)
-        self.ref_thumb_container.hide()
+        self.lbl_dirty_indicator = QLabel("✓ 저장됨")
+        self.lbl_dirty_indicator.setStyleSheet("font-size: 8pt; color: #16a34a; font-weight: bold;")
+        ph_layout.addWidget(self.lbl_dirty_indicator)
 
         ph_layout.addStretch()
-        ph_layout.addWidget(self.ref_thumb_container)
+
+        # Undo Button
+        self.btn_undo_inspector = QPushButton("◀")
+        self.btn_undo_inspector.setFixedWidth(28)
+        self.btn_undo_inspector.setToolTip("인스펙터 실행 취소 (Undo - Ctrl+Z)")
+        self.btn_undo_inspector.clicked.connect(self._on_undo_inspector)
+        self.btn_undo_inspector.setEnabled(False)
+        ph_layout.addWidget(self.btn_undo_inspector)
+
+        # Redo Button
+        self.btn_redo_inspector = QPushButton("▶")
+        self.btn_redo_inspector.setFixedWidth(28)
+        self.btn_redo_inspector.setToolTip("인스펙터 다시 실행 (Redo - Ctrl+Y / Ctrl+Shift+Z)")
+        self.btn_redo_inspector.clicked.connect(self._on_redo_inspector)
+        self.btn_redo_inspector.setEnabled(False)
+        ph_layout.addWidget(self.btn_redo_inspector)
+
+        # Cancel Button
+        self.btn_cancel_inspector = QPushButton("↩️ 취소")
+        self.btn_cancel_inspector.setToolTip("수정한 내용을 모두 버리고 원래 상태로 되돌립니다.")
+        self.btn_cancel_inspector.clicked.connect(self._on_cancel_inspector)
+        self.btn_cancel_inspector.setEnabled(False)
+        ph_layout.addWidget(self.btn_cancel_inspector)
+
+        # Save Button
+        self.btn_save_inspector = QPushButton("💾 저장")
+        self.btn_save_inspector.setObjectName("btn_primary")
+        self.btn_save_inspector.setStyleSheet("font-weight: bold; padding: 2px 10px;")
+        self.btn_save_inspector.setToolTip("인스펙터 변경사항을 시나리오에 적용 및 저장합니다. (Ctrl+S)")
+        self.btn_save_inspector.clicked.connect(self._on_save_inspector)
+        self.btn_save_inspector.setEnabled(False)
+        ph_layout.addWidget(self.btn_save_inspector)
 
         self.lbl_inspector_status = QLabel("시나리오 설정")
         self.lbl_inspector_status.setStyleSheet("color: #64748b; font-size: 8.5pt;")
@@ -372,6 +404,15 @@ class InspectorWidget(QWidget):
         self.btn_copy_cond.clicked.connect(self._on_copy_condition_from_other)
         top_row.addWidget(self.btn_copy_cond)
 
+        # 50px Reference Thumbnail for Condition (Eye)
+        self.lbl_thumb_cond = ClickableThumbnailLabel(
+            border_color="#3b82f6",
+            tooltip="👁️ 인식 조건 레퍼런스 이미지 (가로 50px)\n클릭 시 조건/색상 편집기 열기"
+        )
+        self.lbl_thumb_cond.clicked.connect(self._on_open_canvas_editor)
+        self.lbl_thumb_cond.hide()
+        top_row.addWidget(self.lbl_thumb_cond)
+
         layout.addLayout(top_row)
 
         # Points Table
@@ -557,6 +598,16 @@ class InspectorWidget(QWidget):
         add_bar_row1.addWidget(btn_add_log)
 
         add_bar_row1.addStretch()
+
+        # 50px Reference Thumbnail for Action (Hand)
+        self.lbl_thumb_act = ClickableThumbnailLabel(
+            border_color="#10b981",
+            tooltip="🎯 액션 조건 레퍼런스 이미지 (가로 50px)\n클릭 시 액션 좌표 지정 작업창 열기"
+        )
+        self.lbl_thumb_act.clicked.connect(self._on_pick_coord_for_selected_action)
+        self.lbl_thumb_act.hide()
+        add_bar_row1.addWidget(self.lbl_thumb_act)
+
         layout.addLayout(add_bar_row1)
 
         # Row 2: Operation Recording & Sequence Copy
@@ -661,19 +712,38 @@ class InspectorWidget(QWidget):
     # ==========================================
     # Data Loading & Syncing
     # ==========================================
+    # ==========================================
+    # Data Loading, Draft Management & Undo/Redo
+    # ==========================================
     def set_target_hwnd(self, hwnd: int):
         self.target_hwnd = hwnd
 
     def set_scenario(self, scenario: Optional[Scenario], target_hwnd: int = 0, project: Optional[Project] = None):
-        """Bind and display a scenario in the inspector."""
-        self.current_scenario = scenario
+        """Bind and display a scenario in the inspector as an isolated working draft."""
+        self.original_scenario = scenario
         self.target_hwnd = target_hwnd
         self.project = project
 
         if not scenario:
+            self.current_scenario = None
             self.stack.setCurrentIndex(0)
+            self.inspector_undo_stack.clear()
+            self.inspector_redo_stack.clear()
+            self.is_dirty = False
+            self._update_save_cancel_buttons()
             return
 
+        # Create working draft copy so edits don't prematurely mutate the original
+        self.current_scenario = copy.deepcopy(scenario)
+        self.inspector_undo_stack.clear()
+        self.inspector_redo_stack.clear()
+        self.is_dirty = False
+
+        self._load_scenario_to_ui(self.current_scenario)
+        self._update_save_cancel_buttons()
+
+    def _load_scenario_to_ui(self, scenario: Scenario):
+        """Populates UI controls from a Scenario instance."""
         self._is_loading = True
         try:
             self.stack.setCurrentIndex(1)
@@ -746,20 +816,125 @@ class InspectorWidget(QWidget):
             self.chk_action_log.blockSignals(False)
             self.txt_action_log.blockSignals(False)
 
-            # 6. Update 50px Reference Thumbnails at top
+            # 6. Update 50px Reference Thumbnails (Condition Card & Action Card)
             self._update_reference_thumbnails()
 
         finally:
             self._is_loading = False
 
+    def _record_undo_state(self):
+        """Pushes current working draft to inspector undo stack before a new modification."""
+        if self._is_loading or self._is_undoing_redoing or not self.current_scenario:
+            return
+        snapshot = self.current_scenario.to_dict()
+        if self.inspector_undo_stack and self.inspector_undo_stack[-1] == snapshot:
+            return
+        self.inspector_undo_stack.append(snapshot)
+        if len(self.inspector_undo_stack) > 50:
+            self.inspector_undo_stack.pop(0)
+        self.inspector_redo_stack.clear()
+
+    def _mark_dirty(self):
+        """Marks the inspector draft as having unsaved changes and updates buttons."""
+        self.is_dirty = True
+        self._update_save_cancel_buttons()
+
+    def _update_save_cancel_buttons(self):
+        """Updates enablement and visual styles for Save, Cancel, Undo, and Redo buttons."""
+        has_scen = (self.current_scenario is not None)
+        can_undo = bool(self.inspector_undo_stack)
+        can_redo = bool(self.inspector_redo_stack)
+
+        self.btn_save_inspector.setEnabled(has_scen and self.is_dirty)
+        self.btn_cancel_inspector.setEnabled(has_scen and self.is_dirty)
+        self.btn_undo_inspector.setEnabled(can_undo)
+        self.btn_redo_inspector.setEnabled(can_redo)
+
+        if not has_scen:
+            self.lbl_dirty_indicator.setText("")
+        elif self.is_dirty:
+            self.lbl_dirty_indicator.setText("● 변경사항 있음")
+            self.lbl_dirty_indicator.setStyleSheet("font-size: 8pt; color: #ea580c; font-weight: bold;")
+        else:
+            self.lbl_dirty_indicator.setText("✓ 저장됨")
+            self.lbl_dirty_indicator.setStyleSheet("font-size: 8pt; color: #16a34a; font-weight: bold;")
+
+    def _on_save_inspector(self):
+        """Applies working draft scenario to original scenario and notifies main window."""
+        if not self.original_scenario or not self.current_scenario:
+            return
+
+        draft_dict = self.current_scenario.to_dict()
+        updated_scen = Scenario.from_dict(draft_dict)
+
+        for f_name in updated_scen.__dataclass_fields__:
+            setattr(self.original_scenario, f_name, getattr(updated_scen, f_name))
+
+        self.is_dirty = False
+        self._update_save_cancel_buttons()
+        self.sig_scenario_saved.emit(self.original_scenario)
+        self.sig_scenario_changed.emit(self.original_scenario)
+        self.sig_log.emit("SUCCESS", f"💾 시나리오 #{self.original_scenario.scenario_number} [{self.original_scenario.name}] 변경사항이 저장되었습니다.")
+
+    def _on_cancel_inspector(self):
+        """Reverts working draft back to original scenario state."""
+        if not self.original_scenario:
+            return
+        self.current_scenario = copy.deepcopy(self.original_scenario)
+        self.inspector_undo_stack.clear()
+        self.inspector_redo_stack.clear()
+        self.is_dirty = False
+        self._load_scenario_to_ui(self.current_scenario)
+        self._update_save_cancel_buttons()
+        self.sig_log.emit("INFO", f"↩️ 시나리오 #{self.original_scenario.scenario_number} 변경사항을 취소했습니다.")
+
+    def _on_undo_inspector(self):
+        """Undoes last edit in inspector."""
+        if not self.inspector_undo_stack or not self.current_scenario:
+            return
+        cur_snapshot = self.current_scenario.to_dict()
+        self.inspector_redo_stack.append(cur_snapshot)
+
+        prev_snapshot = self.inspector_undo_stack.pop()
+        self._is_undoing_redoing = True
+        try:
+            self.current_scenario = Scenario.from_dict(prev_snapshot)
+            self._load_scenario_to_ui(self.current_scenario)
+        finally:
+            self._is_undoing_redoing = False
+
+        self.is_dirty = (self.original_scenario and self.current_scenario.to_dict() != self.original_scenario.to_dict())
+        self._update_save_cancel_buttons()
+
+    def _on_redo_inspector(self):
+        """Redoes previously undone edit in inspector."""
+        if not self.inspector_redo_stack or not self.current_scenario:
+            return
+        cur_snapshot = self.current_scenario.to_dict()
+        self.inspector_undo_stack.append(cur_snapshot)
+
+        next_snapshot = self.inspector_redo_stack.pop()
+        self._is_undoing_redoing = True
+        try:
+            self.current_scenario = Scenario.from_dict(next_snapshot)
+            self._load_scenario_to_ui(self.current_scenario)
+        finally:
+            self._is_undoing_redoing = False
+
+        self.is_dirty = (self.original_scenario and self.current_scenario.to_dict() != self.original_scenario.to_dict())
+        self._update_save_cancel_buttons()
+
     def _update_reference_thumbnails(self):
         """
-        Updates the 50px reference image thumbnails at the top of the inspector.
-        Displays reference image used for color condition detection (Eye) and
-        action sequence coordinate picking (Hand) with 50px width.
+        Updates the 50px reference image thumbnails:
+        - Condition reference thumbnail inside Condition Card (Eye)
+        - Action reference thumbnail inside Action Card (Hand)
         """
         if not self.current_scenario:
-            self.ref_thumb_container.hide()
+            if hasattr(self, "lbl_thumb_cond"):
+                self.lbl_thumb_cond.hide()
+            if hasattr(self, "lbl_thumb_act"):
+                self.lbl_thumb_act.hide()
             return
 
         cond_path = None
@@ -773,25 +948,21 @@ class InspectorWidget(QWidget):
                     act_path = act.reference_image_path
                     break
 
-        has_cond = self.lbl_thumb_cond.set_image(cond_path)
-        has_act = self.lbl_thumb_act.set_image(act_path)
+        if hasattr(self, "lbl_thumb_cond"):
+            has_cond = self.lbl_thumb_cond.set_image(cond_path)
+            if has_cond and cond_path:
+                fname = os.path.basename(cond_path)
+                self.lbl_thumb_cond.setToolTip(
+                    f"👁️ 인식 조건 레퍼런스 (가로 50px)\n클릭 시 조건/색상 편집기 열기\n파일: {fname}"
+                )
 
-        if has_cond and cond_path:
-            fname = os.path.basename(cond_path)
-            self.lbl_thumb_cond.setToolTip(
-                f"👁️ 인식 조건 레퍼런스 (가로 50px)\n클릭 시 조건/색상 편집기 열기\n파일: {fname}"
-            )
-
-        if has_act and act_path:
-            fname = os.path.basename(act_path)
-            self.lbl_thumb_act.setToolTip(
-                f"🎯 액션 좌표 지정 레퍼런스 (가로 50px)\n클릭 시 액션 좌표 지정 작업창 열기\n파일: {fname}"
-            )
-
-        if has_cond or has_act:
-            self.ref_thumb_container.show()
-        else:
-            self.ref_thumb_container.hide()
+        if hasattr(self, "lbl_thumb_act"):
+            has_act = self.lbl_thumb_act.set_image(act_path)
+            if has_act and act_path:
+                fname = os.path.basename(act_path)
+                self.lbl_thumb_act.setToolTip(
+                    f"🎯 액션 좌표 지정 레퍼런스 (가로 50px)\n클릭 시 액션 좌표 지정 작업창 열기\n파일: {fname}"
+                )
 
     def _on_action_log_toggled(self, checked: bool):
         self.txt_action_log.setEnabled(checked)
@@ -947,12 +1118,15 @@ class InspectorWidget(QWidget):
     def _on_scenario_number_changed(self, val: int):
         if self._is_loading or not self.current_scenario:
             return
+        self._record_undo_state()
         self.current_scenario.scenario_number = val
-        self.sig_scenario_changed.emit(self.current_scenario)
+        self._mark_dirty()
 
     def _on_field_changed(self):
         if self._is_loading or not self.current_scenario:
             return
+
+        self._record_undo_state()
 
         self.current_scenario.name = self.txt_name.text()
         self.current_scenario.enabled = self.chk_enabled.isChecked()
@@ -979,7 +1153,7 @@ class InspectorWidget(QWidget):
             self.current_scenario.loop_count = self.spin_loop_cnt.value()
 
         self._update_reference_thumbnails()
-        self.sig_scenario_changed.emit(self.current_scenario)
+        self._mark_dirty()
 
     def _on_node_type_changed(self):
         if self._is_loading or not self.current_scenario:

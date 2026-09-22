@@ -16,7 +16,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import Qt, QByteArray
 from core.models import Project, Scenario, Condition, Action, ColorPoint
 from core.preset_manager import PresetManager
@@ -256,38 +256,140 @@ class TestPresetsAndLayouts(unittest.TestCase):
         inspector = InspectorWidget()
         proj = Project()
 
-        # 1. Scenario without images: thumbnail container should be hidden
+        # 1. Scenario without images: both thumbnails should be hidden
         s1 = Scenario(id="s1", name="이미지 없음", condition=Condition(name="조건"))
-        inspector.set_scenario(s1, proj)
-        self.assertTrue(inspector.ref_thumb_container.isHidden())
+        inspector.set_scenario(s1, 0, proj)
+        self.assertTrue(inspector.lbl_thumb_cond.isHidden())
+        self.assertTrue(inspector.lbl_thumb_act.isHidden())
 
-        # 2. Scenario with condition reference image
+        # 2. Scenario with condition reference image: condition thumbnail shown at condition tab top
         s2 = Scenario(
             id="s2",
             name="인식 조건 이미지 있음",
             condition=Condition(name="조건", reference_image_path=img_path)
         )
-        inspector.set_scenario(s2, proj)
-        self.assertFalse(inspector.ref_thumb_container.isHidden())
+        inspector.set_scenario(s2, 0, proj)
         self.assertFalse(inspector.lbl_thumb_cond.isHidden())
+        self.assertTrue(inspector.lbl_thumb_act.isHidden())
         self.assertEqual(inspector.lbl_thumb_cond.width(), 50)
         self.assertIsNotNone(inspector.lbl_thumb_cond.pixmap())
         self.assertEqual(inspector.lbl_thumb_cond.pixmap().width(), 50)
 
-        # 3. Scenario with action reference image
+        # 3. Scenario with action reference image: action thumbnail shown at action tab top
         s3 = Scenario(
             id="s3",
             name="액션 이미지 있음",
             last_action_image_path=img_path
         )
-        inspector.set_scenario(s3, proj)
-        self.assertFalse(inspector.ref_thumb_container.isHidden())
+        inspector.set_scenario(s3, 0, proj)
+        self.assertTrue(inspector.lbl_thumb_cond.isHidden())
         self.assertFalse(inspector.lbl_thumb_act.isHidden())
         self.assertEqual(inspector.lbl_thumb_act.width(), 50)
         self.assertIsNotNone(inspector.lbl_thumb_act.pixmap())
         self.assertEqual(inspector.lbl_thumb_act.pixmap().width(), 50)
 
         inspector.close()
+
+    def test_09_inspector_draft_save_cancel_and_undo_redo(self):
+        """Verify inspector edits do not mutate original until Save is clicked,
+        and support Cancel, Undo (Ctrl+Z), and Redo (Ctrl+Y)."""
+        from ui.inspector_widget import InspectorWidget
+
+        inspector = InspectorWidget()
+        proj = Project()
+        orig_scen = Scenario(id="scen_orig", scenario_number=1, name="초기 시나리오 이름", enabled=True)
+        proj.scenarios = [orig_scen]
+
+        inspector.set_scenario(orig_scen, 0, proj)
+        self.assertFalse(inspector.is_dirty)
+        self.assertFalse(inspector.btn_save_inspector.isEnabled())
+        self.assertFalse(inspector.btn_cancel_inspector.isEnabled())
+
+        # 1. Edit name in inspector
+        inspector.txt_name.setText("수정된 임시 시나리오 이름")
+        self.assertTrue(inspector.is_dirty)
+        self.assertTrue(inspector.btn_save_inspector.isEnabled())
+        self.assertTrue(inspector.btn_cancel_inspector.isEnabled())
+        # Original scenario should remain UNCHANGED before Save
+        self.assertEqual(orig_scen.name, "초기 시나리오 이름")
+
+        # 2. Undo edit
+        self.assertTrue(inspector.btn_undo_inspector.isEnabled())
+        inspector._on_undo_inspector()
+        self.assertEqual(inspector.txt_name.text(), "초기 시나리오 이름")
+
+        # 3. Redo edit
+        self.assertTrue(inspector.btn_redo_inspector.isEnabled())
+        inspector._on_redo_inspector()
+        self.assertEqual(inspector.txt_name.text(), "수정된 임시 시나리오 이름")
+
+        # 4. Save edit
+        saved_scenarios = []
+        inspector.sig_scenario_saved.connect(lambda s: saved_scenarios.append(s))
+        inspector._on_save_inspector()
+
+        self.assertFalse(inspector.is_dirty)
+        self.assertEqual(len(saved_scenarios), 1)
+        # Original scenario now updated!
+        self.assertEqual(orig_scen.name, "수정된 임시 시나리오 이름")
+
+        # 5. Edit again and Cancel
+        inspector.txt_name.setText("다시 바꾼 이름")
+        self.assertTrue(inspector.is_dirty)
+        inspector._on_cancel_inspector()
+        self.assertFalse(inspector.is_dirty)
+        self.assertEqual(inspector.txt_name.text(), "수정된 임시 시나리오 이름")
+        self.assertEqual(orig_scen.name, "수정된 임시 시나리오 이름")
+
+        inspector.close()
+
+    def test_10_scenario_list_undo_redo(self):
+        """Verify MainWindow scenario list modifications support Undo (Ctrl+Z) and Redo (Ctrl+Y)."""
+        win = MainWindow()
+        win.project.scenarios = [
+            Scenario(id="s1", scenario_number=1, step_number=1, name="시나리오 1"),
+            Scenario(id="s2", scenario_number=2, step_number=2, name="시나리오 2"),
+        ]
+        win.project.renumber_steps()
+        win._refresh_scenario_table()
+
+        initial_count = len(win.project.scenarios)
+        self.assertEqual(initial_count, 2)
+        self.assertFalse(win.btn_undo_scenario.isEnabled())
+
+        # 1. Add scenario -> Undo -> Redo
+        win._on_add_scenario()
+        self.assertEqual(len(win.project.scenarios), 3)
+        self.assertTrue(win.btn_undo_scenario.isEnabled())
+
+        # Undo addition
+        win._undo_scenario()
+        self.assertEqual(len(win.project.scenarios), 2)
+        self.assertEqual([s.scenario_number for s in win.project.scenarios], [1, 2])
+        self.assertTrue(win.btn_redo_scenario.isEnabled())
+
+        # Redo addition
+        win._redo_scenario()
+        self.assertEqual(len(win.project.scenarios), 3)
+
+        # 2. Delete scenario -> Undo
+        win.tbl_scenarios.selectRow(2)
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.Yes):
+            win._on_delete_scenario()
+        self.assertEqual(len(win.project.scenarios), 2)
+
+        # Undo deletion
+        win._undo_scenario()
+        self.assertEqual(len(win.project.scenarios), 3)
+
+        # 3. Move scenario up -> Undo
+        win.tbl_scenarios.selectRow(1)
+        win._on_move_up()
+        self.assertEqual(win.project.scenarios[0].id, "s2")
+        win._undo_scenario()
+        self.assertEqual(win.project.scenarios[0].id, "s1")
+
+        win.close()
 
 
 if __name__ == "__main__":

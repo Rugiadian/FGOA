@@ -11,7 +11,7 @@ import os
 import sys
 import json
 import copy
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple, Any
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
@@ -60,6 +60,11 @@ class MainWindow(QMainWindow):
         self.custom_layouts: Dict[str, str] = {}
         self.current_layout_name: str = "기본 3열 (Default)"
         self._saved_dock_state: Optional[str] = None
+
+        # Scenario list Undo / Redo history
+        self.scenario_undo_stack: List[Tuple[str, List[Dict[str, Any]]]] = []
+        self.scenario_redo_stack: List[Tuple[str, List[Dict[str, Any]]]] = []
+        self._is_undoing_redoing_scenario: bool = False
 
         # Load user settings
         self._load_app_config()
@@ -353,7 +358,22 @@ class MainWindow(QMainWindow):
         btn_down.clicked.connect(self._on_move_down)
         tb_layout.addWidget(btn_down)
 
-        tb_layout.addSpacing(4)
+        tb_layout.addSpacing(6)
+
+        # Undo / Redo for Scenario List
+        self.btn_undo_scenario = QPushButton("↩️ 취소")
+        self.btn_undo_scenario.setToolTip("시나리오 목록 변경 작업 실행 취소 (Ctrl+Z)")
+        self.btn_undo_scenario.clicked.connect(self._undo_scenario)
+        self.btn_undo_scenario.setEnabled(False)
+        tb_layout.addWidget(self.btn_undo_scenario)
+
+        self.btn_redo_scenario = QPushButton("▶️ 다시")
+        self.btn_redo_scenario.setToolTip("취소한 시나리오 목록 변경 작업 다시 실행 (Ctrl+Y / Ctrl+Shift+Z)")
+        self.btn_redo_scenario.clicked.connect(self._redo_scenario)
+        self.btn_redo_scenario.setEnabled(False)
+        tb_layout.addWidget(self.btn_redo_scenario)
+
+        tb_layout.addSpacing(6)
 
         # PRESET BUTTON
         self.btn_preset = QPushButton("📦 프리셋 ▼")
@@ -437,6 +457,7 @@ class MainWindow(QMainWindow):
         # Pane 2: Center (Unity-Style Always-Open Inspector)
         # ==========================================
         self.inspector = InspectorWidget(self)
+        self.inspector.sig_scenario_saved.connect(self._on_inspector_scenario_saved)
         self.inspector.sig_scenario_changed.connect(self._on_inspector_scenario_changed)
         self.inspector.sig_log.connect(self._append_log)
 
@@ -595,6 +616,16 @@ class MainWindow(QMainWindow):
         self.sc_preset_save = QShortcut(QKeySequence("Ctrl+Shift+S"), self)
         self.sc_preset_save.activated.connect(self._on_save_preset)
 
+        # Global Undo / Redo Shortcuts
+        self.sc_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
+        self.sc_undo.activated.connect(self._on_global_undo)
+
+        self.sc_redo_y = QShortcut(QKeySequence("Ctrl+Y"), self)
+        self.sc_redo_y.activated.connect(self._on_global_redo)
+
+        self.sc_redo_shift_z = QShortcut(QKeySequence("Ctrl+Shift+Z"), self)
+        self.sc_redo_shift_z.activated.connect(self._on_global_redo)
+
     # ==========================================
     # Code Watcher & Live Reload
     # ==========================================
@@ -696,13 +727,127 @@ class MainWindow(QMainWindow):
 
         row = rows[0].row()
         if 0 <= row < len(self.project.scenarios):
-            scen = self.project.scenarios[row]
-            self.inspector.set_scenario(scen, self.target_hwnd, self.project)
+            target_scen = self.project.scenarios[row]
+            # If current inspector has unsaved changes for a different scenario, ask user
+            if (self.inspector.is_dirty and self.inspector.original_scenario and
+                    self.inspector.original_scenario.id != target_scen.id):
+                res = QMessageBox.question(
+                    self, "저장되지 않은 변경사항",
+                    f"시나리오 #{self.inspector.original_scenario.scenario_number} [{self.inspector.original_scenario.name}]의 "
+                    f"인스펙터 변경사항이 저장되지 않았습니다.\n변경사항을 저장하시겠습니까?",
+                    QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                    QMessageBox.Save
+                )
+                if res == QMessageBox.Save:
+                    self.inspector._on_save_inspector()
+                elif res == QMessageBox.Cancel:
+                    # Restore previous selection
+                    for r, s in enumerate(self.project.scenarios):
+                        if s.id == self.inspector.original_scenario.id:
+                            self.tbl_scenarios.blockSignals(True)
+                            self.tbl_scenarios.selectRow(r)
+                            self.tbl_scenarios.blockSignals(False)
+                            break
+                    return
+                else:
+                    self.inspector._on_cancel_inspector()
+
+            self.inspector.set_scenario(target_scen, self.target_hwnd, self.project)
+
+    def _on_inspector_scenario_saved(self, saved_scen: Scenario):
+        """Called when user explicitly clicks Save in Inspector."""
+        self._push_scenario_undo_state(f"시나리오 #{saved_scen.scenario_number} 속성 저장")
+        self._refresh_scenario_table()
+        self.status_bar.showMessage(f"💾 시나리오 #{saved_scen.scenario_number} [{saved_scen.name}] 저장 완료", 3000)
 
     def _on_inspector_scenario_changed(self, modified_scen: Scenario):
         """Called when properties are edited inside the Inspector."""
-        # Refresh full table to properly update hierarchy indentation if node_type changed
         self._refresh_scenario_table()
+
+    # ==========================================
+    # Global & Scenario List Undo / Redo
+    # ==========================================
+    def _on_global_undo(self):
+        """Dispatches undo to Inspector if focused and has edits, else to scenario list."""
+        if hasattr(self, "inspector") and self.inspector.hasFocus() and self.inspector.inspector_undo_stack:
+            self.inspector._on_undo_inspector()
+        else:
+            self._undo_scenario()
+
+    def _on_global_redo(self):
+        """Dispatches redo to Inspector if focused and has redo stack, else to scenario list."""
+        if hasattr(self, "inspector") and self.inspector.hasFocus() and self.inspector.inspector_redo_stack:
+            self.inspector._on_redo_inspector()
+        else:
+            self._redo_scenario()
+
+    def _push_scenario_undo_state(self, action_name: str):
+        """Saves current scenarios snapshot into scenario_undo_stack before an action."""
+        if getattr(self, "_is_undoing_redoing_scenario", False):
+            return
+        snapshot = [s.to_dict() for s in self.project.scenarios]
+        self.scenario_undo_stack.append((action_name, snapshot))
+        if len(self.scenario_undo_stack) > 50:
+            self.scenario_undo_stack.pop(0)
+        self.scenario_redo_stack.clear()
+        self._update_scenario_undo_redo_buttons()
+
+    def _update_scenario_undo_redo_buttons(self):
+        """Updates enablement and tooltip of undo/redo buttons in toolbar."""
+        can_undo = bool(self.scenario_undo_stack)
+        can_redo = bool(self.scenario_redo_stack)
+
+        if hasattr(self, "btn_undo_scenario"):
+            self.btn_undo_scenario.setEnabled(can_undo)
+            if can_undo:
+                self.btn_undo_scenario.setToolTip(f"실행 취소: '{self.scenario_undo_stack[-1][0]}' (Ctrl+Z)")
+            else:
+                self.btn_undo_scenario.setToolTip("시나리오 목록 변경 실행 취소 (Ctrl+Z)")
+
+        if hasattr(self, "btn_redo_scenario"):
+            self.btn_redo_scenario.setEnabled(can_redo)
+            if can_redo:
+                self.btn_redo_scenario.setToolTip(f"다시 실행: '{self.scenario_redo_stack[-1][0]}' (Ctrl+Y / Ctrl+Shift+Z)")
+            else:
+                self.btn_redo_scenario.setToolTip("취소한 변경 다시 실행 (Ctrl+Y / Ctrl+Shift+Z)")
+
+    def _undo_scenario(self):
+        """Undoes last scenario list modification."""
+        if not self.scenario_undo_stack:
+            return
+        cur_snapshot = [s.to_dict() for s in self.project.scenarios]
+        action_name, prev_snapshot = self.scenario_undo_stack.pop()
+        self.scenario_redo_stack.append((action_name, cur_snapshot))
+
+        self._is_undoing_redoing_scenario = True
+        try:
+            self.project.scenarios = [Scenario.from_dict(d) for d in prev_snapshot]
+            self._refresh_scenario_table()
+        finally:
+            self._is_undoing_redoing_scenario = False
+
+        self._update_scenario_undo_redo_buttons()
+        self.status_bar.showMessage(f"↩️ '{action_name}' 작업 실행 취소 완료", 3000)
+        self._append_log("INFO", f"↩️ [실행 취소] '{action_name}' 작업이 취소되었습니다.")
+
+    def _redo_scenario(self):
+        """Redoes previously undone scenario list modification."""
+        if not self.scenario_redo_stack:
+            return
+        cur_snapshot = [s.to_dict() for s in self.project.scenarios]
+        action_name, next_snapshot = self.scenario_redo_stack.pop()
+        self.scenario_undo_stack.append((action_name, cur_snapshot))
+
+        self._is_undoing_redoing_scenario = True
+        try:
+            self.project.scenarios = [Scenario.from_dict(d) for d in next_snapshot]
+            self._refresh_scenario_table()
+        finally:
+            self._is_undoing_redoing_scenario = False
+
+        self._update_scenario_undo_redo_buttons()
+        self.status_bar.showMessage(f"▶️ '{action_name}' 작업 다시 실행 완료", 3000)
+        self._append_log("INFO", f"▶️ [다시 실행] '{action_name}' 작업이 다시 실행되었습니다.")
 
     # ==========================================
     # Table Rendering & Hierarchy UI
@@ -843,6 +988,7 @@ class MainWindow(QMainWindow):
         return target_id
 
     def _on_scenario_toggle(self, scenario: Scenario, state: int):
+        self._push_scenario_undo_state(f"시나리오 #{scenario.scenario_number} 활성화 토글")
         scenario.enabled = (state == Qt.Checked)
         if self.inspector.current_scenario and self.inspector.current_scenario.id == scenario.id:
             self.inspector.chk_enabled.blockSignals(True)
@@ -1055,6 +1201,8 @@ class MainWindow(QMainWindow):
         if not scenarios:
             return
 
+        self._push_scenario_undo_state(f"프리셋 시나리오 {len(scenarios)}건 불러오기")
+
         if mode == "replace":
             self.project.scenarios = scenarios
             insert_idx = 0
@@ -1099,6 +1247,13 @@ class MainWindow(QMainWindow):
         act_up.triggered.connect(self._on_move_up)
         act_dn = menu.addAction("⬇️ 아래로 이동")
         act_dn.triggered.connect(self._on_move_down)
+        menu.addSeparator()
+        act_undo = menu.addAction("↩️ 실행 취소 (Ctrl+Z)")
+        act_undo.triggered.connect(self._undo_scenario)
+        act_undo.setEnabled(bool(self.scenario_undo_stack))
+        act_redo = menu.addAction("▶️ 다시 실행 (Ctrl+Y)")
+        act_redo.triggered.connect(self._redo_scenario)
+        act_redo.setEnabled(bool(self.scenario_redo_stack))
         menu.exec_(self.tbl_scenarios.viewport().mapToGlobal(pos))
 
     # ==========================================
@@ -1113,6 +1268,7 @@ class MainWindow(QMainWindow):
             name=f"시나리오 {new_scen_num}",
             enabled=True
         )
+        self._push_scenario_undo_state(f"시나리오 #{new_scen_num} 추가")
         self.project.scenarios.append(new_scen)
         self._refresh_scenario_table()
         self.tbl_scenarios.selectRow(len(self.project.scenarios) - 1)
@@ -1146,6 +1302,7 @@ class MainWindow(QMainWindow):
             loop_target_id=scen_start.id,
             enabled=True
         )
+        self._push_scenario_undo_state(f"루프 블록 #{start_num} 추가")
         self.project.scenarios.extend([scen_start, scen_child, scen_end])
         self._refresh_scenario_table()
         # Select loop start
@@ -1162,11 +1319,13 @@ class MainWindow(QMainWindow):
         if not rows:
             return
         row = rows[0].row()
-        cloned = copy.deepcopy(self.project.scenarios[row])
+        orig = self.project.scenarios[row]
+        cloned = copy.deepcopy(orig)
         import uuid
         cloned.id = f"scen_{uuid.uuid4().hex[:6]}"
         cloned.scenario_number = self.project.get_next_scenario_number()
         cloned.name = f"{cloned.name} (복제)"
+        self._push_scenario_undo_state(f"시나리오 #{orig.scenario_number} 복제")
         self.project.scenarios.insert(row + 1, cloned)
         self._refresh_scenario_table()
         self.tbl_scenarios.selectRow(row + 1)
@@ -1179,6 +1338,7 @@ class MainWindow(QMainWindow):
         scen = self.project.scenarios[row]
         res = QMessageBox.question(self, "삭제 확인", f"시나리오 고유 #{scen.scenario_number} (실행 #{scen.step_number}) [{scen.name}]를 삭제하시겠습니까?")
         if res == QMessageBox.Yes:
+            self._push_scenario_undo_state(f"시나리오 #{scen.scenario_number} 삭제")
             del self.project.scenarios[row]
             self._refresh_scenario_table()
             new_sel = min(row, len(self.project.scenarios) - 1)
@@ -1190,6 +1350,7 @@ class MainWindow(QMainWindow):
         if not rows or rows[0].row() == 0:
             return
         row = rows[0].row()
+        self._push_scenario_undo_state(f"시나리오 #{self.project.scenarios[row].scenario_number} 위로 이동")
         self.project.scenarios[row - 1], self.project.scenarios[row] = (
             self.project.scenarios[row], self.project.scenarios[row - 1]
         )
@@ -1201,6 +1362,7 @@ class MainWindow(QMainWindow):
         if not rows or rows[0].row() >= len(self.project.scenarios) - 1:
             return
         row = rows[0].row()
+        self._push_scenario_undo_state(f"시나리오 #{self.project.scenarios[row].scenario_number} 아래로 이동")
         self.project.scenarios[row + 1], self.project.scenarios[row] = (
             self.project.scenarios[row], self.project.scenarios[row + 1]
         )
