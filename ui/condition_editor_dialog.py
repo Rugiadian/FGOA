@@ -10,11 +10,11 @@ from PyQt5.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
     QComboBox, QSpinBox, QGroupBox, QSplitter, QMessageBox,
-    QApplication, QInputDialog, QButtonGroup
+    QApplication, QInputDialog, QButtonGroup, QSizePolicy
 )
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import Qt, QTimer
-from PIL import Image, ImageQt
+from PIL import Image
 
 from core.models import Condition, ColorPoint, Project, Scenario
 from core.screen_capture import ScreenCapture
@@ -23,6 +23,7 @@ from ui.canvas_view import CanvasView
 from ui.magnifier_widget import MagnifierWidget
 from ui.widgets.color_badge import ColorChipWidget, WarningBadge
 from ui.reference_gallery_dialog import ReferenceGalleryDialog
+from ui.qt_image_utils import qimage_to_pil
 
 
 class ConditionEditorDialog(QDialog):
@@ -59,7 +60,10 @@ class ConditionEditorDialog(QDialog):
         self.canvas.sig_nudge_requested.connect(self._on_nudge_point)
 
         # 1. Top Header Toolbar: Reference Image & Tools
-        top_bar = QHBoxLayout()
+        top_bar_widget = QWidget()
+        top_bar_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        top_bar = QHBoxLayout(top_bar_widget)
+        top_bar.setContentsMargins(0, 0, 0, 0)
         top_bar.setSpacing(6)
 
         # Image Load Buttons
@@ -146,7 +150,7 @@ class ConditionEditorDialog(QDialog):
         self.btn_fullscreen.clicked.connect(self._toggle_fullscreen)
         top_bar.addWidget(self.btn_fullscreen)
 
-        main_layout.addLayout(top_bar)
+        main_layout.addWidget(top_bar_widget)
 
         # Warning Banner for Duplicates / Non-uniqueness
         self.lbl_warning_banner = QLabel()
@@ -222,10 +226,13 @@ class ConditionEditorDialog(QDialog):
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 0)
         self.splitter.setSizes([940, 320])
-        main_layout.addWidget(self.splitter)
+        main_layout.addWidget(self.splitter, 1)
 
         # 3. Bottom Action Buttons: Save / Cancel
-        bottom_bar = QHBoxLayout()
+        bottom_bar_widget = QWidget()
+        bottom_bar_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        bottom_bar = QHBoxLayout(bottom_bar_widget)
+        bottom_bar.setContentsMargins(0, 0, 0, 0)
         bottom_bar.addStretch()
 
         btn_cancel = QPushButton("취소")
@@ -237,21 +244,44 @@ class ConditionEditorDialog(QDialog):
         btn_save.clicked.connect(self._on_save)
         bottom_bar.addWidget(btn_save)
 
-        main_layout.addLayout(bottom_bar)
+        main_layout.addWidget(bottom_bar_widget)
 
     def _load_condition_data(self):
         # Set target resolution on canvas
         from core.window_manager import WindowManager
         target_info = WindowManager.get_window_info(self.target_hwnd) if self.target_hwnd else None
-        if target_info and target_info.client_width > 0:
-            self.canvas.set_target_resolution(target_info.client_width, target_info.client_height)
-        elif hasattr(self.project, "target_client_width") and self.project.target_client_width > 0:
-            self.canvas.set_target_resolution(self.project.target_client_width, self.project.target_client_height)
+        target_w = target_info.client_width if target_info and target_info.client_width > 0 else (getattr(self.project, "target_client_width", 0) or 1600)
+        target_h = target_info.client_height if target_info and target_info.client_height > 0 else (getattr(self.project, "target_client_height", 0) or 900)
+        self.canvas.set_target_resolution(target_w, target_h)
 
+        loaded = False
         # Load reference image if exists
         if self.condition.reference_image_path and os.path.exists(self.condition.reference_image_path):
-            self.canvas.load_image_from_path(self.condition.reference_image_path)
+            try:
+                self.canvas.load_image_from_path(self.condition.reference_image_path)
+                loaded = True
+            except Exception:
+                pass
 
+        if not loaded and self.target_hwnd:
+            try:
+                from core.screen_capture import ScreenCapture
+                img = ScreenCapture.capture_client_area(self.target_hwnd)
+                if img:
+                    from ui.qt_image_utils import pil_to_qpixmap
+                    self.canvas.pixmap = pil_to_qpixmap(img)
+                    self.canvas.qimage = self.canvas.pixmap.toImage()
+                    self.canvas.fit_to_view()
+                    self.canvas.update()
+                    loaded = True
+            except Exception:
+                pass
+
+        if not loaded:
+            # Create Dummy Canvas when target app is not specified!
+            from core.dummy_canvas import create_dummy_canvas_qimage
+            dummy_qimg = create_dummy_canvas_qimage(target_w, target_h)
+            self.canvas.set_qimage(dummy_qimg)
 
         # Set canvas points
         self.canvas.set_points(self.condition.points)
@@ -325,7 +355,7 @@ class ConditionEditorDialog(QDialog):
         pil_ref = None
         if self.canvas.qimage and not self.canvas.qimage.isNull():
             try:
-                pil_ref = ImageQt.fromqimage(self.canvas.qimage)
+                pil_ref = qimage_to_pil(self.canvas.qimage)
             except Exception:
                 pil_ref = None
 

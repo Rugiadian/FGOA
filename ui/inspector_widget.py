@@ -8,12 +8,14 @@ Supports independent condition/action combining and compact high-density layout.
 """
 from typing import Optional, List
 import copy
+import time
+import random
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
     QScrollArea, QFrame, QMessageBox, QStackedWidget, QSplitter,
-    QMenu
+    QMenu, QApplication
 )
 from PyQt5.QtGui import QColor, QFont
 from PyQt5.QtCore import Qt, pyqtSignal
@@ -454,46 +456,51 @@ class InspectorWidget(QWidget):
         layout.setContentsMargins(6, 10, 6, 6)
         layout.setSpacing(4)
 
-        # Quick Add Buttons Bar + Copy from other scenario
-        add_bar = QHBoxLayout()
-        add_bar.setSpacing(4)
+        # Quick Add Buttons Bar + Copy from other scenario (2 Rows for neat layout)
+        # Row 1: Quick Add Buttons
+        add_bar_row1 = QHBoxLayout()
+        add_bar_row1.setSpacing(4)
 
         btn_add_click = QPushButton("🖱️+클릭")
         btn_add_click.clicked.connect(lambda: self._on_quick_add_action("mouse_click"))
-        add_bar.addWidget(btn_add_click)
+        add_bar_row1.addWidget(btn_add_click)
 
         btn_add_drag = QPushButton("↔️+드래그")
         btn_add_drag.clicked.connect(lambda: self._on_quick_add_action("mouse_drag"))
-        add_bar.addWidget(btn_add_drag)
+        add_bar_row1.addWidget(btn_add_drag)
 
         btn_add_key = QPushButton("⌨️+키")
         btn_add_key.clicked.connect(lambda: self._on_quick_add_action("key_press"))
-        add_bar.addWidget(btn_add_key)
+        add_bar_row1.addWidget(btn_add_key)
 
         btn_add_text = QPushButton("📝+텍스트")
         btn_add_text.clicked.connect(lambda: self._on_quick_add_action("text_type"))
-        add_bar.addWidget(btn_add_text)
+        add_bar_row1.addWidget(btn_add_text)
 
         btn_add_delay = QPushButton("⏳+대기")
         btn_add_delay.clicked.connect(lambda: self._on_quick_add_action("delay"))
-        add_bar.addWidget(btn_add_delay)
+        add_bar_row1.addWidget(btn_add_delay)
 
-        add_bar.addSpacing(4)
+        add_bar_row1.addStretch()
+        layout.addLayout(add_bar_row1)
+
+        # Row 2: Operation Recording & Sequence Copy
+        add_bar_row2 = QHBoxLayout()
+        add_bar_row2.setSpacing(4)
 
         btn_record = QPushButton("⏺️ 조작 녹화")
         btn_record.setStyleSheet("color: #dc2626; font-weight: bold;")
         btn_record.setToolTip("타겟 게임 창에서 직접 마우스 클릭 및 드래그를 조작하여 실시간으로 액션을 녹화합니다.")
         btn_record.clicked.connect(self._on_start_operation_recording)
-        add_bar.addWidget(btn_record)
-
-        add_bar.addStretch()
+        add_bar_row2.addWidget(btn_record)
 
         self.btn_copy_act = QPushButton("📋 가져오기...")
         self.btn_copy_act.setToolTip("다른 시나리오의 액션 시퀀스를 복사해와서 조합합니다.")
         self.btn_copy_act.clicked.connect(self._on_copy_actions_from_other)
-        add_bar.addWidget(self.btn_copy_act)
+        add_bar_row2.addWidget(self.btn_copy_act)
 
-        layout.addLayout(add_bar)
+        add_bar_row2.addStretch()
+        layout.addLayout(add_bar_row2)
 
         # Actions Table
         self.tbl_actions = QTableWidget()
@@ -514,39 +521,51 @@ class InspectorWidget(QWidget):
         self.tbl_actions.cellDoubleClicked.connect(lambda r, c: self._on_edit_action())
         layout.addWidget(self.tbl_actions)
 
-        # Actions Control Buttons Row
-        act_ctrl_row = QHBoxLayout()
-        act_ctrl_row.setSpacing(4)
+        # Actions Control Buttons - Row 1: Item Manipulation (Edit, Pick Coord, Delete, Up, Down)
+        act_ctrl_row1 = QHBoxLayout()
+        act_ctrl_row1.setSpacing(4)
         btn_edit_act = QPushButton("✏️ 편집")
         btn_edit_act.clicked.connect(self._on_edit_action)
-        act_ctrl_row.addWidget(btn_edit_act)
+        act_ctrl_row1.addWidget(btn_edit_act)
 
-        btn_pick_coord_act = QPushButton("🎯 레퍼런스로 좌표 지정...")
-        btn_pick_coord_act.setToolTip("선택한 액션의 좌표를 레퍼런스 이미지나 현재 게임 창 화면에서 직접 클릭하여 지정합니다.")
+        btn_pick_coord_act = QPushButton("🎯 액션 시퀀스 이미지로 좌표 지정...")
+        btn_pick_coord_act.setToolTip("액션 시퀀스 이미지로 좌표 지정 작업창을 열어 레퍼런스 이미지 상에서 좌표를 직접 지정 및 편집합니다.")
         btn_pick_coord_act.clicked.connect(self._on_pick_coord_for_selected_action)
-        act_ctrl_row.addWidget(btn_pick_coord_act)
+        act_ctrl_row1.addWidget(btn_pick_coord_act)
 
         btn_del_act = QPushButton("🗑️ 삭제")
         btn_del_act.clicked.connect(self._on_delete_action)
-        act_ctrl_row.addWidget(btn_del_act)
+        act_ctrl_row1.addWidget(btn_del_act)
 
         btn_up_act = QPushButton("⬆️ 위로")
         btn_up_act.clicked.connect(self._on_move_action_up)
-        act_ctrl_row.addWidget(btn_up_act)
+        act_ctrl_row1.addWidget(btn_up_act)
 
         btn_down_act = QPushButton("⬇️ 아래로")
         btn_down_act.clicked.connect(self._on_move_action_down)
-        act_ctrl_row.addWidget(btn_down_act)
+        act_ctrl_row1.addWidget(btn_down_act)
 
-        act_ctrl_row.addSpacing(6)
+        act_ctrl_row1.addStretch()
+        layout.addLayout(act_ctrl_row1)
 
-        btn_test_act = QPushButton("⚡ 선택 액션 즉시 실행")
-        btn_test_act.setStyleSheet("color: #2563eb; font-weight: bold;")
-        btn_test_act.clicked.connect(self._on_test_action_now)
-        act_ctrl_row.addWidget(btn_test_act)
+        # Actions Control Buttons - Row 2: Test & Execution (Single Action & Full Sequence)
+        act_ctrl_row2 = QHBoxLayout()
+        act_ctrl_row2.setSpacing(4)
 
-        act_ctrl_row.addStretch()
-        layout.addLayout(act_ctrl_row)
+        self.btn_test_act = QPushButton("⚡ 선택 액션 즉시 실행")
+        self.btn_test_act.setStyleSheet("color: #2563eb; font-weight: bold;")
+        self.btn_test_act.setToolTip("목록에서 선택한 단일 액션을 현재 타겟 창에 즉시 테스트 실행합니다.")
+        self.btn_test_act.clicked.connect(self._on_test_action_now)
+        act_ctrl_row2.addWidget(self.btn_test_act)
+
+        self.btn_test_all_act = QPushButton("▶ 전체 시퀀스 실행 테스트")
+        self.btn_test_all_act.setStyleSheet("color: #16a34a; font-weight: bold;")
+        self.btn_test_all_act.setToolTip("이 시나리오에 등록된 모든 액션을 등록된 순서대로 순차 테스트 실행합니다.")
+        self.btn_test_all_act.clicked.connect(self._on_test_all_actions_now)
+        act_ctrl_row2.addWidget(self.btn_test_all_act)
+
+        act_ctrl_row2.addStretch()
+        layout.addLayout(act_ctrl_row2)
 
         return grp
 
@@ -963,8 +982,8 @@ class InspectorWidget(QWidget):
             QMessageBox.warning(self, "타겟 창 필요", "상단에서 타겟 게임 창을 먼저 선택해주세요.")
             return
 
+        cond = self.current_scenario.condition
         try:
-            cond = self.current_scenario.condition
             matched, details = ConditionEvaluator.evaluate(cond, self.target_hwnd)
 
             self.lbl_cond_test_result.setVisible(True)
@@ -1077,37 +1096,28 @@ class InspectorWidget(QWidget):
         if not self.current_scenario:
             return
         rows = self.tbl_actions.selectionModel().selectedRows()
-        if not rows:
-            QMessageBox.information(self, "액션 선택", "좌표를 지정할 액션을 먼저 표에서 선택해주세요.")
-            return
-        row = rows[0].row()
-        act = self.current_scenario.actions[row]
-        if act.action_type not in ("mouse_click", "mouse_drag"):
-            QMessageBox.information(self, "좌표 미지원", "마우스 클릭 또는 드래그 액션만 좌표를 지정할 수 있습니다.")
-            return
+        row = rows[0].row() if rows else 0
+        act = self.current_scenario.actions[row] if (self.current_scenario.actions and 0 <= row < len(self.current_scenario.actions)) else None
 
         from ui.coordinate_picker_dialog import CoordinatePickerDialog
         ref_path = self.current_scenario.condition.reference_image_path if self.current_scenario.condition else None
         dlg = CoordinatePickerDialog(
             image_path=ref_path,
             target_hwnd=self.target_hwnd,
-            initial_x=act.x,
-            initial_y=act.y,
-            drag_mode=(act.action_type == "mouse_drag"),
-            initial_end_x=act.end_x if act.action_type == "mouse_drag" else 0,
-            initial_end_y=act.end_y if act.action_type == "mouse_drag" else 0,
+            initial_x=act.x if act else 0,
+            initial_y=act.y if act else 0,
+            drag_mode=(act.action_type == "mouse_drag") if act else False,
+            initial_end_x=act.end_x if (act and act.action_type == "mouse_drag") else 0,
+            initial_end_y=act.end_y if (act and act.action_type == "mouse_drag") else 0,
+            actions=self.current_scenario.actions,
+            selected_action_index=row if act else 0,
             parent=self
         )
         if dlg.exec_() == CoordinatePickerDialog.Accepted:
-            x, y, ex, ey = dlg.get_coordinates()
-            act.x = x
-            act.y = y
-            if act.action_type == "mouse_drag":
-                act.end_x = ex
-                act.end_y = ey
+            self.current_scenario.actions = dlg.get_actions()
             self._refresh_actions_table()
             self._on_field_changed()
-            self.sig_log.emit("INFO", f"🎯 액션 #{row + 1} 좌표가 ({x}, {y})로 설정되었습니다.")
+            self.sig_log.emit("INFO", "🎯 액션 시퀀스 좌표 및 목록이 업데이트되었습니다.")
 
     def _on_delete_action(self):
         if not self.current_scenario:
@@ -1137,10 +1147,12 @@ class InspectorWidget(QWidget):
         if not self.current_scenario:
             return
         rows = self.tbl_actions.selectionModel().selectedRows()
-        if not rows or rows[0].row() >= len(self.current_scenario.actions) - 1:
+        if not rows:
             return
         r = rows[0].row()
         acts = self.current_scenario.actions
+        if r >= len(acts) - 1:
+            return
         acts[r + 1], acts[r] = acts[r], acts[r + 1]
         self._refresh_actions_table()
         self.tbl_actions.selectRow(r + 1)
@@ -1158,9 +1170,112 @@ class InspectorWidget(QWidget):
             return
 
         act = self.current_scenario.actions[rows[0].row()]
+        use_anti_ban = getattr(self.project, "anti_ban_enabled", False) if self.project else False
+        act_anti_ban = getattr(act, "anti_ban", None)
+        should_anti_ban = act_anti_ban if act_anti_ban is not None else use_anti_ban
+
+        min_del = getattr(self.project, "anti_ban_min_delay", 0.15) if self.project else 0.15
+        max_del = getattr(self.project, "anti_ban_max_delay", 1.0) if self.project else 1.0
+        jitter = round(random.uniform(min_del, max_del), 3) if should_anti_ban else 0.0
+
+        orig_t = act.delay_seconds if act.action_type == "delay" else getattr(act, "delay_seconds", 0.0)
+        ab_t = round(orig_t + jitter, 2)
+        sleep_total = ab_t if should_anti_ban else orig_t
+
+        if act.action_type == "delay":
+            act_msg = f"{sleep_total:.1f}초 (원본{orig_t:.2f}초) 대기"
+        else:
+            extra_str = f" (안티밴 +{jitter:.2f}초)" if should_anti_ban and jitter > 0 else ""
+            act_msg = f"{act.get_summary()}{extra_str}"
+
         try:
-            InputController.execute_action(act, self.target_hwnd)
-            self.sig_log.emit("ACTION", f"테스트 액션 실행 완료: [{act.action_type}]")
+            InputController.execute_action(
+                act, self.target_hwnd,
+                apply_anti_ban=use_anti_ban,
+                min_delay=min_del,
+                max_delay=max_del,
+                precomputed_jitter=jitter
+            )
+            self.sig_log.emit("ACTION", f"테스트 액션 실행 완료: [{act_msg}]")
         except Exception as e:
             self.sig_log.emit("ERROR", f"액션 실행 실패: {e}")
             QMessageBox.critical(self, "실행 오류", f"액션 실행 중 오류 발생:\n{e}")
+
+    def _on_test_all_actions_now(self):
+        if not self.current_scenario:
+            return
+        if not self.current_scenario.actions:
+            QMessageBox.information(self, "액션 없음", "실행할 액션이 시퀀스에 없습니다.")
+            return
+        if not self.target_hwnd:
+            QMessageBox.warning(self, "타겟 창 필요", "상단에서 타겟 게임 창을 먼저 선택해주세요.")
+            return
+
+        actions = self.current_scenario.actions
+        total = len(actions)
+        self.sig_log.emit("INFO", f"▶ [{self.current_scenario.name}] 전체 액션 시퀀스 테스트 시작 (총 {total}개)...")
+
+        if hasattr(self, "btn_test_all_act"):
+            self.btn_test_all_act.setEnabled(False)
+        if hasattr(self, "btn_test_act"):
+            self.btn_test_act.setEnabled(False)
+
+        use_anti_ban = getattr(self.project, "anti_ban_enabled", False) if self.project else False
+        min_del = getattr(self.project, "anti_ban_min_delay", 0.15) if self.project else 0.15
+        max_del = getattr(self.project, "anti_ban_max_delay", 1.0) if self.project else 1.0
+
+        try:
+            for idx, act in enumerate(actions, 1):
+                self.tbl_actions.selectRow(idx - 1)
+                QApplication.processEvents()
+
+                act_anti_ban = getattr(act, "anti_ban", None)
+                should_anti_ban = act_anti_ban if act_anti_ban is not None else use_anti_ban
+                jitter = round(random.uniform(min_del, max_del), 3) if should_anti_ban else 0.0
+
+                orig_t = act.delay_seconds if act.action_type == "delay" else getattr(act, "delay_seconds", 0.0)
+                ab_t = round(orig_t + jitter, 2)
+                sleep_total = ab_t if should_anti_ban else orig_t
+
+                if act.action_type == "delay":
+                    act_msg = f"{sleep_total:.1f}초 (원본{orig_t:.2f}초) 대기"
+                else:
+                    extra_str = f" (안티밴 +{jitter:.2f}초)" if should_anti_ban and jitter > 0 else ""
+                    act_msg = f"{act.get_summary()}{extra_str}"
+
+                self.sig_log.emit("ACTION", f"  [{idx}/{total}] 액션 실행: {act_msg}")
+
+                if act.action_type == "delay" and act.delay_seconds > 0.05:
+                    remaining = sleep_total
+                    while remaining > 0:
+                        step_sleep = min(0.1, remaining)
+                        time.sleep(step_sleep)
+                        remaining -= step_sleep
+                        QApplication.processEvents()
+                else:
+                    if self.target_hwnd:
+                        InputController.execute_action(
+                            act, self.target_hwnd,
+                            apply_anti_ban=use_anti_ban,
+                            min_delay=min_del,
+                            max_delay=max_del,
+                            precomputed_jitter=jitter
+                        )
+                    else:
+                        time.sleep(0.08)
+
+                time.sleep(0.04)
+                QApplication.processEvents()
+
+                time.sleep(0.05)
+                QApplication.processEvents()
+
+            self.sig_log.emit("SUCCESS", f"✅ [{self.current_scenario.name}] 전체 액션 시퀀스({total}개) 테스트 실행 완료")
+        except Exception as e:
+            self.sig_log.emit("ERROR", f"액션 시퀀스 실행 중 오류: {e}")
+            QMessageBox.critical(self, "실행 오류", f"액션 시퀀스 실행 중 오류 발생:\n{e}")
+        finally:
+            if hasattr(self, "btn_test_all_act"):
+                self.btn_test_all_act.setEnabled(True)
+            if hasattr(self, "btn_test_act"):
+                self.btn_test_act.setEnabled(True)

@@ -6,7 +6,7 @@ cognition conditions (Eye) and action coordinates (Hand).
 import os
 import glob
 from typing import List, Dict, Any, Optional
-from PIL import Image, ImageQt
+from PIL import Image
 from PyQt5.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QListWidget, QListWidgetItem, QSplitter,
@@ -19,6 +19,7 @@ from PyQt5.QtGui import QPixmap, QIcon, QColor, QFont
 from core.models import Project, Scenario
 from core.screen_capture import ScreenCapture
 from ui.coordinate_picker_dialog import CoordinatePickerDialog
+from ui.qt_image_utils import pil_to_qpixmap
 
 
 REFS_DIR = os.path.expanduser("~/.fgoa_refs")
@@ -272,8 +273,7 @@ class ReferenceGalleryDialog(QDialog):
                 with Image.open(entry["path"]) as im:
                     thumb = im.copy()
                     thumb.thumbnail((72, 48))
-                    qim = ImageQt.ImageQt(thumb)
-                    pix = QPixmap.fromImage(qim)
+                    pix = pil_to_qpixmap(thumb)
                     item.setIcon(QIcon(pix))
             except Exception:
                 pass

@@ -438,6 +438,14 @@ class MainWindow(QMainWindow):
         self.spin_loop_delay.valueChanged.connect(self._on_loop_delay_changed)
         c_layout.addWidget(self.spin_loop_delay)
 
+        c_layout.addSpacing(15)
+
+        self.chk_anti_ban = QCheckBox("🛡️ 안티밴")
+        self.chk_anti_ban.setChecked(self.project.anti_ban_enabled)
+        self.chk_anti_ban.setToolTip("안티밴 모드 활성화:\n- 액션 좌표에 ±10픽셀 무작위 오프셋 적용\n- 0.15~1.0초 가변 지연시간 무작위 분포 적용")
+        self.chk_anti_ban.toggled.connect(self._on_anti_ban_toggled)
+        c_layout.addWidget(self.chk_anti_ban)
+
         c_layout.addStretch()
 
         self.lbl_run_status = QLabel("대기 중")
@@ -1003,6 +1011,11 @@ class MainWindow(QMainWindow):
     def _on_loop_delay_changed(self, val: float):
         self.project.loop_delay_seconds = val
 
+    def _on_anti_ban_toggled(self, checked: bool):
+        self.project.anti_ban_enabled = checked
+        state_str = "활성화 (좌표 ±10px, 0.15~1.0s 가변 지연)" if checked else "비활성화"
+        self._append_log("INFO", f"🛡️ 안티밴 모드가 {state_str}되었습니다.")
+
     # ==========================================
     # Save & Open Project
     # ==========================================
@@ -1031,6 +1044,7 @@ class MainWindow(QMainWindow):
                 self.current_project_path = path
                 self.spin_loops.setValue(self.project.loop_count)
                 self.spin_loop_delay.setValue(self.project.loop_delay_seconds)
+                self.chk_anti_ban.setChecked(self.project.anti_ban_enabled)
                 self._refresh_scenario_table()
                 if self.project.scenarios:
                     self.tbl_scenarios.selectRow(0)

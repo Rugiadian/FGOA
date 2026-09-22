@@ -3,6 +3,7 @@ Input Controller module for FGOA.
 Simulates mouse clicks, drags, keyboard shortcuts, and text entry using Win32 API SendInput.
 """
 import time
+import random
 import ctypes
 from ctypes import wintypes
 from typing import List, Tuple, Optional
@@ -174,20 +175,56 @@ class InputController:
             pass
 
     @classmethod
-    def execute_action(cls, action, hwnd: int = 0):
+    def execute_action(
+        cls,
+        action,
+        hwnd: int = 0,
+        apply_anti_ban: Optional[bool] = None,
+        offset_range: int = 10,
+        min_delay: float = 0.15,
+        max_delay: float = 1.0,
+        precomputed_jitter: Optional[float] = None
+    ) -> Tuple[int, int, float, float]:
         """
         Executes a single Action model instance against target window hwnd.
         Supports mouse_click, mouse_drag, key_press, text_type, delay, sound_beep, log_message.
+        When anti-ban is enabled, random coordinate offset (+-offset_range) and
+        variable action distribution delay (min_delay~max_delay) are applied.
+        Returns (executed_x, executed_y, original_time, final_time).
         """
         if not action:
-            return
+            return 0, 0, 0.0, 0.0
+
+        act_anti_ban = getattr(action, "anti_ban", None)
+        should_anti_ban = act_anti_ban if act_anti_ban is not None else bool(apply_anti_ban)
+
+        act_x = action.x
+        act_y = action.y
+        act_end_x = getattr(action, "end_x", 0)
+        act_end_y = getattr(action, "end_y", 0)
+
+        jitter = 0.0
+        if should_anti_ban:
+            jitter = precomputed_jitter if precomputed_jitter is not None else round(random.uniform(min_delay, max_delay), 3)
+            dx = random.randint(-offset_range, offset_range)
+            dy = random.randint(-offset_range, offset_range)
+            act_x = max(0, act_x + dx)
+            act_y = max(0, act_y + dy)
+            if getattr(action, "action_type", "") == "mouse_drag":
+                edx = random.randint(-offset_range, offset_range)
+                edy = random.randint(-offset_range, offset_range)
+                act_end_x = max(0, act_end_x + edx)
+                act_end_y = max(0, act_end_y + edy)
+
+        orig_time = action.delay_seconds if action.action_type == "delay" else getattr(action, "delay_seconds", 0.0)
+        final_time = round(orig_time + jitter, 2) if should_anti_ban else orig_time
 
         act_type = getattr(action, "action_type", "")
         if act_type == "mouse_click":
             cls.click_at(
                 hwnd=hwnd,
-                rel_x=action.x,
-                rel_y=action.y,
+                rel_x=act_x,
+                rel_y=act_y,
                 button=action.mouse_button,
                 click_type=action.click_type,
                 repeat=action.repeat_count
@@ -195,10 +232,10 @@ class InputController:
         elif act_type == "mouse_drag":
             cls.drag_and_drop(
                 hwnd=hwnd,
-                start_x=action.x,
-                start_y=action.y,
-                end_x=action.end_x,
-                end_y=action.end_y,
+                start_x=act_x,
+                start_y=act_y,
+                end_x=act_end_x,
+                end_y=act_end_y,
                 duration_ms=action.drag_duration_ms
             )
         elif act_type == "key_press":
@@ -206,9 +243,15 @@ class InputController:
         elif act_type == "text_type":
             cls.type_text(action.text)
         elif act_type == "delay":
-            time.sleep(action.delay_seconds)
+            time.sleep(max(0.0, final_time))
+            return act_x, act_y, orig_time, final_time
         elif act_type == "sound_beep":
             cls.beep(action.beep_freq, action.beep_duration_ms)
         elif act_type == "log_message":
             pass
+
+        if should_anti_ban and jitter > 0:
+            time.sleep(jitter)
+
+        return act_x, act_y, orig_time, final_time
 

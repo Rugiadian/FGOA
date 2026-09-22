@@ -91,6 +91,9 @@ class Action:
     # Delay params
     delay_seconds: float = 0.5
     
+    # Anti-ban override (None = use project default, True/False = explicit)
+    anti_ban: Optional[bool] = None
+
     # Log / Beep
     log_text: str = ""
     beep_freq: int = 1000
@@ -267,6 +270,10 @@ class Project:
     target_client_height: int = 900
     loop_count: int = 1  # 0 means infinite loop
     loop_delay_seconds: float = 1.0
+    anti_ban_enabled: bool = False
+    anti_ban_offset: int = 10
+    anti_ban_min_delay: float = 0.15
+    anti_ban_max_delay: float = 1.0
     scenarios: List[Scenario] = field(default_factory=list)
 
     def renumber_steps(self):
@@ -353,6 +360,10 @@ class Project:
             "target_client_height": self.target_client_height,
             "loop_count": self.loop_count,
             "loop_delay_seconds": self.loop_delay_seconds,
+            "anti_ban_enabled": self.anti_ban_enabled,
+            "anti_ban_offset": self.anti_ban_offset,
+            "anti_ban_min_delay": self.anti_ban_min_delay,
+            "anti_ban_max_delay": self.anti_ban_max_delay,
             "scenarios": [s.to_dict() for s in self.scenarios]
         }
 
@@ -367,6 +378,10 @@ class Project:
             target_client_height=data.get("target_client_height", 900),
             loop_count=data.get("loop_count", 1),
             loop_delay_seconds=data.get("loop_delay_seconds", 1.0),
+            anti_ban_enabled=data.get("anti_ban_enabled", False),
+            anti_ban_offset=data.get("anti_ban_offset", 10),
+            anti_ban_min_delay=data.get("anti_ban_min_delay", 0.15),
+            anti_ban_max_delay=data.get("anti_ban_max_delay", 1.0),
             scenarios=scenarios
         )
         proj.renumber_steps()

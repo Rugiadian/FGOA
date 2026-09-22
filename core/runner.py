@@ -3,6 +3,7 @@ Execution Runner Engine for FGOA.
 Runs scenarios in a background QThread, handling conditions, actions, branching, and loops.
 """
 import time
+import random
 from typing import Optional
 from PyQt5.QtCore import QThread, pyqtSignal
 from core.models import Project, Scenario, Action
@@ -263,6 +264,11 @@ class WorkflowRunner(QThread):
 
     def _execute_actions(self, scenario: Scenario):
         """Sequentially execute all actions defined in the scenario."""
+        use_anti_ban = getattr(self.project, "anti_ban_enabled", False)
+        offset_range = getattr(self.project, "anti_ban_offset", 10)
+        min_del = getattr(self.project, "anti_ban_min_delay", 0.15)
+        max_del = getattr(self.project, "anti_ban_max_delay", 1.0)
+
         for act in scenario.actions:
             if not self._is_running:
                 break
@@ -271,36 +277,33 @@ class WorkflowRunner(QThread):
             while self._is_running and self._is_paused:
                 time.sleep(0.05)
 
-            self.sig_log.emit("ACTION", f"  ▶ 액션 실행: {act.get_summary()}")
+            # Determine anti-ban time formatting
+            act_anti_ban = getattr(act, "anti_ban", None)
+            should_anti_ban = act_anti_ban if act_anti_ban is not None else use_anti_ban
+            jitter = round(random.uniform(min_del, max_del), 3) if should_anti_ban else 0.0
 
-            if act.action_type == "mouse_click":
-                InputController.click_at(
-                    hwnd=self.hwnd,
-                    rel_x=act.x,
-                    rel_y=act.y,
-                    button=act.mouse_button,
-                    click_type=act.click_type,
-                    repeat=act.repeat_count
-                )
-            elif act.action_type == "mouse_drag":
-                InputController.drag_and_drop(
-                    hwnd=self.hwnd,
-                    start_x=act.x,
-                    start_y=act.y,
-                    end_x=act.end_x,
-                    end_y=act.end_y,
-                    duration_ms=act.drag_duration_ms
-                )
-            elif act.action_type == "key_press":
-                InputController.send_key_combination(act.key, act.modifiers)
-            elif act.action_type == "text_type":
-                InputController.type_text(act.text)
-            elif act.action_type == "delay":
-                time.sleep(act.delay_seconds)
-            elif act.action_type == "sound_beep":
-                InputController.beep(act.beep_freq, act.beep_duration_ms)
-            elif act.action_type == "log_message":
+            orig_t = act.delay_seconds if act.action_type == "delay" else getattr(act, "delay_seconds", 0.0)
+            if act.action_type == "delay":
+                sleep_total = round(orig_t + jitter, 2) if should_anti_ban else orig_t
+                log_msg = f"액션 실행: {sleep_total:.1f}초 (원본{orig_t:.2f}초) 대기"
+            else:
+                extra_str = f" (안티밴 +{jitter:.2f}초)" if should_anti_ban and jitter > 0 else ""
+                log_msg = f"액션 실행: {act.get_summary()}{extra_str}"
+
+            self.sig_log.emit("ACTION", f"  ▶ {log_msg}")
+
+            if act.action_type == "log_message":
                 self.sig_log.emit("USER", f"  [사용자 로그] {act.log_text}")
+
+            InputController.execute_action(
+                action=act,
+                hwnd=self.hwnd,
+                apply_anti_ban=use_anti_ban,
+                offset_range=offset_range,
+                min_delay=min_del,
+                max_delay=max_del,
+                precomputed_jitter=jitter
+            )
 
             # Small safety delay between actions
             time.sleep(0.05)

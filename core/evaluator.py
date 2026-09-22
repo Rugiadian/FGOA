@@ -58,9 +58,9 @@ class ConditionEvaluator:
         return points
 
     @staticmethod
-    def evaluate(condition: Optional[Condition], hwnd: int) -> Tuple[bool, List[Dict[str, Any]]]:
+    def evaluate(condition: Optional[Condition], hwnd: int = 0, image: Optional[Image.Image] = None) -> Tuple[bool, List[Dict[str, Any]]]:
         """
-        Evaluates condition against live target window HWND.
+        Evaluates condition against live target window HWND or provided Image (dummy canvas / reference).
         Returns:
             (is_matched, point_results_list)
         """
@@ -73,7 +73,12 @@ class ConditionEvaluator:
         total_points = len(condition.points)
 
         for pt in condition.points:
-            actual_color = ScreenCapture.get_client_pixel_color(hwnd, pt.x, pt.y)
+            if image is not None:
+                color = ScreenCapture.get_image_pixel(image, pt.x, pt.y)
+                actual_color = color[:3] if color else None
+            else:
+                actual_color = ScreenCapture.get_client_pixel_color(hwnd, pt.x, pt.y)
+
             if actual_color is None:
                 passed = False
                 actual_rgb = (0, 0, 0)

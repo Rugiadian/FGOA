@@ -3,12 +3,13 @@ Action Sequence Editor Dialog for FGOA.
 Allows editing mouse clicks, drags, delays, keystrokes, and text inputs for a scenario.
 """
 import copy
+import time
 from typing import List, Optional
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox,
     QSpinBox, QDoubleSpinBox, QLineEdit, QGroupBox, QMessageBox,
-    QFormLayout
+    QFormLayout, QApplication, QCheckBox
 )
 from PyQt5.QtCore import Qt
 from core.models import Action
@@ -159,6 +160,14 @@ class SingleActionDialog(QDialog):
         l_delay.addRow("대기 시간:", self.spin_delay)
         form.addRow(self.grp_delay)
 
+        # 6. Anti-ban options
+        self.grp_antiban = QGroupBox("🛡️ 안티밴 설정")
+        l_ab = QFormLayout(self.grp_antiban)
+        self.chk_anti_ban = QCheckBox("이 액션에 안티밴 적용 (좌표 ±10px / 0.15~1.0초 가변 지연)")
+        self.chk_anti_ban.setChecked(bool(self.action.anti_ban))
+        l_ab.addRow(self.chk_anti_ban)
+        form.addRow(self.grp_antiban)
+
         layout.addLayout(form)
         self._update_visibility()
 
@@ -212,6 +221,8 @@ class SingleActionDialog(QDialog):
         elif self.action.action_type == "delay":
             self.action.delay_seconds = self.spin_delay.value()
 
+        self.action.anti_ban = True if self.chk_anti_ban.isChecked() else None
+
         self.accept()
 
     def _on_pick_coordinates_from_image(self, drag_mode: bool = False):
@@ -234,6 +245,10 @@ class SingleActionDialog(QDialog):
             if drag_mode:
                 self.spin_end_x.setValue(ex)
                 self.spin_end_y.setValue(ey)
+
+    def get_action(self) -> Action:
+        """Returns the edited Action instance."""
+        return self.action
 
 
 class ActionEditorDialog(QDialog):
@@ -261,39 +276,51 @@ class ActionEditorDialog(QDialog):
         self.tbl_actions.setSelectionBehavior(QTableWidget.SelectRows)
         layout.addWidget(self.tbl_actions)
 
-        # Toolbar buttons
-        btn_bar = QHBoxLayout()
+        # Toolbar buttons - Row 1: Add, Edit, Del, Up, Down
+        btn_bar1 = QHBoxLayout()
+        btn_bar1.setSpacing(4)
 
         btn_add = QPushButton("➕ 액션 추가")
         btn_add.clicked.connect(self._on_add_action)
-        btn_bar.addWidget(btn_add)
+        btn_bar1.addWidget(btn_add)
 
         btn_edit = QPushButton("✏️ 액션 수정")
         btn_edit.clicked.connect(self._on_edit_action)
-        btn_bar.addWidget(btn_edit)
+        btn_bar1.addWidget(btn_edit)
 
         btn_del = QPushButton("🗑️ 삭제")
         btn_del.clicked.connect(self._on_delete_action)
-        btn_bar.addWidget(btn_del)
+        btn_bar1.addWidget(btn_del)
 
-        btn_bar.addSpacing(15)
+        btn_bar1.addSpacing(10)
 
         btn_up = QPushButton("⬆️ 위로")
         btn_up.clicked.connect(self._on_move_up)
-        btn_bar.addWidget(btn_up)
+        btn_bar1.addWidget(btn_up)
 
         btn_down = QPushButton("⬇️ 아래로")
         btn_down.clicked.connect(self._on_move_down)
-        btn_bar.addWidget(btn_down)
+        btn_bar1.addWidget(btn_down)
 
-        btn_bar.addStretch()
+        btn_bar1.addStretch()
+        layout.addLayout(btn_bar1)
 
-        btn_test = QPushButton("▶ 단일 액션 테스트")
-        btn_test.setStyleSheet("background-color: #2e7d32; color: white;")
+        # Toolbar buttons - Row 2: Tests
+        btn_bar2 = QHBoxLayout()
+        btn_bar2.setSpacing(4)
+
+        btn_test = QPushButton("⚡ 선택 액션 테스트")
+        btn_test.setStyleSheet("color: #2563eb; font-weight: bold;")
         btn_test.clicked.connect(self._on_test_action)
-        btn_bar.addWidget(btn_test)
+        btn_bar2.addWidget(btn_test)
 
-        layout.addLayout(btn_bar)
+        btn_test_all = QPushButton("▶ 전체 시퀀스 테스트")
+        btn_test_all.setStyleSheet("color: #16a34a; font-weight: bold;")
+        btn_test_all.clicked.connect(self._on_test_all_actions)
+        btn_bar2.addWidget(btn_test_all)
+
+        btn_bar2.addStretch()
+        layout.addLayout(btn_bar2)
 
         # Bottom OK / Cancel
         bottom_bar = QHBoxLayout()
@@ -383,13 +410,42 @@ class ActionEditorDialog(QDialog):
             QMessageBox.warning(self, "경고", "타겟 창이 설정되어 있지 않습니다.")
             return
 
-        if act.action_type == "mouse_click":
-            InputController.click_at(self.target_hwnd, act.x, act.y, act.mouse_button, act.click_type, act.repeat_count)
-        elif act.action_type == "key_press":
-            InputController.send_key_combination(act.key, act.modifiers)
-        elif act.action_type == "sound_beep":
-            InputController.beep()
-        QMessageBox.information(self, "완료", f"액션 '{act.get_summary()}' 테스트를 실행했습니다.")
+        try:
+            InputController.execute_action(act, self.target_hwnd)
+            QMessageBox.information(self, "완료", f"액션 '{act.get_summary()}' 테스트를 실행했습니다.")
+        except Exception as e:
+            QMessageBox.critical(self, "실행 오류", f"액션 실행 중 오류 발생:\n{e}")
+
+    def _on_test_all_actions(self):
+        if not self.actions:
+            QMessageBox.warning(self, "경고", "실행할 액션이 없습니다.")
+            return
+        if not self.target_hwnd:
+            QMessageBox.warning(self, "경고", "타겟 창이 설정되어 있지 않습니다.")
+            return
+
+        total = len(self.actions)
+        try:
+            for idx, act in enumerate(self.actions):
+                self.tbl_actions.selectRow(idx)
+                QApplication.processEvents()
+
+                if act.action_type == "delay" and act.delay_seconds > 0.1:
+                    remaining = act.delay_seconds
+                    while remaining > 0:
+                        step_sleep = min(0.1, remaining)
+                        time.sleep(step_sleep)
+                        remaining -= step_sleep
+                        QApplication.processEvents()
+                else:
+                    InputController.execute_action(act, self.target_hwnd)
+
+                time.sleep(0.05)
+                QApplication.processEvents()
+
+            QMessageBox.information(self, "완료", f"전체 액션 시퀀스({total}개) 테스트 실행을 완료했습니다.")
+        except Exception as e:
+            QMessageBox.critical(self, "실행 오류", f"액션 시퀀스 실행 중 오류 발생:\n{e}")
 
     def get_actions(self) -> List[Action]:
         return self.actions

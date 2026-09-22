@@ -107,8 +107,14 @@ class ActionRecorder(QThread):
 
         now = time.time()
         elapsed_since_last = now - self._last_event_time
-        # Clamped delay between 0.1s and 10.0s
-        delay = round(max(0.1, min(elapsed_since_last, 10.0)), 2)
+        # Clamped delay between 0.05s and 60.0s
+        delay = round(max(0.05, min(elapsed_since_last, 60.0)), 2)
+
+        # Record wait time between clicks as an explicit delay action
+        if self.recorded_actions and elapsed_since_last >= 0.05:
+            delay_act = Action(action_type="delay", delay_seconds=delay)
+            self.recorded_actions.append(delay_act)
+            self.sig_action_recorded.emit(delay_act)
 
         # Determine if click or drag
         dist = abs(client_start[0] - client_end[0]) + abs(client_start[1] - client_end[1])
@@ -121,7 +127,7 @@ class ActionRecorder(QThread):
                 end_x=client_end[0],
                 end_y=client_end[1],
                 drag_duration_ms=int(press_duration * 1000),
-                delay_seconds=delay
+                delay_seconds=0.2
             )
         else:
             # Mouse Click
@@ -132,7 +138,7 @@ class ActionRecorder(QThread):
                 mouse_button=button,
                 click_type="single",
                 repeat_count=1,
-                delay_seconds=delay
+                delay_seconds=0.2
             )
 
         self.recorded_actions.append(act)
