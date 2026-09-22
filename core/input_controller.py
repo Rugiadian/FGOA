@@ -172,3 +172,43 @@ class InputController:
             winsound.Beep(freq, duration_ms)
         except Exception:
             pass
+
+    @classmethod
+    def execute_action(cls, action, hwnd: int = 0):
+        """
+        Executes a single Action model instance against target window hwnd.
+        Supports mouse_click, mouse_drag, key_press, text_type, delay, sound_beep, log_message.
+        """
+        if not action:
+            return
+
+        act_type = getattr(action, "action_type", "")
+        if act_type == "mouse_click":
+            cls.click_at(
+                hwnd=hwnd,
+                rel_x=action.x,
+                rel_y=action.y,
+                button=action.mouse_button,
+                click_type=action.click_type,
+                repeat=action.repeat_count
+            )
+        elif act_type == "mouse_drag":
+            cls.drag_and_drop(
+                hwnd=hwnd,
+                start_x=action.x,
+                start_y=action.y,
+                end_x=action.end_x,
+                end_y=action.end_y,
+                duration_ms=action.drag_duration_ms
+            )
+        elif act_type == "key_press":
+            cls.send_key_combination(action.key, action.modifiers)
+        elif act_type == "text_type":
+            cls.type_text(action.text)
+        elif act_type == "delay":
+            time.sleep(action.delay_seconds)
+        elif act_type == "sound_beep":
+            cls.beep(action.beep_freq, action.beep_duration_ms)
+        elif act_type == "log_message":
+            pass
+

@@ -396,9 +396,14 @@ class ConditionEditorDialog(QDialog):
 
         color = self.canvas.get_pixel_color_at(new_x, new_y)
         if color:
-            selected_point.r = color.red()
-            selected_point.g = color.green()
-            selected_point.b = color.blue()
+            if hasattr(color, "red"):
+                selected_point.r = color.red()
+                selected_point.g = color.green()
+                selected_point.b = color.blue()
+            else:
+                selected_point.r = color[0]
+                selected_point.g = color[1]
+                selected_point.b = color[2]
 
         if 0 <= selected_row < self.tbl_points.rowCount():
             it_coord = self.tbl_points.item(selected_row, 1)

@@ -56,6 +56,7 @@ class WorkflowRunner(QThread):
 
         target_win = WindowManager.get_window_info(self.hwnd)
         if not target_win:
+            self._is_running = False
             self.sig_log.emit("ERROR", "타겟 창을 찾을 수 없습니다. 실행을 중단합니다.")
             self.sig_finished.emit("타겟 창 없음")
             return
