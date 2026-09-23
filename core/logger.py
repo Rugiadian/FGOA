@@ -91,9 +91,16 @@ def log_crash(exc_type, exc_value, exc_tb) -> str:
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
 
+    try:
+        from core.version import __version__
+        version_str = __version__
+    except Exception:
+        version_str = "Unknown"
+
     report = (
         f"\n{'='*70}\n"
         f"[FGOA CRASH REPORT - {now_str}]\n"
+        f"FGOA Version: {version_str}\n"
         f"Python: {sys.version}\n"
         f"Executable: {sys.executable}\n"
         f"Base Dir: {BASE_DIR}\n"

@@ -7,9 +7,12 @@ from core.screen_capture import ScreenCapture
 from core.input_controller import InputController
 from core.evaluator import ConditionEvaluator
 from core.runner import WorkflowRunner
+from core.version import __version__
 
 __all__ = [
+    "__version__",
     "ColorPoint", "Condition", "Action", "Scenario", "Project",
     "WindowManager", "WindowInfo", "ScreenCapture", "InputController",
     "ConditionEvaluator", "WorkflowRunner"
 ]
+

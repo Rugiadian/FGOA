@@ -97,6 +97,7 @@ FGOA/
 ├── README.md                   # 프로젝트 문서 및 사용 가이드
 │
 ├── core/                       # 핵심 오토마톤 & 윈도우 API 엔진
+│   ├── version.py              # 앱 버전 정의 (업데이트 날짜시간 YYYY.MM.DD.HHMM)
 │   ├── models.py               # Scenario, Condition, ColorPoint, Action 데이터 모델
 │   ├── window_manager.py       # 타겟 창 감지, HWND, ClientRect 상대좌표 변환
 │   ├── screen_capture.py       # Win32 GDI 초고속 픽셀 읽기 및 mss 캡처

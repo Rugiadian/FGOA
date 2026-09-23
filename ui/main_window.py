@@ -28,6 +28,7 @@ from core.window_manager import WindowManager, WindowInfo
 from core.evaluator import ConditionEvaluator
 from core.runner import WorkflowRunner
 from core.preset_manager import PresetManager
+from core.version import __version__
 from ui.theme import get_stylesheet, get_theme_colors
 from ui.window_picker_dialog import WindowPickerDialog
 from ui.inspector_widget import InspectorWidget
@@ -47,15 +48,15 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("FGOA - 화면 인식 스마트 윈도우 오토 툴")
-        self.resize(1380, 880)
-        self.setMinimumSize(1020, 650)
-
         self.project = Project()
         self.target_hwnd: int = 0
         self.runner: Optional[WorkflowRunner] = None
         self.current_project_path: Optional[str] = None
         self.current_theme: str = "light"  # Default to light mode
+
+        self._update_window_title()
+        self.resize(1380, 880)
+        self.setMinimumSize(1020, 650)
 
         self.custom_layouts: Dict[str, str] = {}
         self.current_layout_name: str = "기본 3열 (Default)"
@@ -91,6 +92,14 @@ class MainWindow(QMainWindow):
         # Initial selection to first scenario
         if self.project.scenarios:
             self.tbl_scenarios.selectRow(0)
+
+    def _update_window_title(self):
+        """Update window title with application version and current project filename."""
+        title = f"FGOA v{__version__} - 화면 인식 스마트 윈도우 오토 툴"
+        if self.current_project_path:
+            proj_name = os.path.basename(self.current_project_path)
+            title = f"{title} [{proj_name}]"
+        self.setWindowTitle(title)
 
     def _check_reload_state(self):
         """Restore project state if reloading after code modification."""
@@ -601,7 +610,7 @@ class MainWindow(QMainWindow):
         # Status Bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("준비 완료 - FGOA 화면 인식 스마트 오토 툴")
+        self.status_bar.showMessage(f"준비 완료 - FGOA v{__version__} 화면 인식 스마트 오토 툴")
 
         # Shortcuts
         self.sc_reload = QShortcut(QKeySequence("Ctrl+R"), self)
@@ -1564,6 +1573,7 @@ class MainWindow(QMainWindow):
                 with open(path, "w", encoding="utf-8") as f:
                     json.dump(self.project.to_dict(), f, indent=2, ensure_ascii=False)
                 self.current_project_path = path
+                self._update_window_title()
                 self.status_bar.showMessage(f"프로젝트 저장 완료: {path}", 4000)
             except Exception as e:
                 QMessageBox.critical(self, "저장 오류", f"프로젝트를 저장할 수 없습니다:\n{e}")
@@ -1578,6 +1588,7 @@ class MainWindow(QMainWindow):
                     data = json.load(f)
                 self.project = Project.from_dict(data)
                 self.current_project_path = path
+                self._update_window_title()
                 self.spin_loops.setValue(self.project.loop_count)
                 self.spin_loop_delay.setValue(self.project.loop_delay_seconds)
                 self.chk_anti_ban.setChecked(self.project.anti_ban_enabled)

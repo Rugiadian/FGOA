@@ -42,8 +42,11 @@ def main():
 
     configure_high_dpi()
 
+    from core.version import __version__
+
     app = QApplication(sys.argv)
     app.setApplicationName("FGOA")
+    app.setApplicationVersion(__version__)
     app.setOrganizationName("Rugiadian")
 
     # Use Fusion style to prevent Windows OS Dark Mode DWM surface from leaking black backgrounds
