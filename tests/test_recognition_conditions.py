@@ -270,11 +270,15 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
         widget.set_scenario(scen2, target_hwnd=123, project=proj)
         self.assertFalse(widget.chk_has_condition.isChecked())
         widget.chk_has_condition.setChecked(True)
+        self.assertIsNotNone(widget.current_scenario.condition)
+        # 인스펙터 변경사항 저장 (드래프트 -> 원본 반영)
+        widget._on_save_inspector()
         self.assertIsNotNone(scen2.condition)
-        print("  [성공] 인스펙터: 조건 비활성 -> 활성 토글 시 Condition 모델 자동 생성")
+        print("  [성공] 인스펙터: 조건 비활성 -> 활성 토글 및 저장 시 Condition 모델 자동 생성")
 
         # 2. [📋 조건 가져오기] - scen1의 조건을 scen2로 복사
         widget._copy_condition_from(scen1)
+        widget._on_save_inspector()
         self.assertEqual(len(scen2.condition.points), 2)
         # Deep Copy 검증: scen2의 포인트를 수정해도 scen1은 변경되지 않아야 함
         scen2.condition.points[0].x = 999

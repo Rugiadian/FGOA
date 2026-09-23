@@ -286,16 +286,68 @@ class Project:
     scenarios: List[Scenario] = field(default_factory=list)
 
     def renumber_steps(self):
-        """Update step_number for all scenarios sequentially starting at 1."""
+        """Update step_number for all scenarios sequentially starting at 1,
+        and guarantee every scenario has a strictly unique scenario_number and unique ID
+        without corrupting jump targets or loop bindings."""
+        if not self.scenarios:
+            return
+
+        # 1. Update sequential execution order (step_number)
         for idx, scen in enumerate(self.scenarios, start=1):
             scen.step_number = idx
-            if not hasattr(scen, "scenario_number") or scen.scenario_number is None or scen.scenario_number <= 0:
-                scen.scenario_number = idx
+
+        # 2. Guarantee unique ID for each scenario and remap any duplicates
+        seen_ids = set()
+        for scen in self.scenarios:
+            if not getattr(scen, "id", None) or scen.id in seen_ids:
+                old_id = getattr(scen, "id", "")
+                new_id = f"scen_{uuid.uuid4().hex[:8]}"
+                scen.id = new_id
+                if old_id:
+                    # Update any jump or loop references in project
+                    for other in self.scenarios:
+                        if other.jump_target_on_match == old_id:
+                            other.jump_target_on_match = new_id
+                        if other.jump_target_on_mismatch == old_id:
+                            other.jump_target_on_mismatch = new_id
+                        if other.loop_target_id == old_id:
+                            other.loop_target_id = new_id
+            seen_ids.add(scen.id)
+
+        # 3. Guarantee strictly unique scenario_number
+        allocated_nums = set()
+        needs_num = []
+        for scen in self.scenarios:
+            num = getattr(scen, "scenario_number", None)
+            if num is not None and isinstance(num, int) and num > 0 and num not in allocated_nums:
+                allocated_nums.add(num)
+            else:
+                needs_num.append(scen)
+
+        next_avail = (max(allocated_nums) + 1) if allocated_nums else 1
+        for scen in needs_num:
+            scen.scenario_number = next_avail
+            allocated_nums.add(next_avail)
+            next_avail += 1
+
+        # 4. Normalize legacy numeric jump targets to robust UUIDs
+        num_to_id = {s.scenario_number: s.id for s in self.scenarios}
+        for scen in self.scenarios:
+            # Check jump_target_on_match
+            if scen.jump_target_on_match and scen.jump_target_on_match.isdigit():
+                t_num = int(scen.jump_target_on_match)
+                if t_num in num_to_id:
+                    scen.jump_target_on_match = num_to_id[t_num]
+            # Check jump_target_on_mismatch
+            if scen.jump_target_on_mismatch and scen.jump_target_on_mismatch.isdigit():
+                t_num = int(scen.jump_target_on_mismatch)
+                if t_num in num_to_id:
+                    scen.jump_target_on_mismatch = num_to_id[t_num]
 
     def get_next_scenario_number(self) -> int:
-        """Generate the next unique scenario number."""
+        """Generate the next unique scenario number not colliding with any existing node."""
         nums = [getattr(s, "scenario_number", 0) for s in self.scenarios if getattr(s, "scenario_number", 0) > 0]
-        return max(nums, default=0) + 1
+        return (max(nums) + 1) if nums else 1
 
     def compute_hierarchy_depths(self) -> List[int]:
         """Calculate nesting hierarchy depth (0, 1, 2...) for each scenario."""
