@@ -1,0 +1,27 @@
+[일시 / Timestamp]
+- 요청 시각: 2026-09-24 16:46:14
+- 완료 시각: 2026-09-24 16:48:30
+
+[요청 내용 / User Request]
+- 모두 진행해줘. 특히 히스토리는 기록용이기 때문에 매번 읽을 필요 없음.
+
+[결과 요약 / Summary of Results]
+1. `.geminiignore` 생성 및 AI 컨텍스트 배제 규칙 구축:
+   - `history/` 및 하위 전체를 배제하여 AI가 전역 검색/컨텍스트 로딩 시 과거 작업 기록을 임의로 읽지 않도록 차단
+   - `__pycache__/`, `*.pyc`, `*.log`, `fgoa_crash.log`, `fgoa_debug.log`, `event 1.json`, `fgoa_project.json` 등 제외 등록
+2. `.gitignore` 전면 보강:
+   - Python 바이트코드(`__pycache__/`, `*.py[cod]`, `*$py.class`), `.pytest_cache/`, `venv/` 추가 및 중복 설정 정리
+3. 기존 캐시 파일 전량 정리:
+   - 프로젝트 내 존재하던 `__pycache__` 디렉터리 및 30여 개 이상의 `.pyc` 파일 일괄 삭제
+4. `AGENTS.md` 프로젝트 규칙 강화:
+   - 히스토리 파일 열람 제한 (Write-Only Archive) 규칙 명시 (사용자의 명시적 요청 없이 과거 기록 파일 임의 로딩 금지)
+   - 토큰 최적화 규칙 (Token Optimization Rule) 신설 (불필요한 컨텍스트 주입 방지 및 대형 소스 최소 범위 조회)
+5. 버전 갱신:
+   - `core/version.py` -> `260924.1648` 갱신 및 `tests/test_version.py` 검증 통과
+
+[영향 파일 목록 / Affected Files]
+- .geminiignore (신규 생성)
+- .gitignore (수정)
+- AGENTS.md (규칙 추가/수정)
+- core/version.py (버전 갱신)
+- history/2026-09-24_164830_프로젝트_토큰_최적화_적용_및_히스토리_열람_제한_규칙_수립.txt (기록 생성)

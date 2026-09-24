@@ -187,7 +187,7 @@ class ConditionEditorDialog(QDialog):
 
         self.tbl_points = QTableWidget()
         self.tbl_points.setColumnCount(6)
-        self.tbl_points.setHorizontalHeaderLabels(["#", "좌표", "색상", "오차", "모드", "삭제"])
+        self.tbl_points.setHorizontalHeaderLabels(["ID", "좌표", "색상", "오차", "모드", "삭제"])
         self.tbl_points.verticalHeader().setVisible(False)  # Remove duplicate vertical row numbering!
         self.tbl_points.verticalHeader().setDefaultSectionSize(26)
         self.tbl_points.setSelectionBehavior(QTableWidget.SelectRows)
@@ -291,7 +291,7 @@ class ConditionEditorDialog(QDialog):
         self.tbl_points.setRowCount(len(self.condition.points))
         for row, pt in enumerate(self.condition.points):
             # 1. Index
-            it_idx = QTableWidgetItem(f"#{row + 1}")
+            it_idx = QTableWidgetItem(f"p{row + 1}")
             it_idx.setTextAlignment(Qt.AlignCenter)
             self.tbl_points.setItem(row, 0, it_idx)
 

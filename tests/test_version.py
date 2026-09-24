@@ -23,11 +23,11 @@ class TestVersionManagement(unittest.TestCase):
         self.assertIsInstance(__version__, str)
         self.assertEqual(core.__version__, __version__)
 
-        pattern = r"^\d{4}\.\d{2}\.\d{2}\.\d{4}$"
+        pattern = r"^\d{6}\.\d{4}$"
         self.assertRegex(
             __version__,
             pattern,
-            f"Version '{__version__}' does not match expected YYYY.MM.DD.HHMM format."
+            f"Version '{__version__}' does not match expected yymmdd.hhmm format."
         )
 
     def test_window_title_displays_version(self):

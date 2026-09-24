@@ -33,6 +33,7 @@ from ui.theme import get_stylesheet, get_theme_colors
 from ui.window_picker_dialog import WindowPickerDialog
 from ui.inspector_widget import InspectorWidget
 from ui.widgets.color_badge import WarningBadge
+from ui.widgets.flow_layout import FlowLayout
 from ui.preset_dialog import SavePresetDialog, PresetManagerDialog
 
 
@@ -52,8 +53,39 @@ class DraggableScenarioTableWidget(QTableWidget):
         self.setDropIndicatorShown(True)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.horizontalHeader().setMinimumSectionSize(20)
         self._drag_start_pos = None
         self._drag_start_row = -1
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.adjust_column_widths()
+
+    def adjust_column_widths(self):
+        """Dynamically adjusts column widths in proportion to the table viewport width."""
+        w = self.viewport().width()
+        if w <= 0:
+            return
+
+        # Fixed-width compact columns:
+        # 0: 순서 (34px), 1: 고유 ID (s1, s2...) (48px), 2: 활성 (38px), 6: 액션 (44px)
+        fixed_sum = 34 + 48 + 38 + 44
+        rem = max(180, w - fixed_sum)
+
+        # Distribute remaining width proportionally:
+        # 3: 시나리오 이름 (40%), 4: 인식 조건 (Eye) (33%), 5: 분기 (27%)
+        w_name = max(80, int(rem * 0.40))
+        w_cond = max(75, int(rem * 0.33))
+        w_branch = max(65, rem - w_name - w_cond)
+
+        header = self.horizontalHeader()
+        header.resizeSection(0, 34)
+        header.resizeSection(1, 48)
+        header.resizeSection(2, 38)
+        header.resizeSection(3, w_name)
+        header.resizeSection(4, w_cond)
+        header.resizeSection(5, w_branch)
+        header.resizeSection(6, 44)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -404,9 +436,10 @@ class MainWindow(QMainWindow):
         pane_hdr.addWidget(self.lbl_scen_count)
         l_layout.addLayout(pane_hdr)
 
-        # Toolbar
-        tb_layout = QHBoxLayout()
-        tb_layout.setSpacing(5)
+        # Toolbar with responsive FlowLayout (automatically wraps buttons when width is constrained)
+        tb_widget = QWidget()
+        tb_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        tb_layout = FlowLayout(tb_widget, margin=0, spacing=4)
 
         btn_add = QPushButton("➕ 추가")
         btn_add.clicked.connect(self._on_add_scenario)
@@ -425,8 +458,6 @@ class MainWindow(QMainWindow):
         btn_del.clicked.connect(self._on_delete_scenario)
         tb_layout.addWidget(btn_del)
 
-        tb_layout.addSpacing(4)
-
         btn_up = QPushButton("⬆️")
         btn_up.setToolTip("위로 이동")
         btn_up.clicked.connect(self._on_move_up)
@@ -436,8 +467,6 @@ class MainWindow(QMainWindow):
         btn_down.setToolTip("아래로 이동")
         btn_down.clicked.connect(self._on_move_down)
         tb_layout.addWidget(btn_down)
-
-        tb_layout.addSpacing(6)
 
         # Undo / Redo for Scenario List
         self.btn_undo_scenario = QPushButton("↩️ 취소")
@@ -451,8 +480,6 @@ class MainWindow(QMainWindow):
         self.btn_redo_scenario.clicked.connect(self._redo_scenario)
         self.btn_redo_scenario.setEnabled(False)
         tb_layout.addWidget(self.btn_redo_scenario)
-
-        tb_layout.addSpacing(6)
 
         # PRESET BUTTON
         self.btn_preset = QPushButton("📦 프리셋 ▼")
@@ -479,8 +506,6 @@ class MainWindow(QMainWindow):
         self.btn_preset.setMenu(menu_preset)
         tb_layout.addWidget(self.btn_preset)
 
-        tb_layout.addStretch()
-
         btn_save_proj = QPushButton("💾 저장")
         btn_save_proj.clicked.connect(self._on_save_project)
         tb_layout.addWidget(btn_save_proj)
@@ -489,31 +514,21 @@ class MainWindow(QMainWindow):
         btn_open_proj.clicked.connect(self._on_open_project)
         tb_layout.addWidget(btn_open_proj)
 
-        l_layout.addLayout(tb_layout)
+        l_layout.addWidget(tb_widget)
 
         # Scenario Table (Full height)
         self.tbl_scenarios = DraggableScenarioTableWidget()
         self.tbl_scenarios.setColumnCount(7)
         self.tbl_scenarios.sig_row_reordered.connect(self._on_scenario_row_reordered)
         self.tbl_scenarios.setHorizontalHeaderLabels([
-            "순서", "고유 #", "활성", "시나리오 이름", "인식 조건 (Eye)", "분기 (일치/불일치)", "액션"
+            "순서", "고유 ID", "활성", "시나리오 이름", "인식 조건 (Eye)", "분기 (일치/불일치)", "액션"
         ])
         
-        # Responsive header resizing
+        # Responsive header resizing (Interactive mode allowing user adjustment and dynamic proportionality)
         header = self.tbl_scenarios.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Fixed)
-        header.resizeSection(0, 32)
-        header.setSectionResizeMode(1, QHeaderView.Fixed)
-        header.resizeSection(1, 46)
-        header.setSectionResizeMode(2, QHeaderView.Fixed)
-        header.resizeSection(2, 36)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)
-        header.setSectionResizeMode(4, QHeaderView.Fixed)
-        header.resizeSection(4, 115)
-        header.setSectionResizeMode(5, QHeaderView.Fixed)
-        header.resizeSection(5, 105)
-        header.setSectionResizeMode(6, QHeaderView.Fixed)
-        header.resizeSection(6, 42)
+        for col_idx in range(7):
+            header.setSectionResizeMode(col_idx, QHeaderView.Interactive)
+        self.tbl_scenarios.adjust_column_widths()
         self.tbl_scenarios.verticalHeader().setDefaultSectionSize(26)
 
         self.tbl_scenarios.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -862,7 +877,7 @@ class MainWindow(QMainWindow):
                     self.inspector.original_scenario.id != target_scen.id):
                 res = QMessageBox.question(
                     self, "저장되지 않은 변경사항",
-                    f"시나리오 #{self.inspector.original_scenario.scenario_number} [{self.inspector.original_scenario.name}]의 "
+                    f"시나리오 s{self.inspector.original_scenario.scenario_number} [{self.inspector.original_scenario.name}]의 "
                     f"인스펙터 변경사항이 저장되지 않았습니다.\n변경사항을 저장하시겠습니까?",
                     QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
                     QMessageBox.Save
@@ -885,9 +900,9 @@ class MainWindow(QMainWindow):
 
     def _on_inspector_scenario_saved(self, saved_scen: Scenario):
         """Called when user explicitly clicks Save in Inspector."""
-        self._push_scenario_undo_state(f"시나리오 #{saved_scen.scenario_number} 속성 저장")
+        self._push_scenario_undo_state(f"시나리오 s{saved_scen.scenario_number} 속성 저장")
         self._refresh_scenario_table()
-        self.status_bar.showMessage(f"💾 시나리오 #{saved_scen.scenario_number} [{saved_scen.name}] 저장 완료", 3000)
+        self.status_bar.showMessage(f"💾 시나리오 s{saved_scen.scenario_number} [{saved_scen.name}] 저장 완료", 3000)
 
     def _on_inspector_scenario_changed(self, modified_scen: Scenario):
         """Called when properties are edited inside the Inspector."""
@@ -1017,9 +1032,10 @@ class MainWindow(QMainWindow):
         self.tbl_scenarios.setItem(row, 0, it_num)
 
         # 1. Scenario # (시나리오 고유 번호)
-        it_uid = QTableWidgetItem(f"#{scen.scenario_number}")
+        it_uid = QTableWidgetItem(f"s{scen.scenario_number}")
         it_uid.setTextAlignment(Qt.AlignCenter)
         it_uid.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        it_uid.setToolTip(f"시나리오 고유 ID: s{scen.scenario_number}")
         self.tbl_scenarios.setItem(row, 1, it_uid)
 
         # 2. Enabled Checkbox
@@ -1043,7 +1059,7 @@ class MainWindow(QMainWindow):
             it_name.setFont(f)
         elif scen.node_type == "loop_end":
             start_idx = self.project.find_matching_loop_start(row)
-            start_num_str = f"#{self.project.scenarios[start_idx].scenario_number}" if start_idx is not None else ""
+            start_num_str = f"s{self.project.scenarios[start_idx].scenario_number}" if start_idx is not None else ""
             it_name = QTableWidgetItem(f"🔁 [루프 종료] → 루프 {start_num_str} 복귀")
             it_name.setForeground(QColor("#7c3aed" if self.current_theme == "light" else "#c084fc"))
             f = it_name.font()
@@ -1113,11 +1129,11 @@ class MainWindow(QMainWindow):
             except ValueError:
                 pass
         if target_scen:
-            return f"고유 #{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]"
+            return f"고유 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]"
         return target_id
 
     def _on_scenario_toggle(self, scenario: Scenario, state: int):
-        self._push_scenario_undo_state(f"시나리오 #{scenario.scenario_number} 활성화 토글")
+        self._push_scenario_undo_state(f"시나리오 s{scenario.scenario_number} 활성화 토글")
         scenario.enabled = (state == Qt.Checked)
         if self.inspector.current_scenario and self.inspector.current_scenario.id == scenario.id:
             self.inspector.chk_enabled.blockSignals(True)
@@ -1454,7 +1470,7 @@ class MainWindow(QMainWindow):
         cloned.id = f"scen_{uuid.uuid4().hex[:6]}"
         cloned.scenario_number = self.project.get_next_scenario_number()
         cloned.name = f"{cloned.name} (복제)"
-        self._push_scenario_undo_state(f"시나리오 #{orig.scenario_number} 복제")
+        self._push_scenario_undo_state(f"시나리오 s{orig.scenario_number} 복제")
         self.project.scenarios.insert(row + 1, cloned)
         self._refresh_scenario_table()
         self.tbl_scenarios.selectRow(row + 1)
@@ -1465,9 +1481,9 @@ class MainWindow(QMainWindow):
             return
         row = rows[0].row()
         scen = self.project.scenarios[row]
-        res = QMessageBox.question(self, "삭제 확인", f"시나리오 고유 #{scen.scenario_number} (실행 #{scen.step_number}) [{scen.name}]를 삭제하시겠습니까?")
+        res = QMessageBox.question(self, "삭제 확인", f"시나리오 고유 s{scen.scenario_number} (실행 #{scen.step_number}) [{scen.name}]를 삭제하시겠습니까?")
         if res == QMessageBox.Yes:
-            self._push_scenario_undo_state(f"시나리오 #{scen.scenario_number} 삭제")
+            self._push_scenario_undo_state(f"시나리오 s{scen.scenario_number} 삭제")
             del self.project.scenarios[row]
             self._refresh_scenario_table()
             new_sel = min(row, len(self.project.scenarios) - 1)
@@ -1479,7 +1495,7 @@ class MainWindow(QMainWindow):
         if not rows or rows[0].row() == 0:
             return
         row = rows[0].row()
-        self._push_scenario_undo_state(f"시나리오 #{self.project.scenarios[row].scenario_number} 위로 이동")
+        self._push_scenario_undo_state(f"시나리오 s{self.project.scenarios[row].scenario_number} 위로 이동")
         self.project.scenarios[row - 1], self.project.scenarios[row] = (
             self.project.scenarios[row], self.project.scenarios[row - 1]
         )
@@ -1491,7 +1507,7 @@ class MainWindow(QMainWindow):
         if not rows or rows[0].row() >= len(self.project.scenarios) - 1:
             return
         row = rows[0].row()
-        self._push_scenario_undo_state(f"시나리오 #{self.project.scenarios[row].scenario_number} 아래로 이동")
+        self._push_scenario_undo_state(f"시나리오 s{self.project.scenarios[row].scenario_number} 아래로 이동")
         self.project.scenarios[row + 1], self.project.scenarios[row] = (
             self.project.scenarios[row], self.project.scenarios[row + 1]
         )
@@ -1504,7 +1520,7 @@ class MainWindow(QMainWindow):
             return
         scens = self.project.scenarios
         if 0 <= from_row < len(scens) and 0 <= to_row < len(scens):
-            self._push_scenario_undo_state(f"시나리오 #{scens[from_row].scenario_number} 드래그 이동")
+            self._push_scenario_undo_state(f"시나리오 s{scens[from_row].scenario_number} 드래그 이동")
             scen = scens.pop(from_row)
             scens.insert(to_row, scen)
             self._refresh_scenario_table()

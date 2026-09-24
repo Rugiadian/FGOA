@@ -1,0 +1,44 @@
+[일시 / Timestamp]
+- 요청 일시: 2026-09-24 15:46:20
+- 완료 일시: 2026-09-24 16:33:53
+
+[요청 내용 / User Request]
+시나리오창에서
+-- 화면 크기에 따라 표의 열이 유동적으로 조정되게 변경
+-- 상단 버튼 메뉴들이 화면에서 짤리면 자동으로 줄바꿈
+-- 고유 아이디 앞에 s를 붙여서 액션, 인식조건, 액션조건이랑 구분되게 할 것.
+
+[결과 요약 / Summary of Results]
+1. 시나리오 표(tbl_scenarios) 열 너비 유동적 비례 조정:
+   - DraggableScenarioTableWidget의 resizeEvent 및 adjust_column_widths() 구현을 통해 전체 뷰포트 너비 변화에 맞춰 컬럼이 동적으로 비례 분할되도록 개선.
+   - 고정 폭 컬럼(순서 34px, 고유 ID 48px, 활성 38px, 액션 44px)을 제외한 나머지 여백을 시나리오 이름(40%), 인식 조건(33%), 분기(27%)로 유동 분배.
+   - 가로 헤더 resize mode를 QHeaderView.Interactive로 전환하고 setMinimumSectionSize(20)를 적용하여 유저의 수동 너비 조절 및 반응형 축소 레이아웃 완벽 지원.
+
+2. 시나리오 창 상단 버튼 툴바 자동 줄바꿈(FlowLayout):
+   - 상단 버튼 툴바를 가로 고정 레이아웃(QHBoxLayout)에서 너비에 따라 자동으로 여러 줄로 줄바꿈되는 FlowLayout(ui/widgets/flow_layout.py)으로 전면 교체.
+   - 도크 패널을 좌우로 좁히더라도 11개의 시나리오 조작 버튼(추가, 루프 추가, 복제, 삭제, 이동, 취소/다시, 프리셋, 저장, 열기)이 우측으로 잘리지 않고 아래 줄로 부드럽게 래핑되어 접근성 확보.
+
+3. 고유 식별자 's' 접두사 표기 통일:
+   - 시나리오 고유 번호 앞에 's' 접두사를 적용하여 액션(a#), 인식조건 포인트(p#)와 명확히 시각적으로 구분되도록 개선:
+     * 시나리오 테이블 고유 ID 열 및 툴팁: s1, s2 ... (헤더 명칭도 "고유 ID"로 변경)
+     * 루프 종료 노드 복귀 타깃: 🔁 [루프 종료] → 루프 s1 복귀
+     * 분기/점프 타깃 콤보박스 및 디스플레이: 고유 s1 (실행 #1) [이름]
+     * 인스펙터 상단 상태 라벨 및 고유 ID 스핀박스: 고유 s1 [이름], 스핀박스 prefix s (s1)
+     * 러너 실행 로그 및 갤러리/다이얼로그 메시지: [루프 s1], 시나리오 s1
+     * 인식조건 포인트 번호도 p1, p2로 통일 표기하여 계층 구분 명확화.
+
+4. 버전 관리 및 테스트 검증:
+   - core/version.py 버전을 260924.1633으로 갱신 (규칙 준수).
+   - 신규 기능 단위 테스트 tests/test_scenario_table_flow_and_uid.py 작성 및 전체 테스트 스위트 통과 검증 완료.
+
+[영향 파일 목록 / Affected Files]
+- ui/widgets/flow_layout.py
+- ui/main_window.py
+- ui/inspector_widget.py
+- ui/condition_editor_dialog.py
+- ui/reference_gallery_dialog.py
+- core/runner.py
+- core/version.py
+- tests/test_version.py
+- tests/test_scenario_table_flow_and_uid.py
+- history/2026-09-24_163353_시나리오창_유동열_버튼줄바꿈_s고유ID.txt

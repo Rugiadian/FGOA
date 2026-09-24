@@ -223,7 +223,7 @@ class ReferenceGalleryDialog(QDialog):
                 if cond_norm == norm_target:
                     pt_count = len(scen.condition.points)
                     usages.append({
-                        "scenario_name": f"고유 #{scen.scenario_number} (실행 #{scen.step_number}) {scen.name}",
+                        "scenario_name": f"고유 s{scen.scenario_number} (실행 #{scen.step_number}) {scen.name}",
                         "type": "👁️ Eye 색상 조건",
                         "detail": f"기준 레퍼런스 (포인트 {pt_count}개 판정)"
                     })
@@ -233,7 +233,7 @@ class ReferenceGalleryDialog(QDialog):
                 cond_norm = os.path.normpath(os.path.abspath(scen.condition.reference_image_path))
                 if cond_norm == norm_target and scen.actions:
                     usages.append({
-                        "scenario_name": f"고유 #{scen.scenario_number} (실행 #{scen.step_number}) {scen.name}",
+                        "scenario_name": f"고유 s{scen.scenario_number} (실행 #{scen.step_number}) {scen.name}",
                         "type": "✋ Hand 액션",
                         "detail": f"액션 좌표 기준 이미지 ({len(scen.actions)}개 액션)"
                     })

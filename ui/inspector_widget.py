@@ -444,16 +444,17 @@ class InspectorWidget(QWidget):
         self.lbl_step_badge.setToolTip("시나리오 실행 순서 번호 (목록 순서 변경 시 자동 재계산)")
         top_row.addWidget(self.lbl_step_badge)
 
-        lbl_uid_title = QLabel("고유 번호:")
+        lbl_uid_title = QLabel("고유 ID:")
         lbl_uid_title.setStyleSheet("font-weight: bold; font-size: 8.5pt; color: #7c3aed;")
         top_row.addWidget(lbl_uid_title)
 
         self.spin_scen_num = QSpinBox()
         self.spin_scen_num.setRange(1, 99999)
+        self.spin_scen_num.setPrefix("s")
         self.spin_scen_num.setValue(1)
         self.spin_scen_num.setFixedWidth(65)
         self.spin_scen_num.setStyleSheet("font-weight: bold; color: #7c3aed;")
-        self.spin_scen_num.setToolTip("시나리오 고유 번호 (순서가 바뀌어도 유지되는 고유 식별 번호)")
+        self.spin_scen_num.setToolTip("시나리오 고유 ID (순서가 바뀌어도 유지되는 고유 식별 번호)")
         self.spin_scen_num.valueChanged.connect(self._on_scenario_number_changed)
         top_row.addWidget(self.spin_scen_num)
 
@@ -582,10 +583,10 @@ class InspectorWidget(QWidget):
         # Points Table
         self.tbl_points = QTableWidget()
         self.tbl_points.setColumnCount(5)
-        self.tbl_points.setHorizontalHeaderLabels(["#", "상대 좌표 (X, Y)", "목표 색상", "허용 오차", "판정 모드"])
+        self.tbl_points.setHorizontalHeaderLabels(["ID", "상대 좌표 (X, Y)", "목표 색상", "허용 오차", "판정 모드"])
         hdr_pts = self.tbl_points.horizontalHeader()
         hdr_pts.setSectionResizeMode(0, QHeaderView.Fixed)
-        hdr_pts.resizeSection(0, 28)
+        hdr_pts.resizeSection(0, 32)
         hdr_pts.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         hdr_pts.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         hdr_pts.setSectionResizeMode(3, QHeaderView.Fixed)
@@ -928,7 +929,7 @@ class InspectorWidget(QWidget):
             self._populate_jump_combos()
 
             # 1. Header & Identity
-            self.lbl_inspector_status.setText(f"고유 #{scenario.scenario_number} [{scenario.name}]")
+            self.lbl_inspector_status.setText(f"고유 s{scenario.scenario_number} [{scenario.name}]")
             self.lbl_step_badge.setText(f"실행 #{scenario.step_number}")
             self.spin_scen_num.blockSignals(True)
             self.spin_scen_num.setValue(scenario.scenario_number)
@@ -1052,7 +1053,7 @@ class InspectorWidget(QWidget):
         self._update_save_cancel_buttons()
         self.sig_scenario_saved.emit(self.original_scenario)
         self.sig_scenario_changed.emit(self.original_scenario)
-        self.sig_log.emit("SUCCESS", f"💾 시나리오 #{self.original_scenario.scenario_number} [{self.original_scenario.name}] 변경사항이 저장되었습니다.")
+        self.sig_log.emit("SUCCESS", f"💾 시나리오 s{self.original_scenario.scenario_number} [{self.original_scenario.name}] 변경사항이 저장되었습니다.")
 
     def _on_cancel_inspector(self):
         """Reverts working draft back to original scenario state."""
@@ -1064,7 +1065,7 @@ class InspectorWidget(QWidget):
         self.is_dirty = False
         self._load_scenario_to_ui(self.current_scenario)
         self._update_save_cancel_buttons()
-        self.sig_log.emit("INFO", f"↩️ 시나리오 #{self.original_scenario.scenario_number} 변경사항을 취소했습니다.")
+        self.sig_log.emit("INFO", f"↩️ 시나리오 s{self.original_scenario.scenario_number} 변경사항을 취소했습니다.")
 
     def _on_undo_inspector(self):
         """Undoes last edit in inspector."""
@@ -1164,7 +1165,7 @@ class InspectorWidget(QWidget):
                 for s in self.project.scenarios:
                     if self.current_scenario and s.id == self.current_scenario.id:
                         continue
-                    combo.addItem(f"고유 #{s.scenario_number} (실행 #{s.step_number}) [{s.name}]", s.id)
+                    combo.addItem(f"고유 s{s.scenario_number} (실행 #{s.step_number}) [{s.name}]", s.id)
 
     def _select_jump_target(self, combo: QComboBox, target_id: str):
         idx = combo.findData(target_id)
@@ -1196,7 +1197,7 @@ class InspectorWidget(QWidget):
 
         for row, pt in enumerate(pts):
             # 0. Number
-            it_no = QTableWidgetItem(str(row + 1))
+            it_no = QTableWidgetItem(f"p{row + 1}")
             it_no.setTextAlignment(Qt.AlignCenter)
             self.tbl_points.setItem(row, 0, it_no)
 
@@ -1540,7 +1541,7 @@ class InspectorWidget(QWidget):
 
         menu = QMenu(self)
         for s in other_scenarios:
-            action = menu.addAction(f"고유 #{s.scenario_number} [{s.name}] - {len(s.condition.points)}개 포인트 ({s.condition.logic_operator})")
+            action = menu.addAction(f"고유 s{s.scenario_number} [{s.name}] - {len(s.condition.points)}개 포인트 ({s.condition.logic_operator})")
             action.triggered.connect(lambda checked, src=s: self._copy_condition_from(src))
         menu.exec_(self.btn_copy_cond.mapToGlobal(self.btn_copy_cond.rect().bottomLeft()))
 
@@ -1554,7 +1555,7 @@ class InspectorWidget(QWidget):
             self.combo_cond_logic.setCurrentIndex(idx_op)
         self._refresh_points_table()
         self._on_field_changed()
-        self.sig_log.emit("INFO", f"[{self.current_scenario.name}] 고유 #{source_scenario.scenario_number} [{source_scenario.name}]의 인식 조건을 복사하여 조합했습니다.")
+        self.sig_log.emit("INFO", f"[{self.current_scenario.name}] 고유 s{source_scenario.scenario_number} [{source_scenario.name}]의 인식 조건을 복사하여 조합했습니다.")
 
     def _on_open_canvas_editor(self):
         if not self.current_scenario:
@@ -1642,7 +1643,7 @@ class InspectorWidget(QWidget):
 
         menu = QMenu(self)
         for s in other_scenarios:
-            action = menu.addAction(f"고유 #{s.scenario_number} [{s.name}] - {len(s.actions)}개 액션 ({s.get_actions_summary()})")
+            action = menu.addAction(f"고유 s{s.scenario_number} [{s.name}] - {len(s.actions)}개 액션 ({s.get_actions_summary()})")
             action.triggered.connect(lambda checked, src=s: self._copy_actions_from(src))
         menu.exec_(self.btn_copy_act.mapToGlobal(self.btn_copy_act.rect().bottomLeft()))
 
@@ -1652,7 +1653,7 @@ class InspectorWidget(QWidget):
         self.current_scenario.actions = copy.deepcopy(source_scenario.actions)
         self._refresh_actions_table()
         self._on_field_changed()
-        self.sig_log.emit("INFO", f"[{self.current_scenario.name}] 고유 #{source_scenario.scenario_number} [{source_scenario.name}]의 액션 시퀀스를 복사하여 조합했습니다.")
+        self.sig_log.emit("INFO", f"[{self.current_scenario.name}] 고유 s{source_scenario.scenario_number} [{source_scenario.name}]의 액션 시퀀스를 복사하여 조합했습니다.")
 
     def _on_quick_add_action(self, action_type: str):
         if not self.current_scenario:
