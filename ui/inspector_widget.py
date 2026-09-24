@@ -262,6 +262,9 @@ class InspectorWidget(QWidget):
         self._init_ui()
         self._init_shortcuts()
 
+    def set_project(self, project: Project):
+        self.project = project
+
     def _init_shortcuts(self):
         """Register keyboard shortcuts for inspector actions."""
         self.sc_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
@@ -681,6 +684,30 @@ class InspectorWidget(QWidget):
         mm_layout.addWidget(self.combo_jump_mismatch, 1)
         layout.addLayout(mm_layout)
 
+        # Retry fail option row (shown only when on_mismatch == "retry")
+        self.row_retry_fail = QWidget()
+        rf_layout = QHBoxLayout(self.row_retry_fail)
+        rf_layout.setContentsMargins(0, 2, 0, 2)
+        rf_layout.setSpacing(6)
+
+        self.lbl_retry_fail = QLabel("재시도 모두 소진 시 ➔")
+        self.lbl_retry_fail.setStyleSheet("color: #b91c1c; font-weight: bold; font-size: 8.5pt;")
+        self.lbl_retry_fail.setFixedWidth(135)
+        rf_layout.addWidget(self.lbl_retry_fail)
+
+        self.combo_retry_fail_action = QComboBox()
+        self.combo_retry_fail_action.addItem("오토 즉시 정지 (Stop)", "stop")
+        self.combo_retry_fail_action.addItem("다른 시나리오로 점프 (Jump)", "jump")
+        self.combo_retry_fail_action.addItem("다음 시나리오로 진행 (Next)", "next")
+        self.combo_retry_fail_action.currentIndexChanged.connect(self._on_retry_fail_action_changed)
+        rf_layout.addWidget(self.combo_retry_fail_action, 1)
+
+        self.combo_retry_fail_jump = QComboBox()
+        self.combo_retry_fail_jump.currentIndexChanged.connect(self._on_field_changed)
+        rf_layout.addWidget(self.combo_retry_fail_jump, 1)
+
+        layout.addWidget(self.row_retry_fail)
+
         # Retry & Post Delay options row
         opt_layout = QHBoxLayout()
         opt_layout.setSpacing(6)
@@ -966,6 +993,13 @@ class InspectorWidget(QWidget):
                 self.combo_on_mismatch.setCurrentIndex(idx_mismatch)
             self._select_jump_target(self.combo_jump_mismatch, scenario.jump_target_on_mismatch)
 
+            # Retry failure action
+            rf_action = getattr(scenario, "retry_fail_action", "stop")
+            idx_rf = self.combo_retry_fail_action.findData(rf_action)
+            if idx_rf >= 0:
+                self.combo_retry_fail_action.setCurrentIndex(idx_rf)
+            self._select_jump_target(self.combo_retry_fail_jump, getattr(scenario, "retry_fail_jump_target", ""))
+
             self.spin_retries.setValue(scenario.retry_max_count)
             self.spin_retry_sec.setValue(scenario.retry_interval_sec)
             self.spin_post_delay.setValue(scenario.post_delay_seconds)
@@ -1158,7 +1192,7 @@ class InspectorWidget(QWidget):
             self._on_field_changed()
 
     def _populate_jump_combos(self):
-        for combo in [self.combo_jump_match, self.combo_jump_mismatch]:
+        for combo in [self.combo_jump_match, self.combo_jump_mismatch, self.combo_retry_fail_jump]:
             combo.clear()
             combo.addItem("(선택 안 함)", "")
             if self.project:
@@ -1174,6 +1208,12 @@ class InspectorWidget(QWidget):
         else:
             combo.setCurrentIndex(0)
 
+    def _on_retry_fail_action_changed(self):
+        if hasattr(self, "combo_retry_fail_jump") and hasattr(self, "combo_retry_fail_action"):
+            is_jump_fail = (self.combo_retry_fail_action.currentData() == "jump")
+            self.combo_retry_fail_jump.setVisible(is_jump_fail)
+        self._on_field_changed()
+
     def _update_branch_visibility(self):
         is_jump_match = (self.combo_on_match.currentData() == "jump")
         self.combo_jump_match.setVisible(is_jump_match)
@@ -1186,6 +1226,11 @@ class InspectorWidget(QWidget):
         self.spin_retries.setVisible(is_retry)
         self.lbl_retry_sec.setVisible(is_retry)
         self.spin_retry_sec.setVisible(is_retry)
+        if hasattr(self, "row_retry_fail"):
+            self.row_retry_fail.setVisible(is_retry)
+            if is_retry:
+                is_jump_fail = (self.combo_retry_fail_action.currentData() == "jump")
+                self.combo_retry_fail_jump.setVisible(is_jump_fail)
 
     def _refresh_points_table(self):
         if not self.current_scenario or not self.current_scenario.condition:
@@ -1434,6 +1479,11 @@ class InspectorWidget(QWidget):
 
         self.current_scenario.on_mismatch = self.combo_on_mismatch.currentData()
         self.current_scenario.jump_target_on_mismatch = self.combo_jump_mismatch.currentData() if self.current_scenario.on_mismatch == "jump" else ""
+
+        if hasattr(self, "combo_retry_fail_action"):
+            self.current_scenario.retry_fail_action = self.combo_retry_fail_action.currentData() or "stop"
+        if hasattr(self, "combo_retry_fail_jump"):
+            self.current_scenario.retry_fail_jump_target = self.combo_retry_fail_jump.currentData() if self.current_scenario.retry_fail_action == "jump" else ""
 
         self.current_scenario.retry_max_count = self.spin_retries.value()
         self.current_scenario.retry_interval_sec = self.spin_retry_sec.value()

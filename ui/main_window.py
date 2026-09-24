@@ -35,6 +35,7 @@ from ui.inspector_widget import InspectorWidget
 from ui.widgets.color_badge import WarningBadge
 from ui.widgets.flow_layout import FlowLayout
 from ui.preset_dialog import SavePresetDialog, PresetManagerDialog
+from ui.action_overlay import ActionOverlayWindow
 
 
 CONFIG_FILE = "fgoa_config.json"
@@ -264,6 +265,11 @@ class MainWindow(QMainWindow):
             pass
 
     def closeEvent(self, event):
+        if hasattr(self, "action_overlay") and self.action_overlay:
+            try:
+                self.action_overlay.close()
+            except Exception:
+                pass
         self._save_app_config()
         super().closeEvent(event)
 
@@ -650,11 +656,16 @@ class MainWindow(QMainWindow):
         self.btn_stop.setObjectName("btn_stop")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._on_stop_execution)
-        c_layout.addWidget(self.btn_stop)
-
-        self.btn_step = QPushButton("⏭ 단일 스텝")
+        self.btn_step = QPushButton("⏭ 단일 스텝 (F7)")
+        self.btn_step.setToolTip("선택한 시나리오 노드부터 1단계를 실행하고 일시정지합니다. (단축키: F7 / F10)")
         self.btn_step.clicked.connect(self._on_step_execution)
         c_layout.addWidget(self.btn_step)
+
+        self.chk_action_overlay = QCheckBox("🎯 조작 시각화")
+        self.chk_action_overlay.setChecked(True)
+        self.chk_action_overlay.setToolTip("오토 실행 중 조작할 좌표나 범위를 앱 화면 위에 점선 박스/화살표로 시각화 표시합니다.")
+        self.chk_action_overlay.toggled.connect(self._on_toggle_action_overlay)
+        c_layout.addWidget(self.chk_action_overlay)
 
         c_layout.addSpacing(20)
 
@@ -753,6 +764,16 @@ class MainWindow(QMainWindow):
 
         self.sc_f8 = QShortcut(QKeySequence("F8"), self)
         self.sc_f8.activated.connect(self._reload_application)
+
+        # Single Step Shortcuts (F7 / F10)
+        self.sc_f7 = QShortcut(QKeySequence("F7"), self)
+        self.sc_f7.activated.connect(self._on_step_execution)
+
+        self.sc_f10 = QShortcut(QKeySequence("F10"), self)
+        self.sc_f10.activated.connect(self._on_step_execution)
+
+        # Action sequence visualizer overlay window
+        self.action_overlay = ActionOverlayWindow(target_hwnd=self.target_hwnd, parent=self)
 
         self.sc_preset_load = QShortcut(QKeySequence("Ctrl+L"), self)
         self.sc_preset_load.activated.connect(self._on_open_preset_manager)
@@ -1547,6 +1568,8 @@ class MainWindow(QMainWindow):
             self.project.target_client_height = dlg.selected_window.client_height
             self._save_app_config()
             self.inspector.set_target_hwnd(self.target_hwnd)
+            if hasattr(self, "action_overlay") and self.action_overlay:
+                self.action_overlay.set_target_hwnd(self.target_hwnd)
             self._update_target_label(dlg.selected_window)
             self._append_log("INFO", f"타겟 지정 완료: '{dlg.selected_window.title}' ({dlg.selected_window.client_width}×{dlg.selected_window.client_height})")
 
@@ -1601,22 +1624,26 @@ class MainWindow(QMainWindow):
     # ==========================================
     # Execution Engine Control
     # ==========================================
-    def _on_start_execution(self):
+    def _on_start_execution(self, start_scenario_id: Optional[str] = None):
         if not self.target_hwnd:
             QMessageBox.warning(self, "타겟 창 필요", "먼저 상단에서 오토 입력을 수행할 타겟 게임 창을 선택해주세요.")
             return
 
         if self.runner and self.runner.isRunning():
             if self.runner._is_paused:
+                if start_scenario_id:
+                    self.runner.set_next_scenario_id(start_scenario_id)
                 self.runner.resume()
                 self.lbl_run_status.setText("실행 중...")
                 self.btn_pause.setText("⏸ 일시정지")
                 return
 
-        self.runner = WorkflowRunner(self.project, self.target_hwnd, parent=self)
+        self.runner = WorkflowRunner(self.project, self.target_hwnd, start_scenario_id=start_scenario_id, parent=self)
         self.runner.sig_log.connect(self._append_log)
         self.runner.sig_scenario_started.connect(self._on_scenario_started)
         self.runner.sig_scenario_completed.connect(self._on_scenario_completed)
+        self.runner.sig_action_executing.connect(self._on_action_executing_visual)
+        self.runner.sig_action_finished.connect(self._on_action_finished_visual)
         self.runner.sig_finished.connect(self._on_runner_finished)
 
         self.btn_run.setEnabled(False)
@@ -1645,17 +1672,49 @@ class MainWindow(QMainWindow):
             self.runner.stop()
             self.lbl_run_status.setText("정지 요청 중...")
             self.lbl_run_status.setStyleSheet("color: #dc2626; font-weight: bold;")
+        if hasattr(self, "action_overlay") and self.action_overlay:
+            self.action_overlay.clear_action()
 
     def _on_step_execution(self):
         if not self.target_hwnd:
             QMessageBox.warning(self, "타겟 창 필요", "타겟 창을 먼저 선택해주세요.")
             return
+
+        # Find selected scenario node (start from selected node, not from beginning)
+        selected_indexes = self.tbl_scenarios.selectedIndexes()
+        selected_scen_id = None
+        if selected_indexes:
+            row = selected_indexes[0].row()
+            if 0 <= row < len(self.project.scenarios):
+                selected_scen_id = self.project.scenarios[row].id
+
         if not self.runner or not self.runner.isRunning():
-            self._on_start_execution()
+            self._on_start_execution(start_scenario_id=selected_scen_id)
             if self.runner:
                 self.runner.step_forward()
+                self.lbl_run_status.setText("단일 스텝 (F7)")
+                self.lbl_run_status.setStyleSheet("color: #0284c7; font-weight: bold;")
         else:
+            if selected_scen_id:
+                self.runner.set_next_scenario_id(selected_scen_id)
             self.runner.step_forward()
+            self.lbl_run_status.setText("단일 스텝 (F7)")
+            self.lbl_run_status.setStyleSheet("color: #0284c7; font-weight: bold;")
+
+    def _on_action_executing_visual(self, action, index, total):
+        if hasattr(self, "action_overlay") and self.action_overlay and hasattr(self, "chk_action_overlay") and self.chk_action_overlay.isChecked():
+            self.action_overlay.set_target_hwnd(self.target_hwnd)
+            self.action_overlay.show_action(action, index, total)
+
+    def _on_action_finished_visual(self, action):
+        if hasattr(self, "action_overlay") and self.action_overlay:
+            self.action_overlay.hide_action_delayed(500)
+
+    def _on_toggle_action_overlay(self, checked: bool):
+        if hasattr(self, "action_overlay") and self.action_overlay:
+            self.action_overlay.is_overlay_enabled = checked
+            if not checked:
+                self.action_overlay.clear_action()
 
     def _on_scenario_started(self, scenario_id: str):
         for row, s in enumerate(self.project.scenarios):
@@ -1673,6 +1732,8 @@ class MainWindow(QMainWindow):
         self.btn_pause.setText("⏸ 일시정지")
         self.lbl_run_status.setText(f"완료 ({reason})")
         self.lbl_run_status.setStyleSheet("font-weight: bold;")
+        if hasattr(self, "action_overlay") and self.action_overlay:
+            self.action_overlay.clear_action()
 
     def _append_log(self, level: str, msg: str):
         pal = get_theme_colors(self.current_theme)

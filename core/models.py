@@ -168,6 +168,8 @@ class Scenario:
     jump_target_on_mismatch: str = ""  # Scenario ID to jump to
     retry_max_count: int = 3
     retry_interval_sec: float = 0.5
+    retry_fail_action: str = "stop"  # "stop" (정지), "jump" (특정 시나리오로 점프), "next" (다음 단계로 진행)
+    retry_fail_jump_target: str = ""  # retry_fail_action이 "jump"일 때 대상 시나리오 ID
     
     # Actions to execute when condition is met (or unconditional)
     actions: List[Action] = field(default_factory=list)
@@ -244,6 +246,8 @@ class Scenario:
             "jump_target_on_mismatch": self.jump_target_on_mismatch,
             "retry_max_count": self.retry_max_count,
             "retry_interval_sec": self.retry_interval_sec,
+            "retry_fail_action": self.retry_fail_action,
+            "retry_fail_jump_target": self.retry_fail_jump_target,
             "actions": [a.to_dict() for a in self.actions],
             "post_delay_seconds": self.post_delay_seconds,
             "custom_log": self.custom_log,
@@ -272,6 +276,8 @@ class Scenario:
             jump_target_on_mismatch=data.get("jump_target_on_mismatch", ""),
             retry_max_count=data.get("retry_max_count", 3),
             retry_interval_sec=data.get("retry_interval_sec", 0.5),
+            retry_fail_action=data.get("retry_fail_action", "stop"),
+            retry_fail_jump_target=data.get("retry_fail_jump_target", ""),
             actions=actions,
             post_delay_seconds=data.get("post_delay_seconds", 0.2),
             custom_log=data.get("custom_log", ""),

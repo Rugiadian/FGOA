@@ -1,0 +1,40 @@
+[일시 / Timestamp]
+- 요청 시각: 2026-09-24 16:52:16
+- 완료 시각: 2026-09-24 17:50:50
+
+[요청 내용 / User Request]
+- 단일 스탭 진행
+  -- 단축키 필요.
+  -- 시나리오에서 사용자가 선택한 노드부터 시작. 처음부터 아님. 
+- 액션 시퀀스 시각화
+  -- 현재 진행중인 액션 시퀀스가 액션 조작할 부분을 앱 화면 위에 표시. 점선 등으로. 
+- 인식조건 : 대기 후 조건 재시도. 
+  -- 재시도 횟수가 모두 채워졌는데도 실패일 경우 옵션 제공. 시나리오 정지/ 특정 시나리오로 점프.
+
+[결과 요약 / Summary of Results]
+1. 단일 스텝 진행 (Single Step Execution) 개선:
+   - 전역 단축키 F7 및 F10 등록 (창 포커스 무관하게 작동)
+   - 시나리오 테이블에서 사용자가 현재 선택한 노드(행)를 감지하여 처음(Step 1)이 아닌 해당 노드부터 1단계 실행 후 자동 일시정지되도록 러너 및 메인 윈도우 로직 개편
+   - 일시정지 중 다른 시나리오를 선택하고 F7을 누르면 즉시 해당 노드로 이동하여 스텝 실행 지원
+2. 액션 시퀀스 온스크린 시각화 (Action Sequence Visualizer Overlay):
+   - 투명/클릭스루/Always-on-Top 오버레이 윈도우(`ui/action_overlay.py`) 신설
+   - 타겟 앱 윈도우의 클라이언트 영역 위치를 정밀 추적하여 조작할 좌표에 점선 박스(DashLine), 크로스헤어, 드래그 점선 화살표, 단계별 플로팅 뱃지 실시간 렌더링
+   - 메인 화면 하단에 '🎯 조작 시각화' 온/오프 토글 체크박스 연동
+   - 러너에 `sig_action_executing` / `sig_action_finished` 시그널 연동 및 미세 시각 지연(80ms)으로 조작 지점 가시성 확보
+3. 인식조건 재시도 소진 시 분기 옵션 구현:
+   - `core/models.py`: Scenario 모델에 `retry_fail_action`("stop", "jump", "next") 및 `retry_fail_jump_target` 속성 추가 및 직렬화/역직렬화 지원
+   - `core/runner.py`: 조건 재시도 횟수 초과 시 옵션에 따라 "오토 즉시 정지", "특정 시나리오로 점프", "다음 단계 진행"을 안전하게 분기 실행하도록 엔진 로직 구현
+   - `ui/inspector_widget.py`: 조건 불일치 시 '대기 후 조건 재시도' 선택 시 "재시도 모두 소진 시 ➔" 행 노출 및 정지/점프/다음 선택 콤보박스 및 점프 대상 시나리오 선택 콤보박스 연동
+4. 테스트 및 버전 갱신:
+   - `tests/test_step_overlay_and_retry_fail.py` 작성 및 5개 시나리오 100% 통과
+   - `core/version.py` -> `260924.1748`로 갱신 완료
+
+[영향 파일 목록 / Affected Files]
+- core/models.py (Scenario retry fail 옵션 필드 및 직렬화 추가)
+- core/runner.py (선택 노드 시작, 액션 시각화 시그널, 재시도 소진 분기 처리)
+- core/version.py (버전 260924.1748 갱신)
+- ui/action_overlay.py (타겟 앱 화면 위 점선 조작 시각화 오버레이 신규 구현)
+- ui/inspector_widget.py (재시도 소진 시 정지/점프/다음 UI 옵션 연동 및 set_project 추가)
+- ui/main_window.py (단일 스텝 F7/F10 단축키, 선택 노드 시작 로직, 시각화 오버레이 연동 및 UI 토글)
+- tests/test_step_overlay_and_retry_fail.py (신규 기능 통합 단위 테스트)
+- history/2026-09-24_175000_단일스텝_선택노드시작_액션시퀀스시각화_조건재시도옵션_구현.txt

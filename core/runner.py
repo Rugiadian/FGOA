@@ -19,17 +19,25 @@ class WorkflowRunner(QThread):
     sig_log = pyqtSignal(str, str)  # (level, message)
     sig_scenario_started = pyqtSignal(str)  # scenario_id
     sig_scenario_completed = pyqtSignal(str, str)  # (scenario_id, result: "matched" / "mismatch" / "skipped")
+    sig_action_executing = pyqtSignal(object, int, int)  # (action, action_index, total_actions)
+    sig_action_finished = pyqtSignal(object)  # action
     sig_loop_progress = pyqtSignal(int, int)  # (current_loop, total_loops)
     sig_finished = pyqtSignal(str)  # reason
 
-    def __init__(self, project: Project, hwnd: int, parent=None):
+    def __init__(self, project: Project, hwnd: int, start_scenario_id: Optional[str] = None, parent=None):
         super().__init__(parent)
         self.project = project
         self.hwnd = hwnd
+        self.start_scenario_id = start_scenario_id
+        self._next_scenario_id: Optional[str] = None
 
         self._is_running = False
         self._is_paused = False
         self._step_mode = False  # If True, runs one step then pauses
+
+    def set_next_scenario_id(self, scenario_id: Optional[str]):
+        """Sets the scenario ID to jump to next (used when stepping from user-selected node)."""
+        self._next_scenario_id = scenario_id
 
     def stop(self):
         """Signal the runner to stop immediately."""
@@ -72,9 +80,16 @@ class WorkflowRunner(QThread):
             self.sig_loop_progress.emit(current_loop, total_loops)
             self.sig_log.emit("INFO", f"--- 루프 회차 {loop_str} 시작 ---")
 
-            # Execute scenarios starting at step 1
-            current_index = 0
+            # Execute scenarios starting at step 1 or selected node
             scenarios = self.project.scenarios
+            current_index = 0
+            if self.start_scenario_id:
+                found_idx = next((i for i, s in enumerate(scenarios) if s.id == self.start_scenario_id), None)
+                if found_idx is not None:
+                    current_index = found_idx
+                    self.sig_log.emit("INFO", f"▶ 선택된 노드 [#{scenarios[found_idx].step_number}] '{scenarios[found_idx].name}'부터 실행을 시작합니다.")
+                self.start_scenario_id = None
+
             loop_counters = {}  # {loop_start_id: int}
 
             while self._is_running and current_index < len(scenarios):
@@ -84,6 +99,14 @@ class WorkflowRunner(QThread):
 
                 if not self._is_running:
                     break
+
+                # If user selected a different scenario while paused / stepping
+                if self._next_scenario_id:
+                    target = self._resolve_target_scenario(self._next_scenario_id)
+                    if target and target in scenarios:
+                        current_index = scenarios.index(target)
+                        self.sig_log.emit("INFO", f"▶ 선택된 노드 [#{target.step_number}] '{target.name}'(으)로 이동하여 진행합니다.")
+                    self._next_scenario_id = None
 
                 scen = scenarios[current_index]
 
@@ -212,9 +235,28 @@ class WorkflowRunner(QThread):
 
                 else:
                     self.sig_scenario_completed.emit(scen.id, "mismatch")
-                    self.sig_log.emit("WARN", f"[#{scen.step_number}] '{scen.name}' 조건 불일치.")
+                    if scen.on_mismatch == "retry":
+                        fail_action = getattr(scen, "retry_fail_action", "stop")
+                        self.sig_log.emit("WARN", f"[#{scen.step_number}] '{scen.name}' 조건 재시도({scen.retry_max_count}회) 모두 소진! (실패 처리: {fail_action})")
+                        if fail_action == "stop":
+                            self.sig_log.emit("ERROR", f"[#{scen.step_number}] 조건 재시도 실패로 오토 실행을 정지합니다.")
+                            self._is_running = False
+                            break
+                        elif fail_action == "jump":
+                            target_id = getattr(scen, "retry_fail_jump_target", "") or scen.jump_target_on_mismatch
+                            target_scen = self._resolve_target_scenario(target_id)
+                            if target_scen and target_scen in scenarios:
+                                self.sig_log.emit("INFO", f"→ [#{scen.step_number}] 재시도 소진으로 시나리오 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]로 점프합니다.")
+                                current_index = scenarios.index(target_scen)
+                            else:
+                                self.sig_log.emit("WARN", f"재시도 실패 점프 대상 ID '{target_id}'를 찾을 수 없어 오토 실행을 정지합니다.")
+                                self._is_running = False
+                                break
+                        else:  # "next"
+                            self.sig_log.emit("INFO", f"[#{scen.step_number}] 조건 재시도 소진으로 다음 시나리오로 진행합니다.")
+                            current_index += 1
 
-                    if scen.on_mismatch in ("next", "retry"):
+                    elif scen.on_mismatch == "next":
                         current_index += 1
 
                     elif scen.on_mismatch == "break_loop":
@@ -271,13 +313,16 @@ class WorkflowRunner(QThread):
         if scen_log:
             self.sig_log.emit("USER", f"  [액션 로그] {scen_log}")
 
-        for act in scenario.actions:
+        for act_idx, act in enumerate(scenario.actions):
             if not self._is_running:
                 break
 
             # Handle pause
             while self._is_running and self._is_paused:
                 time.sleep(0.05)
+
+            # Signal action visualizer overlay that this action is about to execute
+            self.sig_action_executing.emit(act, act_idx + 1, len(scenario.actions))
 
             # Scenario-wide batch anti-ban: strictly positive +n seconds delay offset
             should_anti_ban = use_anti_ban
@@ -313,6 +358,10 @@ class WorkflowRunner(QThread):
             elif getattr(act, "custom_log", ""):
                 self.sig_log.emit("USER", f"  [사용자 로그] {act.custom_log}")
 
+            # Brief visual display delay (80ms) so overlay dotted indicator is visible before action
+            if act.action_type in ("mouse_click", "mouse_drag"):
+                time.sleep(0.08)
+
             InputController.execute_action(
                 action=act,
                 hwnd=self.hwnd,
@@ -322,6 +371,8 @@ class WorkflowRunner(QThread):
                 max_delay=offset_sec,
                 precomputed_jitter=jitter
             )
+
+            self.sig_action_finished.emit(act)
 
             # Small safety delay between actions
             time.sleep(0.05)
