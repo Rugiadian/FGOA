@@ -18,6 +18,7 @@ from PyQt5.QtGui import QPixmap, QIcon, QColor, QFont
 
 from core.models import Project, Scenario
 from core.screen_capture import ScreenCapture
+from core.window_manager import WindowManager
 from ui.coordinate_picker_dialog import CoordinatePickerDialog
 from ui.qt_image_utils import pil_to_qpixmap
 
@@ -73,13 +74,21 @@ class ReferenceGalleryDialog(QDialog):
 
         tb_layout.addSpacing(16)
 
-        tb_layout.addWidget(QLabel("필터:"))
+        tb_layout.addWidget(QLabel("사용 구분:"))
         self.combo_filter = QComboBox()
-        self.combo_filter.addItem("모든 이미지 보기", "all")
+        self.combo_filter.addItem("모든 이미지", "all")
         self.combo_filter.addItem("🟢 사용 중인 이미지만", "used")
         self.combo_filter.addItem("⚪ 미사용 이미지만", "unused")
         self.combo_filter.currentIndexChanged.connect(self._apply_filter)
         tb_layout.addWidget(self.combo_filter)
+
+        tb_layout.addSpacing(12)
+
+        tb_layout.addWidget(QLabel("📐 해상도별 분류:"))
+        self.combo_resolution = QComboBox()
+        self.combo_resolution.addItem("전체 해상도 보기", "all")
+        self.combo_resolution.currentIndexChanged.connect(self._apply_filter)
+        tb_layout.addWidget(self.combo_resolution)
 
         tb_layout.addStretch()
 
@@ -97,6 +106,14 @@ class ReferenceGalleryDialog(QDialog):
         left_container.setObjectName("card_frame")
         l_layout = QVBoxLayout(left_container)
         l_layout.setContentsMargins(6, 6, 6, 6)
+        l_layout.setSpacing(6)
+
+        self.lbl_res_banner = QLabel("📐 전체 해상도")
+        self.lbl_res_banner.setStyleSheet(
+            "background-color: #f1f5f9; color: #475569; font-weight: bold; font-size: 8.5pt; "
+            "padding: 4px 8px; border-radius: 4px; border: 1px solid #cbd5e1;"
+        )
+        l_layout.addWidget(self.lbl_res_banner)
 
         self.list_widget = QListWidget()
         self.list_widget.setIconSize(QSize(72, 48))
@@ -242,17 +259,72 @@ class ReferenceGalleryDialog(QDialog):
 
     def refresh_gallery(self):
         self.image_entries = self.get_all_gallery_entries(self.project)
+
+        # Update resolution classification options
+        if hasattr(self, "combo_resolution"):
+            cur_res = self.combo_resolution.currentData() or "all"
+            self.combo_resolution.blockSignals(True)
+            self.combo_resolution.clear()
+            self.combo_resolution.addItem("📐 전체 해상도 보기", "all")
+
+            res_counts = {}
+            for e in self.image_entries:
+                key = f"{e['width']}×{e['height']}"
+                res_counts[key] = res_counts.get(key, 0) + 1
+
+            target_win = WindowManager.get_window_info(self.target_hwnd) if self.target_hwnd else None
+            target_res_key = f"{target_win.client_width}×{target_win.client_height}" if target_win and target_win.client_width > 0 else ""
+
+            # Sort resolutions: target resolution first, then by count descending, then key
+            sorted_keys = sorted(
+                res_counts.keys(),
+                key=lambda k: (k != target_res_key, -res_counts[k], k)
+            )
+
+            for res_key in sorted_keys:
+                cnt = res_counts[res_key]
+                target_tag = " [현재 타겟]" if res_key == target_res_key else ""
+                self.combo_resolution.addItem(f"📐 {res_key}{target_tag} ({cnt}개)", res_key)
+
+            idx = self.combo_resolution.findData(cur_res)
+            if idx >= 0:
+                self.combo_resolution.setCurrentIndex(idx)
+            else:
+                self.combo_resolution.setCurrentIndex(0)
+            self.combo_resolution.blockSignals(False)
+
         self._apply_filter()
 
     def _apply_filter(self):
-        filter_mode = self.combo_filter.currentData() if hasattr(self.combo_filter, "currentData") else "all"
+        filter_mode = self.combo_filter.currentData() if hasattr(self, "combo_filter") and hasattr(self.combo_filter, "currentData") else "all"
         if not filter_mode:
             filter_mode = "all"
 
+        res_mode = self.combo_resolution.currentData() if hasattr(self, "combo_resolution") and hasattr(self.combo_resolution, "currentData") else "all"
+        if not res_mode:
+            res_mode = "all"
+
         self.list_widget.clear()
 
+        # Update header banner
+        if hasattr(self, "lbl_res_banner"):
+            target_win = WindowManager.get_window_info(self.target_hwnd) if self.target_hwnd else None
+            target_res_key = f"{target_win.client_width}×{target_win.client_height}" if target_win and target_win.client_width > 0 else ""
+            if res_mode == "all":
+                self.lbl_res_banner.setText("📐 전체 해상도 이미지")
+                self.lbl_res_banner.setStyleSheet("background-color: #f1f5f9; color: #475569; font-weight: bold; font-size: 8.5pt; padding: 4px 8px; border-radius: 4px; border: 1px solid #cbd5e1;")
+            else:
+                is_target = (res_mode == target_res_key)
+                tag = " (현재 타겟 창 해상도와 일치 ✅)" if is_target else ""
+                self.lbl_res_banner.setText(f"📐 {res_mode} 분류{tag}")
+                if is_target:
+                    self.lbl_res_banner.setStyleSheet("background-color: #f0fdf4; color: #166534; font-weight: bold; font-size: 8.5pt; padding: 4px 8px; border-radius: 4px; border: 1px solid #86efac;")
+                else:
+                    self.lbl_res_banner.setStyleSheet("background-color: #eff6ff; color: #1e40af; font-weight: bold; font-size: 8.5pt; padding: 4px 8px; border-radius: 4px; border: 1px solid #bfdbfe;")
+
         used_count = sum(1 for e in self.image_entries if e["is_used"])
-        self.lbl_stats.setText(f"총 {len(self.image_entries)}개 이미지 ({used_count}개 사용 중)")
+        res_types_count = len({f"{e['width']}×{e['height']}" for e in self.image_entries})
+        self.lbl_stats.setText(f"총 {len(self.image_entries)}개 이미지 ({used_count}개 사용 중, 해상도 {res_types_count}종류)")
 
         for entry in self.image_entries:
             if filter_mode == "used" and not entry["is_used"]:
@@ -260,13 +332,24 @@ class ReferenceGalleryDialog(QDialog):
             if filter_mode == "unused" and entry["is_used"]:
                 continue
 
-            # Create Item
+            entry_res = f"{entry['width']}×{entry['height']}"
+            if res_mode != "all" and entry_res != res_mode:
+                continue
+
+            # Create Item with distinct resolution tag
             item = QListWidgetItem()
             status_tag = "🟢 사용 중" if entry["is_used"] else "⚪ 미사용"
             item.setText(
-                f"{entry['filename']}\n{status_tag} | {entry['width']}×{entry['height']} ({entry['size_kb']:.1f} KB)"
+                f"[{entry['width']}×{entry['height']}] {entry['filename']}\n{status_tag} | {entry['size_kb']:.1f} KB"
             )
             item.setData(Qt.UserRole, entry)
+            item.setToolTip(
+                f"파일명: {entry['filename']}\n"
+                f"디바이스 해상도: {entry['width']}×{entry['height']}\n"
+                f"용량: {entry['size_kb']:.1f} KB\n"
+                f"사용 현황: {'사용 중 (' + str(len(entry['usages'])) + '곳)' if entry['is_used'] else '미사용'}\n"
+                f"경로: {entry['path']}"
+            )
 
             # Thumbnail Icon
             try:
@@ -301,11 +384,19 @@ class ReferenceGalleryDialog(QDialog):
         except Exception:
             self.lbl_preview.setText("이미지를 미리볼 수 없습니다.")
 
-        # 2. Metadata info
+        # 2. Metadata info with target resolution comparison
         status_str = f"🟢 사용 중 ({len(entry['usages'])}곳)" if entry["is_used"] else "⚪ 미사용"
+        target_win = WindowManager.get_window_info(self.target_hwnd) if self.target_hwnd else None
+        target_match_str = ""
+        if target_win and target_win.client_width > 0:
+            if entry["width"] == target_win.client_width and entry["height"] == target_win.client_height:
+                target_match_str = " (현재 타겟 해상도와 일치 ✅)"
+            else:
+                target_match_str = f" (현재 타겟: {target_win.client_width}×{target_win.client_height} ⚠️ 해상도 다름)"
+
         self.lbl_info.setText(
             f"파일: {entry['filename']}\n"
-            f"상태: {status_str} | 해상도: {entry['width']} × {entry['height']} | 용량: {entry['size_kb']:.1f} KB\n"
+            f"상태: {status_str} | 디바이스 해상도: {entry['width']} × {entry['height']}{target_match_str} | 용량: {entry['size_kb']:.1f} KB\n"
             f"경로: {entry['path']}"
         )
 
