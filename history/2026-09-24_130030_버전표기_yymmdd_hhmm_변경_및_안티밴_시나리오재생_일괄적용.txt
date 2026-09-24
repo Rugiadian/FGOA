@@ -1,0 +1,38 @@
+[일시 / Timestamp]
+- 요청 일시: 2026-09-24 12:53:16
+- 완료 일시: 2026-09-24 13:00:30
+
+[요청 내용 / User Request]
+- 버전 표기는 yymmdd.hhmm 형식으로. 초까지는 안 써도됨. 
+- 안티밴 기능은 액션마다 하나씩 설정하는게 아니라 시나리오 전체에 일괄 적용 하는 기능. 시나리오 재생 창에 안티밴 설정 온오프를 넣어. 
+-- 액션 시퀀스에서 하나하나 설정하는건 해제. 
+-- 안티밴 오프셋은 +- n초가 아니라 +n초.
+
+[결과 요약 / Summary of Results]
+1. 버전 표기 형식 단순화 및 변경 (yymmdd.hhmm)
+   - core/version.py의 __version__을 '260924.1256' 형식으로 갱신
+   - AGENTS.md의 버전 관리 규칙을 기존 YYYY.MM.DD.HHMM에서 yymmdd.hhmm으로 수정 안내 반영
+   - 메인 윈도우 창 제목에 'FGOA v{__version__}' 정상 표기 유지
+
+2. 안티밴 기능 시나리오 전체 일괄 적용 및 시나리오 재생 컨트롤 배치
+   - 액션 시퀀스 편집창(SingleActionDialog)에서 개별 액션마다 설정하던 안티밴 체크박스 제거
+   - 시나리오 재생 컨트롤 바(Execution Controls)에 '▶ 시나리오 재생:' 라벨 및 안티밴 On/Off 체크박스, 오프셋 설정(+n초) 스핀박스 배치
+   - 프로젝트 데이터 모델(Project)에 anti_ban_offset_seconds 필드 추가 및 저장/불러오기 연동
+   - 안티밴 활성화 시 모든 액션 시퀀스 실행에 일괄 적용되도록 runner, input_controller, inspector_widget, coordinate_picker_dialog 통합
+
+3. 안티밴 오프셋 규칙 (+n초 단방향 양수 지연 추가)
+   - 시간 지연을 단축시키는 위험(+- n초)을 배제하고, 지연 시간에 오직 +0.0 ~ +n초 범위의 추가 지연시간만 무작위로 분산 적용
+   - 로그 출력 메시지에서도 '(안티밴 +n.nn초)' 형식으로 명확히 표기
+
+[영향 파일 목록 / Affected Files]
+- core/version.py
+- AGENTS.md
+- core/models.py
+- core/input_controller.py
+- core/runner.py
+- ui/main_window.py
+- ui/action_editor_dialog.py
+- ui/inspector_widget.py
+- ui/coordinate_picker_dialog.py
+- tests/test_core.py
+- history/2026-09-24_130030_버전표기_yymmdd_hhmm_변경_및_안티밴_시나리오재생_일괄적용.txt

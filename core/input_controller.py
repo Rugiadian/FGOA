@@ -195,17 +195,23 @@ class InputController:
         if not action:
             return 0, 0, 0.0, 0.0
 
-        act_anti_ban = getattr(action, "anti_ban", None)
-        should_anti_ban = act_anti_ban if act_anti_ban is not None else bool(apply_anti_ban)
+        should_anti_ban = bool(apply_anti_ban)
 
         act_x = action.x
         act_y = action.y
         act_end_x = getattr(action, "end_x", 0)
         act_end_y = getattr(action, "end_y", 0)
 
+        # 1. Time anti-ban (+n seconds jitter)
         jitter = 0.0
-        if should_anti_ban:
-            jitter = precomputed_jitter if precomputed_jitter is not None else round(random.uniform(min_delay, max_delay), 3)
+        if bool(apply_anti_ban):
+            if precomputed_jitter is not None:
+                jitter = max(0.0, precomputed_jitter)
+            elif max_delay > 0:
+                jitter = round(random.uniform(0.0, max_delay), 3)
+
+        # 2. Coordinate anti-ban (per-action random pixel offset)
+        if offset_range > 0:
             dx = random.randint(-offset_range, offset_range)
             dy = random.randint(-offset_range, offset_range)
             act_x = max(0, act_x + dx)

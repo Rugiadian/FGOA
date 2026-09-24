@@ -1,8 +1,8 @@
 # FGOA Project Rules for AI Assistants
 
 ## 1. 버전 관리 규칙 (Version Management Rule)
-- **코드 업데이트 시 버전 갱신**: 코드를 수정하거나 기능을 추가/업데이트할 때마다 `core/version.py`의 `__version__`을 반드시 현재 업데이트 날짜 및 시간(`YYYY.MM.DD.HHMM`)으로 갱신합니다.
-- **단순화된 날짜시간 형식**: 다른 연산(SemVer 메이저/마이너/패치 판단, 커밋 해시 계산 등) 없이 오직 업데이트 시점의 날짜시간(`YYYY.MM.DD.HHMM`, 예: `2026.09.24.0036`)을 버전 숫자로 지정합니다.
+- **코드 업데이트 시 버전 갱신**: 코드를 수정하거나 기능을 추가/업데이트할 때마다 `core/version.py`의 `__version__`을 반드시 현재 업데이트 날짜 및 시간(`yymmdd.hhmm`, 예: `260924.1256`)으로 갱신합니다. (초는 포함하지 않음)
+- **단순화된 날짜시간 형식**: 다른 연산(SemVer 메이저/마이너/패치 판단, 커밋 해시 계산 등) 없이 오직 업데이트 시점의 날짜시간(`yymmdd.hhmm`)을 버전 숫자로 지정합니다.
 - **프로그램 창 제목 표시**: 메인 윈도우 제목(Window Title)에 항상 현재 앱 버전(`FGOA v{__version__}`)이 표기되어야 합니다.
 
 ## 2. 작업 내역 개별 txt 파일 기록 규칙 (Work History Logging Rule)

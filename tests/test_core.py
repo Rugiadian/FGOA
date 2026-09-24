@@ -155,6 +155,26 @@ class TestCoreModels(unittest.TestCase):
         self.assertGreaterEqual(len(usages), 1)
         self.assertTrue(any("배틀 시작" in u["scenario_name"] for u in usages))
 
+    def test_antiban_settings_and_positive_offset(self):
+        # 1. Project model serialization includes anti_ban_offset_seconds
+        proj = Project(name="AntiBan Test", anti_ban_enabled=True, anti_ban_offset_seconds=2.5)
+        d = proj.to_dict()
+        self.assertTrue(d["anti_ban_enabled"])
+        self.assertEqual(d["anti_ban_offset_seconds"], 2.5)
+
+        proj_loaded = Project.from_dict(d)
+        self.assertTrue(proj_loaded.anti_ban_enabled)
+        self.assertEqual(proj_loaded.anti_ban_offset_seconds, 2.5)
+
+        # 2. InputController delay jitter is strictly positive (+n seconds, never negative)
+        from core.input_controller import InputController
+        act_delay = Action(action_type="delay", delay_seconds=1.5)
+        _, _, orig_t, final_t = InputController.execute_action(
+            act_delay, hwnd=0, apply_anti_ban=True, max_delay=0.5
+        )
+        self.assertEqual(orig_t, 1.5)
+        self.assertGreaterEqual(final_t, 1.5)  # strictly +n seconds, never minus!
+
 
 if __name__ == "__main__":
     unittest.main()

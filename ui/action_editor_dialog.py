@@ -183,13 +183,26 @@ class SingleActionDialog(QDialog):
         l_cl.addRow("로그 문장:", self.txt_custom_log)
         form.addRow(self.grp_custom_log)
 
-        # 8. Anti-ban options
-        self.grp_antiban = QGroupBox("🛡️ 안티밴 설정")
-        l_ab = QFormLayout(self.grp_antiban)
-        self.chk_anti_ban = QCheckBox("이 액션에 안티밴 적용 (좌표 ±10px / 0.15~1.0초 가변 지연)")
-        self.chk_anti_ban.setChecked(bool(self.action.anti_ban))
-        l_ab.addRow(self.chk_anti_ban)
-        form.addRow(self.grp_antiban)
+        # 8. Coordinate anti-ban options (for mouse_click & mouse_drag)
+        self.grp_coord_antiban = QGroupBox("🎯 안티밴: 좌표 설정")
+        l_cab = QFormLayout(self.grp_coord_antiban)
+        self.combo_coord_antiban = QComboBox()
+        self.combo_coord_antiban.addItem("오프셋 약 (기본값)", "weak")
+        self.combo_coord_antiban.addItem("오프셋 강", "strong")
+        self.combo_coord_antiban.addItem("해제 (좌표 고정)", "none")
+
+        cur_mode = getattr(self.action, "coord_anti_ban", "weak")
+        idx_cab = self.combo_coord_antiban.findData(cur_mode)
+        self.combo_coord_antiban.setCurrentIndex(idx_cab if idx_cab >= 0 else 0)
+        self.combo_coord_antiban.setToolTip(
+            "이 액션 실행 시 마우스 좌표에 무작위 오프셋을 적용합니다.\n"
+            "- 오프셋 약: 좁은 오차 범위 분산 (기본값, 버튼 클릭용)\n"
+            "- 오프셋 강: 넓은 오차 범위 분산 (넓은 영역 클릭용)\n"
+            "- 해제: 오프셋 없이 지정한 좌표 정확히 클릭\n"
+            "* 약/강의 세부 픽셀 수치는 시나리오 재생 창(전역 옵션)에서 조절합니다."
+        )
+        l_cab.addRow("좌표 오프셋 강도:", self.combo_coord_antiban)
+        form.addRow(self.grp_coord_antiban)
 
         layout.addLayout(form)
         self._update_visibility()
@@ -218,6 +231,7 @@ class SingleActionDialog(QDialog):
         self.grp_delay.setVisible(current_type == "delay")
         self.grp_log.setVisible(current_type == "log_message")
         self.grp_custom_log.setVisible(current_type != "log_message")
+        self.grp_coord_antiban.setVisible(current_type in ("mouse_click", "mouse_drag"))
 
     def _on_ok(self):
         self.action.action_type = self.combo_type.currentData()
@@ -228,6 +242,7 @@ class SingleActionDialog(QDialog):
             self.action.mouse_button = btn_map.get(self.combo_btn.currentIndex(), "left")
             self.action.click_type = "double" if self.combo_click_type.currentIndex() == 1 else "single"
             self.action.repeat_count = self.spin_repeat.value()
+            self.action.coord_anti_ban = self.combo_coord_antiban.currentData()
 
         if self.action.action_type == "mouse_drag":
             self.action.end_x = self.spin_end_x.value()
@@ -249,7 +264,6 @@ class SingleActionDialog(QDialog):
         elif self.action.action_type == "log_message":
             self.action.log_text = self.txt_log.text().strip()
 
-        self.action.anti_ban = True if self.chk_anti_ban.isChecked() else None
         self.action.custom_log = self.txt_custom_log.text().strip() if self.chk_custom_log.isChecked() else ""
 
         self.accept()

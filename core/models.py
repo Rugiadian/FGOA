@@ -94,6 +94,9 @@ class Action:
     # Anti-ban override (None = use project default, True/False = explicit)
     anti_ban: Optional[bool] = None
 
+    # Coordinate Anti-ban: "weak" (default, 활성화), "strong", "none" (해제)
+    coord_anti_ban: str = "weak"
+
     # Log / Beep
     log_text: str = ""
     custom_log: str = ""  # Action execution custom log message
@@ -128,7 +131,14 @@ class Action:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Action":
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        kwargs = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+        if "coord_anti_ban" not in data:
+            legacy_ab = data.get("anti_ban")
+            if legacy_ab is False:
+                kwargs["coord_anti_ban"] = "none"
+            else:
+                kwargs["coord_anti_ban"] = "weak"
+        return cls(**kwargs)
 
 
 @dataclass
@@ -281,8 +291,11 @@ class Project:
     loop_delay_seconds: float = 1.0
     anti_ban_enabled: bool = False
     anti_ban_offset: int = 10
-    anti_ban_min_delay: float = 0.15
+    anti_ban_min_delay: float = 0.0
     anti_ban_max_delay: float = 1.0
+    anti_ban_offset_seconds: float = 1.0  # +n seconds delay offset applied globally
+    anti_ban_coord_weak: int = 5          # Coordinate offset weak (약): ±5px
+    anti_ban_coord_strong: int = 15       # Coordinate offset strong (강): ±15px
     scenarios: List[Scenario] = field(default_factory=list)
 
     def renumber_steps(self):
@@ -425,12 +438,16 @@ class Project:
             "anti_ban_offset": self.anti_ban_offset,
             "anti_ban_min_delay": self.anti_ban_min_delay,
             "anti_ban_max_delay": self.anti_ban_max_delay,
+            "anti_ban_offset_seconds": self.anti_ban_offset_seconds,
+            "anti_ban_coord_weak": self.anti_ban_coord_weak,
+            "anti_ban_coord_strong": self.anti_ban_coord_strong,
             "scenarios": [s.to_dict() for s in self.scenarios]
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Project":
         scenarios = [Scenario.from_dict(s) for s in data.get("scenarios", [])]
+        offset_sec = float(data.get("anti_ban_offset_seconds", data.get("anti_ban_max_delay", 1.0)))
         proj = cls(
             version=data.get("version", "1.0.0"),
             name=data.get("name", "FGOA Auto Project"),
@@ -441,8 +458,11 @@ class Project:
             loop_delay_seconds=data.get("loop_delay_seconds", 1.0),
             anti_ban_enabled=data.get("anti_ban_enabled", False),
             anti_ban_offset=data.get("anti_ban_offset", 10),
-            anti_ban_min_delay=data.get("anti_ban_min_delay", 0.15),
-            anti_ban_max_delay=data.get("anti_ban_max_delay", 1.0),
+            anti_ban_min_delay=data.get("anti_ban_min_delay", 0.0),
+            anti_ban_max_delay=offset_sec,
+            anti_ban_offset_seconds=offset_sec,
+            anti_ban_coord_weak=int(data.get("anti_ban_coord_weak", 5)),
+            anti_ban_coord_strong=int(data.get("anti_ban_coord_strong", 15)),
             scenarios=scenarios
         )
         proj.renumber_steps()

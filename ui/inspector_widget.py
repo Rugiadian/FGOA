@@ -1518,19 +1518,16 @@ class InspectorWidget(QWidget):
 
         act = self.current_scenario.actions[rows[0].row()]
         use_anti_ban = getattr(self.project, "anti_ban_enabled", False) if self.project else False
-        act_anti_ban = getattr(act, "anti_ban", None)
-        should_anti_ban = act_anti_ban if act_anti_ban is not None else use_anti_ban
-
-        min_del = getattr(self.project, "anti_ban_min_delay", 0.15) if self.project else 0.15
-        max_del = getattr(self.project, "anti_ban_max_delay", 1.0) if self.project else 1.0
-        jitter = round(random.uniform(min_del, max_del), 3) if should_anti_ban else 0.0
+        should_anti_ban = use_anti_ban
+        offset_sec = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0))) if self.project else 1.0
+        jitter = round(random.uniform(0.0, offset_sec), 3) if (should_anti_ban and offset_sec > 0) else 0.0
 
         orig_t = act.delay_seconds if act.action_type == "delay" else getattr(act, "delay_seconds", 0.0)
         ab_t = round(orig_t + jitter, 2)
         sleep_total = ab_t if should_anti_ban else orig_t
 
         if act.action_type == "delay":
-            act_msg = f"{sleep_total:.1f}초 (원본{orig_t:.2f}초) 대기"
+            act_msg = f"{sleep_total:.2f}초 (원본 {orig_t:.2f}초 + 안티밴 {jitter:.2f}초) 대기" if (should_anti_ban and jitter > 0) else f"{sleep_total:.1f}초 대기"
         else:
             extra_str = f" (안티밴 +{jitter:.2f}초)" if should_anti_ban and jitter > 0 else ""
             act_msg = f"{act.get_summary()}{extra_str}"
@@ -1539,8 +1536,8 @@ class InspectorWidget(QWidget):
             InputController.execute_action(
                 act, self.target_hwnd,
                 apply_anti_ban=use_anti_ban,
-                min_delay=min_del,
-                max_delay=max_del,
+                min_delay=0.0,
+                max_delay=offset_sec,
                 precomputed_jitter=jitter
             )
             self.sig_log.emit("ACTION", f"테스트 액션 실행 완료: [{act_msg}]")
@@ -1568,24 +1565,22 @@ class InspectorWidget(QWidget):
             self.btn_test_act.setEnabled(False)
 
         use_anti_ban = getattr(self.project, "anti_ban_enabled", False) if self.project else False
-        min_del = getattr(self.project, "anti_ban_min_delay", 0.15) if self.project else 0.15
-        max_del = getattr(self.project, "anti_ban_max_delay", 1.0) if self.project else 1.0
+        offset_sec = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0))) if self.project else 1.0
 
         try:
             for idx, act in enumerate(actions, 1):
                 self.tbl_actions.selectRow(idx - 1)
                 QApplication.processEvents()
 
-                act_anti_ban = getattr(act, "anti_ban", None)
-                should_anti_ban = act_anti_ban if act_anti_ban is not None else use_anti_ban
-                jitter = round(random.uniform(min_del, max_del), 3) if should_anti_ban else 0.0
+                should_anti_ban = use_anti_ban
+                jitter = round(random.uniform(0.0, offset_sec), 3) if (should_anti_ban and offset_sec > 0) else 0.0
 
                 orig_t = act.delay_seconds if act.action_type == "delay" else getattr(act, "delay_seconds", 0.0)
                 ab_t = round(orig_t + jitter, 2)
                 sleep_total = ab_t if should_anti_ban else orig_t
 
                 if act.action_type == "delay":
-                    act_msg = f"{sleep_total:.1f}초 (원본{orig_t:.2f}초) 대기"
+                    act_msg = f"{sleep_total:.2f}초 (원본 {orig_t:.2f}초 + 안티밴 {jitter:.2f}초) 대기" if (should_anti_ban and jitter > 0) else f"{sleep_total:.1f}초 대기"
                 else:
                     extra_str = f" (안티밴 +{jitter:.2f}초)" if should_anti_ban and jitter > 0 else ""
                     act_msg = f"{act.get_summary()}{extra_str}"
@@ -1604,8 +1599,8 @@ class InspectorWidget(QWidget):
                         InputController.execute_action(
                             act, self.target_hwnd,
                             apply_anti_ban=use_anti_ban,
-                            min_delay=min_del,
-                            max_delay=max_del,
+                            min_delay=0.0,
+                            max_delay=offset_sec,
                             precomputed_jitter=jitter
                         )
                     else:

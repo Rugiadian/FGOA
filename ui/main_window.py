@@ -538,12 +538,16 @@ class MainWindow(QMainWindow):
         # Compatibility placeholder for legacy splitter
         self.main_h_splitter = None
 
-        # 3. Execution Controller Bottom Bar
+        # 3. Execution Controller Bottom Bar (시나리오 재생 창)
         ctrl_frame = QFrame()
         ctrl_frame.setObjectName("card_frame")
         ctrl_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         c_layout = QHBoxLayout(ctrl_frame)
         c_layout.setContentsMargins(10, 6, 10, 6)
+
+        lbl_playback_title = QLabel("▶ 시나리오 재생:")
+        lbl_playback_title.setStyleSheet("font-weight: bold; font-size: 9.5pt;")
+        c_layout.addWidget(lbl_playback_title)
 
         self.btn_run = QPushButton("▶ 시작 (F5)")
         self.btn_run.setObjectName("btn_run")
@@ -588,9 +592,29 @@ class MainWindow(QMainWindow):
 
         self.chk_anti_ban = QCheckBox("🛡️ 안티밴")
         self.chk_anti_ban.setChecked(self.project.anti_ban_enabled)
-        self.chk_anti_ban.setToolTip("안티밴 모드 활성화:\n- 액션 좌표에 ±10픽셀 무작위 오프셋 적용\n- 0.15~1.0초 가변 지연시간 무작위 분포 적용")
+        self.chk_anti_ban.setToolTip(
+            "시나리오 재생 안티밴 모드 (시나리오 전체 일괄 적용):\n"
+            "- 액션 시퀀스 전체에 안티밴 일괄 적용\n"
+            "- 마우스 좌표에 무작위 픽셀 오프셋 분산\n"
+            "- 액션 실행 및 대기 시간에 +n초 가변 지연시간 무작위 추가 (단축 없이 +0~+n초)"
+        )
         self.chk_anti_ban.toggled.connect(self._on_anti_ban_toggled)
         c_layout.addWidget(self.chk_anti_ban)
+
+        self.lbl_anti_ban_offset = QLabel("오프셋:")
+        self.lbl_anti_ban_offset.setStyleSheet("font-size: 8.5pt;")
+        c_layout.addWidget(self.lbl_anti_ban_offset)
+        self.spin_anti_ban_offset = QDoubleSpinBox()
+        self.spin_anti_ban_offset.setRange(0.0, 30.0)
+        self.spin_anti_ban_offset.setSingleStep(0.1)
+        self.spin_anti_ban_offset.setPrefix("+")
+        self.spin_anti_ban_offset.setSuffix(" 초")
+        init_offset = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0)))
+        self.spin_anti_ban_offset.setValue(init_offset)
+        self.spin_anti_ban_offset.setToolTip("안티밴 적용 시 무작위로 추가될 최대 지연시간 (+0.0 ~ +n초)")
+        self.spin_anti_ban_offset.setEnabled(self.project.anti_ban_enabled)
+        self.spin_anti_ban_offset.valueChanged.connect(self._on_anti_ban_offset_changed)
+        c_layout.addWidget(self.spin_anti_ban_offset)
 
         c_layout.addStretch()
 
@@ -599,7 +623,7 @@ class MainWindow(QMainWindow):
         c_layout.addWidget(self.lbl_run_status)
 
         # Bottom ToolBar
-        self.bottom_toolbar = QToolBar("Execution Controls", self)
+        self.bottom_toolbar = QToolBar("시나리오 재생 컨트롤", self)
         self.bottom_toolbar.setObjectName("BottomToolBar")
         self.bottom_toolbar.setMovable(False)
         self.bottom_toolbar.setFloatable(False)
@@ -1558,8 +1582,15 @@ class MainWindow(QMainWindow):
 
     def _on_anti_ban_toggled(self, checked: bool):
         self.project.anti_ban_enabled = checked
-        state_str = "활성화 (좌표 ±10px, 0.15~1.0s 가변 지연)" if checked else "비활성화"
-        self._append_log("INFO", f"🛡️ 안티밴 모드가 {state_str}되었습니다.")
+        if hasattr(self, "spin_anti_ban_offset"):
+            self.spin_anti_ban_offset.setEnabled(checked)
+        cur_offset = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0)))
+        state_str = f"활성화 (시나리오 전체 일괄 적용, 오프셋: +{cur_offset:.2f}초, 좌표 무작위 분산)" if checked else "비활성화"
+        self._append_log("INFO", f"🛡️ 안티밴 모드가 시나리오 재생에 {state_str}되었습니다.")
+
+    def _on_anti_ban_offset_changed(self, val: float):
+        self.project.anti_ban_offset_seconds = val
+        self.project.anti_ban_max_delay = val
 
     # ==========================================
     # Save & Open Project
@@ -1592,6 +1623,10 @@ class MainWindow(QMainWindow):
                 self.spin_loops.setValue(self.project.loop_count)
                 self.spin_loop_delay.setValue(self.project.loop_delay_seconds)
                 self.chk_anti_ban.setChecked(self.project.anti_ban_enabled)
+                cur_off = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0)))
+                if hasattr(self, "spin_anti_ban_offset"):
+                    self.spin_anti_ban_offset.setValue(cur_off)
+                    self.spin_anti_ban_offset.setEnabled(self.project.anti_ban_enabled)
                 self._refresh_scenario_table()
                 if self.project.scenarios:
                     self.tbl_scenarios.selectRow(0)

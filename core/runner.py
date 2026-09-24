@@ -266,8 +266,7 @@ class WorkflowRunner(QThread):
         """Sequentially execute all actions defined in the scenario."""
         use_anti_ban = getattr(self.project, "anti_ban_enabled", False)
         offset_range = getattr(self.project, "anti_ban_offset", 10)
-        min_del = getattr(self.project, "anti_ban_min_delay", 0.15)
-        max_del = getattr(self.project, "anti_ban_max_delay", 1.0)
+        offset_sec = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0)))
         scen_log = getattr(scenario, "custom_log", "")
         if scen_log:
             self.sig_log.emit("USER", f"  [액션 로그] {scen_log}")
@@ -280,18 +279,32 @@ class WorkflowRunner(QThread):
             while self._is_running and self._is_paused:
                 time.sleep(0.05)
 
-            # Determine anti-ban time formatting
-            act_anti_ban = getattr(act, "anti_ban", None)
-            should_anti_ban = act_anti_ban if act_anti_ban is not None else use_anti_ban
-            jitter = round(random.uniform(min_del, max_del), 3) if should_anti_ban else 0.0
+            # Scenario-wide batch anti-ban: strictly positive +n seconds delay offset
+            should_anti_ban = use_anti_ban
+            jitter = round(random.uniform(0.0, offset_sec), 3) if (should_anti_ban and offset_sec > 0) else 0.0
+
+            # Per-action coordinate anti-ban: "weak", "strong", "none" (with global strength values)
+            coord_mode = getattr(act, "coord_anti_ban", "weak")
+            if coord_mode == "none" or act.action_type not in ("mouse_click", "mouse_drag"):
+                act_offset_range = 0
+                coord_str = ""
+            elif coord_mode == "strong":
+                act_offset_range = getattr(self.project, "anti_ban_coord_strong", 15)
+                coord_str = f" [좌표 강 ±{act_offset_range}px]"
+            else:  # "weak" (default)
+                act_offset_range = getattr(self.project, "anti_ban_coord_weak", 5)
+                coord_str = f" [좌표 약 ±{act_offset_range}px]"
 
             orig_t = act.delay_seconds if act.action_type == "delay" else getattr(act, "delay_seconds", 0.0)
             if act.action_type == "delay":
                 sleep_total = round(orig_t + jitter, 2) if should_anti_ban else orig_t
-                log_msg = f"액션 실행: {sleep_total:.1f}초 (원본{orig_t:.2f}초) 대기"
+                if should_anti_ban and jitter > 0:
+                    log_msg = f"액션 실행: {sleep_total:.2f}초 (원본 {orig_t:.2f}초 + 안티밴 {jitter:.2f}초) 대기"
+                else:
+                    log_msg = f"액션 실행: {sleep_total:.1f}초 대기"
             else:
-                extra_str = f" (안티밴 +{jitter:.2f}초)" if should_anti_ban and jitter > 0 else ""
-                log_msg = f"액션 실행: {act.get_summary()}{extra_str}"
+                time_str = f" (안티밴 +{jitter:.2f}초)" if (should_anti_ban and jitter > 0) else ""
+                log_msg = f"액션 실행: {act.get_summary()}{coord_str}{time_str}"
 
             self.sig_log.emit("ACTION", f"  ▶ {log_msg}")
 
@@ -304,9 +317,9 @@ class WorkflowRunner(QThread):
                 action=act,
                 hwnd=self.hwnd,
                 apply_anti_ban=use_anti_ban,
-                offset_range=offset_range,
-                min_delay=min_del,
-                max_delay=max_del,
+                offset_range=act_offset_range,
+                min_delay=0.0,
+                max_delay=offset_sec,
                 precomputed_jitter=jitter
             )
 
