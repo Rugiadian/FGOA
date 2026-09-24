@@ -1,0 +1,58 @@
+[일시 / Timestamp]
+- 시작: 2026-09-24 19:25:00
+- 완료: 2026-09-24 19:38:30
+
+[요청 내용 / User Request]
+1. 크래시 리포트 오류 수정:
+   - File "ui/main_window.py", line 104, in mouseMoveEvent: NameError: name 'QApplication' is not defined
+2. 기능 테스트 30건 진행
+
+[결과 요약 / Summary of Results]
+1. `QApplication` 정의 누락 버그 수정:
+   - `ui/main_window.py`에서 `DraggableScenarioTableWidget.mouseMoveEvent` 시 `QApplication.startDragDistance()` 호출 시 발생하던 `NameError`를 해결하기 위해 `from PyQt5.QtWidgets import ...` 구문에 `QApplication` 임포트 추가.
+   - `ui/inspector_widget.py`에서도 누락되어 있던 `QSizePolicy` 임포트 보강.
+
+2. 종합 기능 테스트 30건 구축 및 전건 통과 (`tests/test_30_comprehensive_features.py`):
+   - [Test 01] 드래그 앤 드롭 테이블 마우스 이동 이벤트 및 `QApplication.startDragDistance` 검증 (크래시 버그 방지)
+   - [Test 02] 시나리오 행 드래그 재정렬 시그널 및 MIME 데이터 파싱 검증
+   - [Test 03] 메인 윈도우 초기화 및 타이틀 버전 문자열 표기 검증
+   - [Test 04] 팝업 플레이바 F4 단축키 및 툴바 토글 연동 검증
+   - [Test 05] 팝업 플레이바 실행/정지/일시정지 상태 전이 및 뱃지 업데이트 검증
+   - [Test 06] 팝업 플레이바 시나리오 빠른 프리셋 칩/드롭다운 실행 검증
+   - [Test 07] 액션 시퀀스(ActionSequence) 데이터 모델 생성, 요약, 직렬화 무결성 검증
+   - [Test 08] 프로젝트 액션 시퀀스 레지스트리 등록, 조회, 안전 삭제 시 연동 해제 검증
+   - [Test 09] 시나리오-액션 시퀀스 링크 연동 시 실효 액션(get_effective_actions) 추출 검증
+   - [Test 10] 시나리오 단독 액션 보유 시 폴백 검증
+   - [Test 11] 인스펙터 액션 시퀀스 콤보박스 선택 및 상태 안내 라벨 갱신 검증
+   - [Test 12] 인스펙터 현재 액션들을 새로운 모듈형 시퀀스로 저장/등록 검증
+   - [Test 13] 인스펙터 모듈형 시퀀스 연결 해제(독립 사본 생성) 검증
+   - [Test 14] 액션 시퀀스 관리 다이얼로그 목록 표시 및 복제(Duplicate) 검증
+   - [Test 15] 워크플로우 러너(WorkflowRunner)의 모듈형 시퀀스 실효 액션 실행 검증
+   - [Test 16] 안티밴 지터 딜레이가 항상 0 이상 양수로 안전 적용되는지 검증
+   - [Test 17] 러너의 액션별 좌표 안티밴 강도(약: ±5px, 강: ±15px, 없음: 0px) 분기 검증
+   - [Test 18] 단일 스텝 모드(Step Forward)가 사용자가 지정한 노드부터 개별 진행되는지 검증
+   - [Test 19] 조건 판정 엔진(ConditionEvaluator) AND 복합 조건 일치 검증
+   - [Test 20] 조건 판정 엔진 OR 복합 조건 분기 검증
+   - [Test 21] 조건 판정 엔진 not_match(불일치) 모드 검증
+   - [Test 22] 조건 불일치 재시도 초과 시 fail_action='stop' 안전 중단 검증
+   - [Test 23] 조건 불일치 재시도 초과 시 fail_action='jump' 지정 시나리오 분기 검증
+   - [Test 24] 조건 불일치 재시도 초과 시 fail_action='next' 다음 단계 진행 검증
+   - [Test 25] 계층형 루프 블록(loop_start ~ loop_end) 중첩 깊이 및 매칭 검증
+   - [Test 26] 루프 블록 내 조건 일치 시 루프 탈출(break_loop) 설정 검증
+   - [Test 27] 액션 오버레이 시각화 창(ActionOverlayWindow) 점선 표시 및 인덱스 뱃지 검증
+   - [Test 28] 레퍼런스 갤러리 해상도별 분류 콤보박스 연동 검증
+   - [Test 29] 프로젝트 전체 JSON 직렬화/역직렬화 라운드트립 무결성 검증
+   - [Test 30] 메인 윈도우 및 코어 크래시 로거(log_crash) 에러 리포트 저장 및 복구 검증
+
+3. 전체 테스트 스위트 회귀 검증:
+   - 기존 테스트 포함 총 120건 실행 완료 (`Ran 120 tests in 10.929s OK (skipped=1)`).
+
+4. 버전 갱신:
+   - `core/version.py`: `__version__ = "260924.1938"`
+
+[영향 파일 목록 / Affected Files]
+- ui/main_window.py
+- ui/inspector_widget.py
+- core/version.py
+- tests/test_30_comprehensive_features.py
+- history/2026-09-24_193830_QApplication_참조_오류_수정_및_기능_테스트_30건_수행.txt

@@ -142,6 +142,45 @@ class Action:
 
 
 @dataclass
+class ActionSequence:
+    """A reusable modular bundle of automation actions."""
+    id: str = field(default_factory=lambda: f"seq_{uuid.uuid4().hex[:6]}")
+    name: str = "새 액션 시퀀스"
+    description: str = ""
+    actions: List[Action] = field(default_factory=list)
+    last_action_image_path: Optional[str] = None
+
+    def get_summary(self) -> str:
+        """Returns summarized text of actions in this sequence."""
+        if not self.actions:
+            return "(액션 없음)"
+        summaries = [a.get_summary() for a in self.actions]
+        if len(summaries) <= 3:
+            return " → ".join(summaries)
+        return f"{summaries[0]} → {summaries[1]} 외 {len(summaries) - 2}개"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "actions": [a.to_dict() for a in self.actions],
+            "last_action_image_path": self.last_action_image_path
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ActionSequence":
+        actions = [Action.from_dict(a) for a in data.get("actions", [])]
+        return cls(
+            id=data.get("id", f"seq_{uuid.uuid4().hex[:6]}"),
+            name=data.get("name", "새 액션 시퀀스"),
+            description=data.get("description", ""),
+            actions=actions,
+            last_action_image_path=data.get("last_action_image_path")
+        )
+
+
+@dataclass
 class Scenario:
     """A workflow step combining Condition checking and Action execution."""
     id: str = field(default_factory=lambda: f"scen_{uuid.uuid4().hex[:6]}")
@@ -172,6 +211,8 @@ class Scenario:
     retry_fail_jump_target: str = ""  # retry_fail_action이 "jump"일 때 대상 시나리오 ID
     
     # Actions to execute when condition is met (or unconditional)
+    # If sequence_id is set, actions are referenced from project.action_sequences[sequence_id]
+    sequence_id: Optional[str] = None
     actions: List[Action] = field(default_factory=list)
     post_delay_seconds: float = 0.2
 
@@ -203,14 +244,27 @@ class Scenario:
             return "🔁 루프 종료 (시작으로 복귀)"
         return ""
 
-    def get_actions_summary(self) -> str:
+    def get_actions_summary(self, project: Optional["Project"] = None) -> str:
         """Returns summarized text of actions in this scenario."""
-        if not self.actions:
+        if self.sequence_id and project:
+            seq = project.find_action_sequence(self.sequence_id)
+            if seq:
+                return f"🔗 [{seq.name}] {seq.get_summary()}"
+        actions = self.actions
+        if not actions:
             return "(액션 없음)"
-        summaries = [a.get_summary() for a in self.actions]
+        summaries = [a.get_summary() for a in actions]
         if len(summaries) <= 3:
             return " → ".join(summaries)
         return f"{summaries[0]} → {summaries[1]} 외 {len(summaries) - 2}개"
+
+    def get_effective_actions(self, project: Optional["Project"] = None) -> List[Action]:
+        """Returns effective actions: from linked ActionSequence if sequence_id is set and found, else self.actions."""
+        if self.sequence_id and project:
+            seq = project.find_action_sequence(self.sequence_id)
+            if seq:
+                return seq.actions
+        return self.actions
 
     def get_condition_summary(self) -> str:
         """Returns summarized text of condition."""
@@ -248,6 +302,7 @@ class Scenario:
             "retry_interval_sec": self.retry_interval_sec,
             "retry_fail_action": self.retry_fail_action,
             "retry_fail_jump_target": self.retry_fail_jump_target,
+            "sequence_id": self.sequence_id,
             "actions": [a.to_dict() for a in self.actions],
             "post_delay_seconds": self.post_delay_seconds,
             "custom_log": self.custom_log,
@@ -278,6 +333,7 @@ class Scenario:
             retry_interval_sec=data.get("retry_interval_sec", 0.5),
             retry_fail_action=data.get("retry_fail_action", "stop"),
             retry_fail_jump_target=data.get("retry_fail_jump_target", ""),
+            sequence_id=data.get("sequence_id"),
             actions=actions,
             post_delay_seconds=data.get("post_delay_seconds", 0.2),
             custom_log=data.get("custom_log", ""),
@@ -302,6 +358,7 @@ class Project:
     anti_ban_offset_seconds: float = 1.0  # +n seconds delay offset applied globally
     anti_ban_coord_weak: int = 5          # Coordinate offset weak (약): ±5px
     anti_ban_coord_strong: int = 15       # Coordinate offset strong (강): ±15px
+    action_sequences: List[ActionSequence] = field(default_factory=list)
     scenarios: List[Scenario] = field(default_factory=list)
 
     def renumber_steps(self):
@@ -431,6 +488,25 @@ class Project:
                 return s
         return None
 
+    def find_action_sequence(self, seq_id: str) -> Optional[ActionSequence]:
+        """Find registered ActionSequence by ID."""
+        for seq in self.action_sequences:
+            if seq.id == seq_id:
+                return seq
+        return None
+
+    def add_action_sequence(self, seq: ActionSequence):
+        """Add a new action sequence if not already present."""
+        if not any(s.id == seq.id for s in self.action_sequences):
+            self.action_sequences.append(seq)
+
+    def delete_action_sequence(self, seq_id: str):
+        """Delete an action sequence and unlink any scenarios referencing it."""
+        self.action_sequences = [s for s in self.action_sequences if s.id != seq_id]
+        for scen in self.scenarios:
+            if scen.sequence_id == seq_id:
+                scen.sequence_id = None
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "version": self.version,
@@ -447,11 +523,13 @@ class Project:
             "anti_ban_offset_seconds": self.anti_ban_offset_seconds,
             "anti_ban_coord_weak": self.anti_ban_coord_weak,
             "anti_ban_coord_strong": self.anti_ban_coord_strong,
+            "action_sequences": [s.to_dict() for s in self.action_sequences],
             "scenarios": [s.to_dict() for s in self.scenarios]
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Project":
+        action_sequences = [ActionSequence.from_dict(s) for s in data.get("action_sequences", [])]
         scenarios = [Scenario.from_dict(s) for s in data.get("scenarios", [])]
         offset_sec = float(data.get("anti_ban_offset_seconds", data.get("anti_ban_max_delay", 1.0)))
         proj = cls(
@@ -469,6 +547,7 @@ class Project:
             anti_ban_offset_seconds=offset_sec,
             anti_ban_coord_weak=int(data.get("anti_ban_coord_weak", 5)),
             anti_ban_coord_strong=int(data.get("anti_ban_coord_strong", 15)),
+            action_sequences=action_sequences,
             scenarios=scenarios
         )
         proj.renumber_steps()

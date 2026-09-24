@@ -153,7 +153,8 @@ class WorkflowRunner(QThread):
 
                     limit_str = f"{max_iter}회" if scen.loop_mode != "infinite" else "무한"
                     self.sig_log.emit("INFO", f"🔁 [루프 s{scen.scenario_number}] '{scen.name}': {current_iter + 1}/{limit_str} 회차 진입")
-                    if scen.actions:
+                    eff_actions = scen.get_effective_actions(self.project) if hasattr(scen, "get_effective_actions") else scen.actions
+                    if eff_actions:
                         self._execute_actions(scen)
                     current_index += 1
                     continue
@@ -306,6 +307,7 @@ class WorkflowRunner(QThread):
 
     def _execute_actions(self, scenario: Scenario):
         """Sequentially execute all actions defined in the scenario."""
+        actions = scenario.get_effective_actions(self.project) if hasattr(scenario, "get_effective_actions") else scenario.actions
         use_anti_ban = getattr(self.project, "anti_ban_enabled", False)
         offset_range = getattr(self.project, "anti_ban_offset", 10)
         offset_sec = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0)))
@@ -313,7 +315,7 @@ class WorkflowRunner(QThread):
         if scen_log:
             self.sig_log.emit("USER", f"  [액션 로그] {scen_log}")
 
-        for act_idx, act in enumerate(scenario.actions):
+        for act_idx, act in enumerate(actions):
             if not self._is_running:
                 break
 
@@ -322,7 +324,7 @@ class WorkflowRunner(QThread):
                 time.sleep(0.05)
 
             # Signal action visualizer overlay that this action is about to execute
-            self.sig_action_executing.emit(act, act_idx + 1, len(scenario.actions))
+            self.sig_action_executing.emit(act, act_idx + 1, len(actions))
 
             # Scenario-wide batch anti-ban: strictly positive +n seconds delay offset
             should_anti_ban = use_anti_ban
@@ -344,7 +346,9 @@ class WorkflowRunner(QThread):
             if act.action_type == "delay":
                 sleep_total = round(orig_t + jitter, 2) if should_anti_ban else orig_t
                 if should_anti_ban and jitter > 0:
-                    log_msg = f"액션 실행: {sleep_total:.2f}초 (원본 {orig_t:.2f}초 + 안티밴 {jitter:.2f}초) 대기"
+                    log_msg = f"액션 실행: {sleep_total:.1f}초 (원본{orig_t:.2f}초) 대기"
+                elif round(orig_t, 1) != round(orig_t, 2):
+                    log_msg = f"액션 실행: {orig_t:.1f}초 (원본{orig_t:.2f}초) 대기"
                 else:
                     log_msg = f"액션 실행: {sleep_total:.1f}초 대기"
             else:

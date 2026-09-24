@@ -18,7 +18,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QToolBar,
     QFileDialog, QMessageBox, QSplitter, QTextEdit, QStatusBar,
     QFrame, QAbstractItemView, QShortcut, QDockWidget, QMenu,
-    QAction, QInputDialog, QSizePolicy
+    QAction, QInputDialog, QSizePolicy, QApplication
 )
 from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QDrag
 from PyQt5.QtCore import Qt, QTimer, QFileSystemWatcher, QProcess, QByteArray, pyqtSignal, QMimeData
@@ -265,6 +265,11 @@ class MainWindow(QMainWindow):
             pass
 
     def closeEvent(self, event):
+        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+            try:
+                self.popup_play_bar.close()
+            except Exception:
+                pass
         if hasattr(self, "action_overlay") and self.action_overlay:
             try:
                 self.action_overlay.close()
@@ -403,6 +408,12 @@ class MainWindow(QMainWindow):
         btn_error_log.setToolTip("오류 발생 기록(fgoa_crash.log)을 텍스트 편집기로 엽니다.")
         btn_error_log.clicked.connect(self._on_open_crash_log)
         t_layout.addWidget(btn_error_log)
+
+        self.btn_popup_playbar = QPushButton("🎮 플레이바 (F4)")
+        self.btn_popup_playbar.setCheckable(True)
+        self.btn_popup_playbar.setToolTip("항상 위에 떠 있는 미니 플레이바 창을 열거나 닫습니다. (단축키: F4)")
+        self.btn_popup_playbar.clicked.connect(self._toggle_popup_playbar)
+        t_layout.addWidget(self.btn_popup_playbar)
 
         t_layout.addSpacing(10)
 
@@ -775,6 +786,19 @@ class MainWindow(QMainWindow):
         # Action sequence visualizer overlay window
         self.action_overlay = ActionOverlayWindow(target_hwnd=self.target_hwnd, parent=self)
 
+        # Popup Play Bar (Floating Mini Control Bar)
+        from ui.popup_play_bar import PopupPlayBar
+        self.popup_play_bar = PopupPlayBar(self)
+        self.popup_play_bar.sig_start_requested.connect(self._on_playbar_start)
+        self.popup_play_bar.sig_pause_requested.connect(self._on_pause_execution)
+        self.popup_play_bar.sig_stop_requested.connect(self._on_stop_execution)
+        self.popup_play_bar.sig_step_requested.connect(self._on_playbar_step)
+        self.popup_play_bar.sig_select_scenario_requested.connect(self._on_playbar_select_scenario)
+
+        # F4 Shortcut to toggle popup play bar
+        self.sc_f4 = QShortcut(QKeySequence("F4"), self)
+        self.sc_f4.activated.connect(self._toggle_popup_playbar)
+
         self.sc_preset_load = QShortcut(QKeySequence("Ctrl+L"), self)
         self.sc_preset_load.activated.connect(self._on_open_preset_manager)
 
@@ -1044,6 +1068,10 @@ class MainWindow(QMainWindow):
         elif self.project.scenarios:
             self.tbl_scenarios.selectRow(0)
 
+        # Notify popup play bar of scenario changes
+        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+            self.popup_play_bar.refresh_scenarios(self.project.scenarios)
+
     def _update_table_row(self, row: int, scen: Scenario, depth: int = 0):
 
         # 0. Step # (실행 순서 번호)
@@ -1133,11 +1161,21 @@ class MainWindow(QMainWindow):
         it_branch.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
         self.tbl_scenarios.setItem(row, 5, it_branch)
 
-        # 6. Action count
-        act_text = f"{len(scen.actions)}개" if scen.node_type != "loop_end" else "-"
+        # 6. Action count and Sequence info
+        if scen.node_type == "loop_end":
+            act_text = "-"
+        elif getattr(scen, "sequence_id", None):
+            seq = self.project.find_action_sequence(scen.sequence_id)
+            if seq:
+                act_text = f"🔗 {len(seq.actions)}개 [{seq.name}]"
+            else:
+                act_text = f"{len(scen.actions)}개"
+        else:
+            act_text = f"{len(scen.actions)}개"
         it_act = QTableWidgetItem(act_text)
         it_act.setTextAlignment(Qt.AlignCenter)
         it_act.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        it_act.setToolTip(scen.get_actions_summary(self.project))
         self.tbl_scenarios.setItem(row, 6, it_act)
 
     def _get_jump_display(self, target_id: str) -> str:
@@ -1636,6 +1674,8 @@ class MainWindow(QMainWindow):
                 self.runner.resume()
                 self.lbl_run_status.setText("실행 중...")
                 self.btn_pause.setText("⏸ 일시정지")
+                if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+                    self.popup_play_bar.set_runner_state("running", "재개되어 실행 중...")
                 return
 
         self.runner = WorkflowRunner(self.project, self.target_hwnd, start_scenario_id=start_scenario_id, parent=self)
@@ -1651,6 +1691,8 @@ class MainWindow(QMainWindow):
         self.btn_stop.setEnabled(True)
         self.lbl_run_status.setText("실행 중 (F5/F6)")
         self.lbl_run_status.setStyleSheet("color: #16a34a; font-weight: bold;")
+        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+            self.popup_play_bar.set_runner_state("running", "시나리오 실행 중...")
 
         self.runner.start()
 
@@ -1661,17 +1703,23 @@ class MainWindow(QMainWindow):
                 self.btn_pause.setText("⏸ 일시정지")
                 self.lbl_run_status.setText("실행 중...")
                 self.lbl_run_status.setStyleSheet("color: #16a34a; font-weight: bold;")
+                if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+                    self.popup_play_bar.set_runner_state("running", "재개되어 실행 중...")
             else:
                 self.runner.pause()
                 self.btn_pause.setText("▶ 재개")
                 self.lbl_run_status.setText("일시정지됨")
                 self.lbl_run_status.setStyleSheet("color: #ea580c; font-weight: bold;")
+                if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+                    self.popup_play_bar.set_runner_state("paused", "일시정지됨")
 
     def _on_stop_execution(self):
         if self.runner:
             self.runner.stop()
             self.lbl_run_status.setText("정지 요청 중...")
             self.lbl_run_status.setStyleSheet("color: #dc2626; font-weight: bold;")
+        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+            self.popup_play_bar.set_runner_state("stopped", "정지됨")
         if hasattr(self, "action_overlay") and self.action_overlay:
             self.action_overlay.clear_action()
 
@@ -1700,6 +1748,8 @@ class MainWindow(QMainWindow):
             self.runner.step_forward()
             self.lbl_run_status.setText("단일 스텝 (F7)")
             self.lbl_run_status.setStyleSheet("color: #0284c7; font-weight: bold;")
+        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+            self.popup_play_bar.set_runner_state("stepping", "단일 스텝 실행 중...")
 
     def _on_action_executing_visual(self, action, index, total):
         if hasattr(self, "action_overlay") and self.action_overlay and hasattr(self, "chk_action_overlay") and self.chk_action_overlay.isChecked():
@@ -1720,6 +1770,8 @@ class MainWindow(QMainWindow):
         for row, s in enumerate(self.project.scenarios):
             if s.id == scenario_id:
                 self.tbl_scenarios.selectRow(row)
+                if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+                    self.popup_play_bar.set_runner_state("running", f"s{s.scenario_number} [{s.name}] 실행 중...")
                 break
 
     def _on_scenario_completed(self, scenario_id: str, result: str):
@@ -1732,8 +1784,53 @@ class MainWindow(QMainWindow):
         self.btn_pause.setText("⏸ 일시정지")
         self.lbl_run_status.setText(f"완료 ({reason})")
         self.lbl_run_status.setStyleSheet("font-weight: bold;")
+        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+            self.popup_play_bar.set_runner_state("stopped", f"완료 ({reason})")
         if hasattr(self, "action_overlay") and self.action_overlay:
             self.action_overlay.clear_action()
+
+    # ==========================================
+    # Popup Play Bar Controls & Signal Handlers
+    # ==========================================
+    def _toggle_popup_playbar(self):
+        if not hasattr(self, "popup_play_bar") or not self.popup_play_bar:
+            return
+        if self.popup_play_bar.isVisible():
+            self.popup_play_bar.hide()
+            if hasattr(self, "btn_popup_playbar"):
+                self.btn_popup_playbar.setChecked(False)
+        else:
+            self.popup_play_bar.refresh_scenarios(self.project.scenarios)
+            geo = self.geometry()
+            self.popup_play_bar.move(max(0, geo.x() + geo.width() - 480), max(0, geo.y() + 60))
+            self.popup_play_bar.show()
+            self.popup_play_bar.raise_()
+            if hasattr(self, "btn_popup_playbar"):
+                self.btn_popup_playbar.setChecked(True)
+
+    def _on_playbar_start(self, scenario_id: Optional[str] = None):
+        if scenario_id:
+            for row, s in enumerate(self.project.scenarios):
+                if s.id == scenario_id:
+                    self.tbl_scenarios.selectRow(row)
+                    break
+            self._on_start_execution(start_scenario_id=scenario_id)
+        else:
+            self._on_start_execution()
+
+    def _on_playbar_step(self, scenario_id: Optional[str] = None):
+        if scenario_id:
+            for row, s in enumerate(self.project.scenarios):
+                if s.id == scenario_id:
+                    self.tbl_scenarios.selectRow(row)
+                    break
+        self._on_step_execution()
+
+    def _on_playbar_select_scenario(self, scenario_id: str):
+        for row, s in enumerate(self.project.scenarios):
+            if s.id == scenario_id:
+                self.tbl_scenarios.selectRow(row)
+                break
 
     def _append_log(self, level: str, msg: str):
         pal = get_theme_colors(self.current_theme)

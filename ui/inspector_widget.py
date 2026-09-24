@@ -17,12 +17,12 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
     QScrollArea, QFrame, QMessageBox, QStackedWidget, QSplitter,
     QMenu, QApplication, QShortcut, QAbstractItemView,
-    QStyledItemDelegate, QAbstractSpinBox
+    QStyledItemDelegate, QAbstractSpinBox, QInputDialog, QSizePolicy
 )
 from PyQt5.QtGui import QColor, QFont, QPixmap, QKeySequence, QDrag
 from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QPoint
 
-from core.models import Scenario, Project, Condition, ColorPoint, Action
+from core.models import Scenario, Project, Condition, ColorPoint, Action, ActionSequence
 from core.screen_capture import ScreenCapture
 from core.input_controller import InputController
 from core.evaluator import ConditionEvaluator
@@ -755,10 +755,43 @@ class InspectorWidget(QWidget):
     # Lower Section: Action Sequence Card (Hand)
     # ==========================================
     def _create_action_card(self) -> QGroupBox:
-        grp = QGroupBox("✋ 액션 조건 및 시퀀스 (Hand - 실행 동작)")
+        grp = QGroupBox("✋ 액션 시퀀스 (Action Sequence - 실행 동작)")
         layout = QVBoxLayout(grp)
         layout.setContentsMargins(6, 10, 6, 6)
         layout.setSpacing(4)
+
+        # Sequence Selection / Link Bar (액션 시퀀스 모듈화 연결)
+        seq_bar = QHBoxLayout()
+        seq_bar.setSpacing(4)
+        lbl_seq = QLabel("🔗 연결 시퀀스:")
+        lbl_seq.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
+        seq_bar.addWidget(lbl_seq)
+
+        self.combo_sequence = QComboBox()
+        self.combo_sequence.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.combo_sequence.currentIndexChanged.connect(self._on_sequence_combo_changed)
+        seq_bar.addWidget(self.combo_sequence, 1)
+
+        self.btn_save_as_seq = QPushButton("💾 시퀀스로 등록...")
+        self.btn_save_as_seq.setToolTip("현재 시나리오의 액션 목록을 재사용 가능한 '액션 시퀀스 모듈'로 등록하고 연결합니다.")
+        self.btn_save_as_seq.clicked.connect(self._on_save_as_new_sequence)
+        seq_bar.addWidget(self.btn_save_as_seq)
+
+        self.btn_unlink_seq = QPushButton("🔓 연결 해제")
+        self.btn_unlink_seq.setToolTip("연결된 공용 시퀀스를 해제하고 현재 시나리오 전용 액션으로 복제합니다.")
+        self.btn_unlink_seq.clicked.connect(self._on_unlink_sequence)
+        seq_bar.addWidget(self.btn_unlink_seq)
+
+        self.btn_manage_seq = QPushButton("⚙️ 시퀀스 관리...")
+        self.btn_manage_seq.setToolTip("등록된 액션 시퀀스 목록 관리 (생성, 이름 변경, 복제, 삭제)")
+        self.btn_manage_seq.clicked.connect(self._on_manage_sequences)
+        seq_bar.addWidget(self.btn_manage_seq)
+
+        layout.addLayout(seq_bar)
+
+        self.lbl_seq_status = QLabel("")
+        self.lbl_seq_status.setStyleSheet("color: #64748b; font-size: 8pt; padding: 1px 2px;")
+        layout.addWidget(self.lbl_seq_status)
 
         # Quick Add Buttons Bar + Copy from other scenario (2 Rows for neat layout)
         # Row 1: Quick Add Buttons
@@ -1016,7 +1049,8 @@ class InspectorWidget(QWidget):
             self._refresh_points_table()
             self.lbl_cond_test_result.setVisible(False)
 
-            # 4. Actions
+            # 4. Actions & Sequence Link
+            self._populate_sequence_combo()
             self._refresh_actions_table()
 
             # 5. Action Custom Log
@@ -1278,12 +1312,125 @@ class InspectorWidget(QWidget):
             combo_m.currentIndexChanged.connect(lambda idx, p=pt: self._on_point_mode_changed(p, idx))
             self.tbl_points.setCellWidget(row, 4, combo_m)
 
+    # ==========================================
+    # Action Sequence (Module) Management Methods
+    # ==========================================
+    def _get_active_actions_list(self) -> List[Action]:
+        """Returns the active list of actions (from linked ActionSequence if sequence_id is set, else scenario.actions)."""
+        if not self.current_scenario:
+            return []
+        if getattr(self.current_scenario, "sequence_id", None) and self.project:
+            seq = self.project.find_action_sequence(self.current_scenario.sequence_id)
+            if seq is not None:
+                return seq.actions
+        return self.current_scenario.actions
+
+    def _populate_sequence_combo(self):
+        """Populates sequence combobox with (시나리오 전용 액션) and project action sequences."""
+        if not hasattr(self, "combo_sequence"):
+            return
+        self.combo_sequence.blockSignals(True)
+        self.combo_sequence.clear()
+        self.combo_sequence.addItem("(시나리오 전용 액션)", "")
+
+        selected_idx = 0
+        if self.project:
+            for idx, seq in enumerate(self.project.action_sequences, start=1):
+                self.combo_sequence.addItem(f"🔗 [{seq.name}] ({len(seq.actions)}개 액션)", seq.id)
+                if self.current_scenario and getattr(self.current_scenario, "sequence_id", None) == seq.id:
+                    selected_idx = idx
+
+        self.combo_sequence.setCurrentIndex(selected_idx)
+        self.combo_sequence.blockSignals(False)
+        self._update_sequence_status_label()
+
+    def _update_sequence_status_label(self):
+        if not hasattr(self, "lbl_seq_status"):
+            return
+        if not self.current_scenario:
+            self.lbl_seq_status.setText("")
+            self.btn_unlink_seq.setEnabled(False)
+            return
+
+        seq_id = getattr(self.current_scenario, "sequence_id", None)
+        if seq_id and self.project:
+            seq = self.project.find_action_sequence(seq_id)
+            if seq:
+                self.lbl_seq_status.setText(f"🔗 공용 액션 시퀀스 '{seq.name}' 연결됨 (수정 시 공유 시나리오에 공통 적용)")
+                self.lbl_seq_status.setStyleSheet("color: #3b82f6; font-size: 8pt; font-weight: bold; padding: 1px 2px;")
+                self.btn_unlink_seq.setEnabled(True)
+                return
+        self.lbl_seq_status.setText("📌 현재 시나리오 전용 액션 (모듈화하여 재사용하려면 '시퀀스로 등록'을 누르세요)")
+        self.lbl_seq_status.setStyleSheet("color: #64748b; font-size: 8pt; padding: 1px 2px;")
+        self.btn_unlink_seq.setEnabled(False)
+
+    def _on_sequence_combo_changed(self, idx: int):
+        if self._is_loading or not self.current_scenario:
+            return
+        self._record_undo_state()
+        seq_id = self.combo_sequence.currentData()
+        self.current_scenario.sequence_id = seq_id if seq_id else None
+        self._update_sequence_status_label()
+        self._refresh_actions_table()
+        self._mark_dirty()
+        self._on_field_changed()
+
+    def _on_save_as_new_sequence(self):
+        if not self.current_scenario:
+            return
+        default_name = f"{self.current_scenario.name} 액션 시퀀스"
+        name, ok = QInputDialog.getText(self, "새 액션 시퀀스 모듈 등록", "액션 시퀀스 이름:", text=default_name)
+        if not ok or not name.strip():
+            return
+        self._record_undo_state()
+        new_seq = ActionSequence(
+            name=name.strip(),
+            actions=copy.deepcopy(self._get_active_actions_list()),
+            last_action_image_path=getattr(self.current_scenario, "last_action_image_path", None)
+        )
+        if self.project:
+            self.project.add_action_sequence(new_seq)
+        self.current_scenario.sequence_id = new_seq.id
+        self._populate_sequence_combo()
+        self._refresh_actions_table()
+        self._mark_dirty()
+        self._on_field_changed()
+        self.sig_log.emit("INFO", f"💾 새 액션 시퀀스 모듈 '{new_seq.name}'이 등록되어 연결되었습니다.")
+
+    def _on_unlink_sequence(self):
+        if not self.current_scenario or not getattr(self.current_scenario, "sequence_id", None):
+            return
+        self._record_undo_state()
+        active_acts = self._get_active_actions_list()
+        self.current_scenario.actions = copy.deepcopy(active_acts)
+        self.current_scenario.sequence_id = None
+        self._populate_sequence_combo()
+        self._refresh_actions_table()
+        self._mark_dirty()
+        self._on_field_changed()
+        self.sig_log.emit("INFO", f"🔓 시퀀스 연결이 해제되어 '{self.current_scenario.name}' 전용 액션으로 복제되었습니다.")
+
+    def _on_manage_sequences(self):
+        if not self.project:
+            return
+        from ui.action_sequence_manager_dialog import ActionSequenceManagerDialog
+        cur_seq_id = getattr(self.current_scenario, "sequence_id", None) if self.current_scenario else None
+        dlg = ActionSequenceManagerDialog(self.project, current_sequence_id=cur_seq_id, parent=self)
+        if dlg.exec_() == ActionSequenceManagerDialog.Accepted:
+            if self.current_scenario and dlg.selected_sequence_id:
+                self._record_undo_state()
+                self.current_scenario.sequence_id = dlg.selected_sequence_id
+                self._mark_dirty()
+                self._on_field_changed()
+        self._populate_sequence_combo()
+        self._refresh_actions_table()
+
     def _refresh_actions_table(self):
         if not self.current_scenario:
             self.tbl_actions.setRowCount(0)
             return
 
-        actions = self.current_scenario.actions
+        actions = self._get_active_actions_list()
         self.tbl_actions.setRowCount(len(actions))
 
         for row, act in enumerate(actions):
@@ -1390,9 +1537,10 @@ class InspectorWidget(QWidget):
         self.tbl_actions.resizeRowsToContents()
 
     def _get_action_at(self, row: int) -> Optional[Action]:
-        """Safely returns the Action instance at row index in current scenario."""
-        if self.current_scenario and 0 <= row < len(self.current_scenario.actions):
-            return self.current_scenario.actions[row]
+        """Safely returns the Action instance at row index in current scenario or active sequence."""
+        acts = self._get_active_actions_list()
+        if 0 <= row < len(acts):
+            return acts[row]
         return None
 
     def _on_action_cell_clicked(self, row: int, col: int):
@@ -1444,7 +1592,7 @@ class InspectorWidget(QWidget):
         """Reorders actions in the current scenario via safe drag-and-drop."""
         if not self.current_scenario or from_row == to_row:
             return
-        acts = self.current_scenario.actions
+        acts = self._get_active_actions_list()
         if 0 <= from_row < len(acts) and 0 <= to_row < len(acts):
             self._record_undo_state()
             item = acts.pop(from_row)
@@ -1686,22 +1834,30 @@ class InspectorWidget(QWidget):
     def _on_copy_actions_from_other(self):
         if not self.project or not self.current_scenario:
             return
-        other_scenarios = [s for s in self.project.scenarios if s.id != self.current_scenario.id and s.actions]
+        other_scenarios = [s for s in self.project.scenarios if s.id != self.current_scenario.id and (s.actions or getattr(s, "sequence_id", None))]
         if not other_scenarios:
             QMessageBox.information(self, "액션 가져오기", "가져올 수 있는 액션을 가진 다른 시나리오가 없습니다.")
             return
 
         menu = QMenu(self)
         for s in other_scenarios:
-            action = menu.addAction(f"고유 s{s.scenario_number} [{s.name}] - {len(s.actions)}개 액션 ({s.get_actions_summary()})")
+            eff_acts = s.get_effective_actions(self.project) if hasattr(s, "get_effective_actions") else s.actions
+            action = menu.addAction(f"고유 s{s.scenario_number} [{s.name}] - {len(eff_acts)}개 액션 ({s.get_actions_summary(self.project)})")
             action.triggered.connect(lambda checked, src=s: self._copy_actions_from(src))
         menu.exec_(self.btn_copy_act.mapToGlobal(self.btn_copy_act.rect().bottomLeft()))
 
     def _copy_actions_from(self, source_scenario: Scenario):
-        if not source_scenario.actions:
+        source_acts = source_scenario.get_effective_actions(self.project) if hasattr(source_scenario, "get_effective_actions") else source_scenario.actions
+        if not source_acts:
             return
-        self.current_scenario.actions = copy.deepcopy(source_scenario.actions)
+        self._record_undo_state()
+        acts = self._get_active_actions_list()
+        acts.clear()
+        acts.extend(copy.deepcopy(source_acts))
+        if self.current_scenario.sequence_id is None:
+            self.current_scenario.actions = copy.deepcopy(acts)
         self._refresh_actions_table()
+        self._mark_dirty()
         self._on_field_changed()
         self.sig_log.emit("INFO", f"[{self.current_scenario.name}] 고유 s{source_scenario.scenario_number} [{source_scenario.name}]의 액션 시퀀스를 복사하여 조합했습니다.")
 
@@ -1730,9 +1886,14 @@ class InspectorWidget(QWidget):
             act.log_text = "액션 실행 완료"
             act.delay_seconds = 0.2
 
-        self.current_scenario.actions.append(act)
+        self._record_undo_state()
+        acts = self._get_active_actions_list()
+        acts.append(act)
+        if self.current_scenario.sequence_id is None:
+            self.current_scenario.actions = acts
         self._refresh_actions_table()
-        self.tbl_actions.selectRow(len(self.current_scenario.actions) - 1)
+        self.tbl_actions.selectRow(len(acts) - 1)
+        self._mark_dirty()
         self._on_field_changed()
 
     def _on_edit_action(self):
@@ -1742,7 +1903,10 @@ class InspectorWidget(QWidget):
         if not rows:
             return
         row = rows[0].row()
-        act = self.current_scenario.actions[row]
+        acts = self._get_active_actions_list()
+        if not (0 <= row < len(acts)):
+            return
+        act = acts[row]
 
         from ui.coordinate_picker_dialog import CoordinatePickerDialog
         cond_ref = self.current_scenario.condition.reference_image_path if (self.current_scenario and self.current_scenario.condition) else None
@@ -1756,12 +1920,14 @@ class InspectorWidget(QWidget):
             parent=self
         )
         if dlg.exec_() == SingleActionDialog.Accepted:
-            self.current_scenario.actions[row] = dlg.get_action()
+            self._record_undo_state()
+            acts[row] = dlg.get_action()
             if hasattr(dlg, "reference_image_path") and dlg.reference_image_path:
                 self.current_scenario.last_action_image_path = dlg.reference_image_path
                 CoordinatePickerDialog.set_last_used_image_path(dlg.reference_image_path)
             self._refresh_actions_table()
             self.tbl_actions.selectRow(row)
+            self._mark_dirty()
             self._on_field_changed()
 
     def _on_start_operation_recording(self):
@@ -1775,17 +1941,23 @@ class InspectorWidget(QWidget):
         if hud.exec_() == RecordingHud.Accepted:
             recorded = hud.recorder.recorded_actions
             if recorded:
-                self.current_scenario.actions.extend(recorded)
+                self._record_undo_state()
+                acts = self._get_active_actions_list()
+                acts.extend(recorded)
+                if self.current_scenario.sequence_id is None:
+                    self.current_scenario.actions = acts
                 self._refresh_actions_table()
+                self._mark_dirty()
                 self._on_field_changed()
-                self.sig_log.emit("INFO", f"⏺️ 조작 녹화 완료: {len(recorded)}개 액션이 시나리오에 추가되었습니다.")
+                self.sig_log.emit("INFO", f"⏺️ 조작 녹화 완료: {len(recorded)}개 액션이 추가되었습니다.")
 
     def _on_pick_coord_for_selected_action(self):
         if not self.current_scenario:
             return
         rows = self.tbl_actions.selectionModel().selectedRows()
         row = rows[0].row() if rows else 0
-        act = self.current_scenario.actions[row] if (self.current_scenario.actions and 0 <= row < len(self.current_scenario.actions)) else None
+        acts = self._get_active_actions_list()
+        act = acts[row] if (acts and 0 <= row < len(acts)) else None
 
         from ui.coordinate_picker_dialog import CoordinatePickerDialog
         cond_ref = self.current_scenario.condition.reference_image_path if (self.current_scenario and self.current_scenario.condition) else None
@@ -1799,18 +1971,22 @@ class InspectorWidget(QWidget):
             drag_mode=(act.action_type == "mouse_drag") if act else False,
             initial_end_x=act.end_x if (act and act.action_type == "mouse_drag") else 0,
             initial_end_y=act.end_y if (act and act.action_type == "mouse_drag") else 0,
-            actions=self.current_scenario.actions,
+            actions=acts,
             selected_action_index=row if act else 0,
             scenario=self.current_scenario,
             project=self.project,
             parent=self
         )
         if dlg.exec_() == CoordinatePickerDialog.Accepted:
-            self.current_scenario.actions = dlg.get_actions()
+            self._record_undo_state()
+            new_acts = dlg.get_actions()
+            acts.clear()
+            acts.extend(new_acts)
             if dlg.current_image_path:
                 self.current_scenario.last_action_image_path = dlg.current_image_path
                 CoordinatePickerDialog.set_last_used_image_path(dlg.current_image_path)
             self._refresh_actions_table()
+            self._mark_dirty()
             self._on_field_changed()
             self.sig_log.emit("INFO", "🎯 액션 시퀀스 좌표 및 목록이 업데이트되었습니다.")
 
@@ -1821,8 +1997,13 @@ class InspectorWidget(QWidget):
         if not rows:
             return
         row = rows[0].row()
-        del self.current_scenario.actions[row]
+        acts = self._get_active_actions_list()
+        if not (0 <= row < len(acts)):
+            return
+        self._record_undo_state()
+        del acts[row]
         self._refresh_actions_table()
+        self._mark_dirty()
         self._on_field_changed()
 
     def _on_move_action_up(self):
@@ -1832,10 +2013,14 @@ class InspectorWidget(QWidget):
         if not rows or rows[0].row() == 0:
             return
         r = rows[0].row()
-        acts = self.current_scenario.actions
+        acts = self._get_active_actions_list()
+        if not (1 <= r < len(acts)):
+            return
+        self._record_undo_state()
         acts[r - 1], acts[r] = acts[r], acts[r - 1]
         self._refresh_actions_table()
         self.tbl_actions.selectRow(r - 1)
+        self._mark_dirty()
         self._on_field_changed()
 
     def _on_move_action_down(self):
@@ -1845,12 +2030,14 @@ class InspectorWidget(QWidget):
         if not rows:
             return
         r = rows[0].row()
-        acts = self.current_scenario.actions
-        if r >= len(acts) - 1:
+        acts = self._get_active_actions_list()
+        if not (0 <= r < len(acts) - 1):
             return
+        self._record_undo_state()
         acts[r + 1], acts[r] = acts[r], acts[r + 1]
         self._refresh_actions_table()
         self.tbl_actions.selectRow(r + 1)
+        self._mark_dirty()
         self._on_field_changed()
 
     def _on_test_action_now(self):
@@ -1864,7 +2051,10 @@ class InspectorWidget(QWidget):
             QMessageBox.warning(self, "타겟 창 필요", "상단에서 타겟 게임 창을 먼저 선택해주세요.")
             return
 
-        act = self.current_scenario.actions[rows[0].row()]
+        acts = self._get_active_actions_list()
+        if not (0 <= rows[0].row() < len(acts)):
+            return
+        act = acts[rows[0].row()]
         use_anti_ban = getattr(self.project, "anti_ban_enabled", False) if self.project else False
         should_anti_ban = use_anti_ban
         offset_sec = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0))) if self.project else 1.0
@@ -1908,14 +2098,14 @@ class InspectorWidget(QWidget):
     def _on_test_all_actions_now(self):
         if not self.current_scenario:
             return
-        if not self.current_scenario.actions:
+        actions = self._get_active_actions_list()
+        if not actions:
             QMessageBox.information(self, "액션 없음", "실행할 액션이 시퀀스에 없습니다.")
             return
         if not self.target_hwnd:
             QMessageBox.warning(self, "타겟 창 필요", "상단에서 타겟 게임 창을 먼저 선택해주세요.")
             return
 
-        actions = self.current_scenario.actions
         total = len(actions)
         self.sig_log.emit("INFO", f"▶ [{self.current_scenario.name}] 전체 액션 시퀀스 테스트 시작 (총 {total}개)...")
 
