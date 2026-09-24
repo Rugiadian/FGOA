@@ -16,10 +16,11 @@ from PyQt5.QtWidgets import (
     QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
     QScrollArea, QFrame, QMessageBox, QStackedWidget, QSplitter,
-    QMenu, QApplication, QShortcut
+    QMenu, QApplication, QShortcut, QAbstractItemView,
+    QStyledItemDelegate, QAbstractSpinBox
 )
-from PyQt5.QtGui import QColor, QFont, QPixmap, QKeySequence
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QColor, QFont, QPixmap, QKeySequence, QDrag
+from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QPoint
 
 from core.models import Scenario, Project, Condition, ColorPoint, Action
 from core.screen_capture import ScreenCapture
@@ -28,6 +29,169 @@ from core.evaluator import ConditionEvaluator
 from ui.widgets.color_badge import ColorChipWidget
 from ui.condition_editor_dialog import ConditionEditorDialog
 from ui.action_editor_dialog import SingleActionDialog
+
+
+class DraggableActionsTableWidget(QTableWidget):
+    """QTableWidget supporting safe mouse drag-and-drop row reordering without item loss."""
+    sig_row_reordered = pyqtSignal(int, int)  # (from_row, to_row)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._drag_start_pos = None
+        self._drag_start_row = -1
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_start_pos = event.pos()
+            self._drag_start_row = self.rowAt(event.pos().y())
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (
+            (event.buttons() & Qt.LeftButton)
+            and self._drag_start_pos is not None
+            and self._drag_start_row >= 0
+        ):
+            dist = (event.pos() - self._drag_start_pos).manhattanLength()
+            if dist >= QApplication.startDragDistance():
+                drag = QDrag(self)
+                mime = QMimeData()
+                mime.setData("application/x-fgoa-action-row", str(self._drag_start_row).encode("utf-8"))
+                drag.setMimeData(mime)
+                self._drag_start_pos = None
+                drag.exec_(Qt.MoveAction)
+                self._drag_start_row = -1
+                return
+        super().mouseMoveEvent(event)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat("application/x-fgoa-action-row"):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasFormat("application/x-fgoa-action-row"):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasFormat("application/x-fgoa-action-row"):
+            data_bytes = event.mimeData().data("application/x-fgoa-action-row").data()
+            try:
+                from_row = int(data_bytes.decode("utf-8"))
+            except Exception:
+                from_row = -1
+            to_row = self.rowAt(event.pos().y())
+            if to_row < 0:
+                to_row = self.rowCount() - 1
+            if to_row < 0:
+                to_row = 0
+            event.acceptProposedAction()
+            if from_row != to_row and from_row >= 0 and to_row >= 0:
+                self.sig_row_reordered.emit(from_row, to_row)
+        else:
+            event.ignore()
+
+
+class ActionColumnDelegate(QStyledItemDelegate):
+    """
+    Delegate for Offset (Col 3), Delay (Col 4), and Log (Col 5) columns.
+    Normally displays clean text (like Action Type column).
+    Switches to inline editor on click, and reverts to clean text after editing.
+    """
+    def __init__(self, inspector: Any, parent=None):
+        super().__init__(parent)
+        self.inspector = inspector
+
+    def createEditor(self, parent, option, index):
+        col = index.column()
+        row = index.row()
+        act = self.inspector._get_action_at(row)
+        if not act:
+            return super().createEditor(parent, option, index)
+
+        if col == 3:  # 오프셋
+            if act.action_type in ("mouse_click", "mouse_drag"):
+                combo = QComboBox(parent)
+                combo.addItem("약", "weak")
+                combo.addItem("강", "strong")
+                combo.addItem("해제", "none")
+                combo.setStyleSheet("font-size: 8.5pt;")
+                return combo
+            return None  # 비마우스 액션은 편집 불가
+
+        elif col == 4:  # 대기 시간: 화살표 숨김 (NoButtons)
+            spin = QDoubleSpinBox(parent)
+            spin.setRange(0.0, 3600.0)
+            spin.setDecimals(1)
+            spin.setSingleStep(0.1)
+            spin.setSuffix("s")
+            spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
+            spin.setAlignment(Qt.AlignCenter)
+            spin.setStyleSheet("font-size: 8.5pt;")
+            return spin
+
+        elif col == 5:  # 로그
+            edit = QLineEdit(parent)
+            edit.setPlaceholderText("로그 문구 (비워두면 꺼짐)")
+            edit.setStyleSheet("font-size: 8.5pt; padding: 1px 3px;")
+            return edit
+
+        return super().createEditor(parent, option, index)
+
+    def setEditorData(self, editor, index):
+        col = index.column()
+        row = index.row()
+        act = self.inspector._get_action_at(row)
+        if not act:
+            return
+
+        if col == 3 and isinstance(editor, QComboBox):
+            cur = getattr(act, "coord_anti_ban", "weak")
+            idx = editor.findData(cur)
+            editor.setCurrentIndex(idx if idx >= 0 else 0)
+
+        elif col == 4 and isinstance(editor, QDoubleSpinBox):
+            editor.setValue(act.delay_seconds)
+            editor.selectAll()
+
+        elif col == 5 and isinstance(editor, QLineEdit):
+            cur_log = getattr(act, "custom_log", "")
+            if not cur_log and act.action_type == "log_message":
+                cur_log = getattr(act, "log_text", "")
+            editor.setText(cur_log)
+            editor.selectAll()
+
+    def setModelData(self, editor, model, index):
+        col = index.column()
+        row = index.row()
+        act = self.inspector._get_action_at(row)
+        if not act:
+            return
+
+        if col == 3 and isinstance(editor, QComboBox):
+            new_mode = editor.currentData()
+            self.inspector._on_inline_offset_changed(act, new_mode)
+            offset_map = {"weak": "약", "strong": "강", "none": "해제"}
+            model.setData(index, offset_map.get(new_mode, "약"), Qt.DisplayRole)
+
+        elif col == 4 and isinstance(editor, QDoubleSpinBox):
+            new_delay = editor.value()
+            self.inspector._on_inline_delay_changed(act, new_delay)
+            model.setData(index, f"{new_delay:.1f}s" if new_delay > 0 else "-", Qt.DisplayRole)
+
+        elif col == 5 and isinstance(editor, QLineEdit):
+            new_log = editor.text().strip()
+            self.inspector._on_inline_log_changed(act, new_log)
+            model.setData(index, new_log if new_log else "-", Qt.DisplayRole)
 
 
 class ClickableThumbnailLabel(QLabel):
@@ -629,22 +793,36 @@ class InspectorWidget(QWidget):
         layout.addLayout(add_bar_row2)
 
         # Actions Table
-        self.tbl_actions = QTableWidget()
-        self.tbl_actions.setColumnCount(5)
-        self.tbl_actions.setHorizontalHeaderLabels(["#", "액션 유형", "좌표 / 키 / 텍스트", "상세 설정", "대기"])
+        self.tbl_actions = DraggableActionsTableWidget()
+        self.tbl_actions.setColumnCount(6)
+        self.tbl_actions.setHorizontalHeaderLabels(["#", "액션 유형", "좌표 / 키 / 텍스트", "오프셋", "대기", "로그"])
+        self.tbl_actions.setWordWrap(True)
+        self.tbl_actions.sig_row_reordered.connect(self._on_action_row_reordered)
         hdr_act = self.tbl_actions.horizontalHeader()
-        hdr_act.setSectionResizeMode(0, QHeaderView.Fixed)
-        hdr_act.resizeSection(0, 28)
-        hdr_act.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        hdr_act.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        hdr_act.setSectionResizeMode(3, QHeaderView.Stretch)
-        hdr_act.setSectionResizeMode(4, QHeaderView.Fixed)
-        hdr_act.resizeSection(4, 50)
-        self.tbl_actions.verticalHeader().setDefaultSectionSize(24)
+        for c in range(6):
+            hdr_act.setSectionResizeMode(c, QHeaderView.Interactive)
+        hdr_act.resizeSection(0, 36)
+        hdr_act.resizeSection(1, 95)
+        hdr_act.resizeSection(2, 115)
+        hdr_act.resizeSection(3, 58)
+        hdr_act.resizeSection(4, 58)
+        hdr_act.resizeSection(5, 140)
+        self.tbl_actions.verticalHeader().setDefaultSectionSize(26)
+        self.tbl_actions.verticalHeader().setMinimumSectionSize(24)
         self.tbl_actions.setSelectionBehavior(QTableWidget.SelectRows)
         self.tbl_actions.setMinimumHeight(95)
-        self.tbl_actions.setMaximumHeight(180)
-        self.tbl_actions.cellDoubleClicked.connect(lambda r, c: self._on_edit_action())
+        self.tbl_actions.setMaximumHeight(200)
+
+        # 델리게이트 연결: 오프셋, 대기, 로그 열에 대해 평상시 깔끔한 텍스트 출력 및 클릭 시 즉시 인라인 편집 지원
+        self.action_column_delegate = ActionColumnDelegate(self, self.tbl_actions)
+        self.tbl_actions.setItemDelegateForColumn(3, self.action_column_delegate)
+        self.tbl_actions.setItemDelegateForColumn(4, self.action_column_delegate)
+        self.tbl_actions.setItemDelegateForColumn(5, self.action_column_delegate)
+        self.tbl_actions.setEditTriggers(
+            QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked | QAbstractItemView.EditKeyPressed
+        )
+        self.tbl_actions.cellClicked.connect(self._on_action_cell_clicked)
+        self.tbl_actions.cellDoubleClicked.connect(self._on_action_cell_double_clicked)
         layout.addWidget(self.tbl_actions)
 
         # Actions Control Buttons - Row 1: Item Manipulation (Edit, Pick Coord, Delete, Up, Down)
@@ -693,14 +871,14 @@ class InspectorWidget(QWidget):
         act_ctrl_row2.addStretch()
         layout.addLayout(act_ctrl_row2)
 
-        # Row 3: Action Custom Log Option
+        # Row 3: Action Custom Log Option (항상 입력 가능, 비어있으면 자동 꺼짐)
         log_bar = QHBoxLayout()
         log_bar.setSpacing(6)
         self.chk_action_log = QCheckBox("액션 실행 시 로그 출력:")
-        self.chk_action_log.setToolTip("이 시나리오의 액션들이 실행될 때 로그 창에 원하는 문장을 출력합니다.")
+        self.chk_action_log.setToolTip("이 시나리오의 액션들이 실행될 때 로그 창에 원하는 문장을 출력합니다. (문장을 입력하면 자동으로 켜집니다)")
         self.txt_action_log = QLineEdit()
-        self.txt_action_log.setPlaceholderText("원하는 로그 문장을 입력하세요 (예: 1라운드 스킬 발동 완료)")
-        self.txt_action_log.setEnabled(False)
+        self.txt_action_log.setPlaceholderText("원하는 로그 문장을 입력하세요 (비워두면 출력 안 함)")
+        self.txt_action_log.setEnabled(True)
         self.chk_action_log.toggled.connect(self._on_action_log_toggled)
         self.txt_action_log.textChanged.connect(self._on_action_log_text_changed)
         log_bar.addWidget(self.chk_action_log)
@@ -965,14 +1143,17 @@ class InspectorWidget(QWidget):
                 )
 
     def _on_action_log_toggled(self, checked: bool):
-        self.txt_action_log.setEnabled(checked)
         if not self._is_loading and self.current_scenario:
             self.current_scenario.custom_log = self.txt_action_log.text().strip() if checked else ""
             self._on_field_changed()
 
     def _on_action_log_text_changed(self, text: str):
+        clean = text.strip()
+        self.chk_action_log.blockSignals(True)
+        self.chk_action_log.setChecked(bool(clean))
+        self.chk_action_log.blockSignals(False)
         if not self._is_loading and self.current_scenario:
-            self.current_scenario.custom_log = text.strip() if self.chk_action_log.isChecked() else ""
+            self.current_scenario.custom_log = clean
             self._on_field_changed()
 
     def _populate_jump_combos(self):
@@ -1059,58 +1240,174 @@ class InspectorWidget(QWidget):
         actions = self.current_scenario.actions
         self.tbl_actions.setRowCount(len(actions))
 
-        type_names = {
-            "mouse_click": "🖱️ 클릭",
-            "mouse_drag": "↔️ 드래그",
-            "key_press": "⌨️ 키 입력",
-            "text_type": "📝 텍스트",
-            "delay": "⏳ 대기",
-            "sound_beep": "🔔 비프음",
-            "log_message": "📋 로그"
-        }
-
         for row, act in enumerate(actions):
-            # 0. Number
-            it_no = QTableWidgetItem(str(row + 1))
+            # 0. Action Numbering (a1, a2, a3...)
+            it_no = QTableWidgetItem(f"a{row + 1}")
             it_no.setTextAlignment(Qt.AlignCenter)
+            it_no.setToolTip(f"액션 고유 번호 a{row + 1}")
+            it_no.setFlags(it_no.flags() & ~Qt.ItemIsEditable)
             self.tbl_actions.setItem(row, 0, it_no)
 
-            # 1. Type
-            it_type = QTableWidgetItem(type_names.get(act.action_type, act.action_type))
+            # 1. Action Type (상세 설정 내용을 통합하여 간략 표기)
+            if act.action_type == "mouse_click":
+                btn_name = {"left": "좌", "right": "우", "middle": "휠"}.get(act.mouse_button, act.mouse_button)
+                if act.click_type == "double":
+                    type_str = f"🖱️ 더블{btn_name}클릭"
+                elif act.repeat_count > 1:
+                    type_str = f"🖱️ {btn_name}클릭({act.repeat_count}회)"
+                else:
+                    type_str = f"🖱️ {btn_name}클릭"
+            elif act.action_type == "mouse_drag":
+                type_str = f"↔️ 드래그({act.drag_duration_ms}ms)"
+            elif act.action_type == "key_press":
+                type_str = "⌨️ 키 조합" if act.modifiers else "⌨️ 키 입력"
+            elif act.action_type == "text_type":
+                type_str = "📝 텍스트"
+            elif act.action_type == "delay":
+                type_str = "⏳ 대기"
+            elif act.action_type == "sound_beep":
+                type_str = "🔔 비프음"
+            elif act.action_type == "log_message":
+                type_str = "📋 로그"
+            else:
+                type_str = act.action_type
+
+            it_type = QTableWidgetItem(type_str)
             it_type.setTextAlignment(Qt.AlignCenter)
+            it_type.setFlags(it_type.flags() & ~Qt.ItemIsEditable)
             self.tbl_actions.setItem(row, 1, it_type)
 
             # 2. Target / Param
             if act.action_type == "mouse_click":
                 target_str = f"({act.x}, {act.y})"
-                detail_str = f"{'더블' if act.click_type == 'double' else '단일'} {act.mouse_button}클릭"
             elif act.action_type == "mouse_drag":
-                target_str = f"({act.x},{act.y}) ➔ ({act.end_x},{act.end_y})"
-                detail_str = f"{act.drag_duration_ms}ms"
+                target_str = f"({act.x}, {act.y}) ➔ ({act.end_x}, {act.end_y})"
             elif act.action_type == "key_press":
-                target_str = f"키: [{act.key}]"
-                detail_str = f"조합: {', '.join(act.modifiers)}" if act.modifiers else "(단일)"
+                if act.modifiers:
+                    target_str = f"[{'+'.join(act.modifiers)}+{act.key}]"
+                else:
+                    target_str = f"[{act.key}]"
             elif act.action_type == "text_type":
-                target_str = f"\"{act.text}\""
-                detail_str = "텍스트 타이핑"
+                target_str = f'"{act.text}"'
             elif act.action_type == "delay":
                 target_str = f"{act.delay_seconds:.1f}초"
-                detail_str = "정밀 일시 정지"
+            elif act.action_type == "sound_beep":
+                target_str = f"{act.beep_freq}Hz ({act.beep_duration_ms}ms)"
+            elif act.action_type == "log_message":
+                target_str = act.log_text if act.log_text else "-"
             else:
                 target_str = "-"
-                detail_str = "-"
 
             it_target = QTableWidgetItem(target_str)
             it_target.setTextAlignment(Qt.AlignCenter)
+            it_target.setFlags(it_target.flags() & ~Qt.ItemIsEditable)
             self.tbl_actions.setItem(row, 2, it_target)
 
-            it_detail = QTableWidgetItem(detail_str)
-            self.tbl_actions.setItem(row, 3, it_detail)
+            # 3. Anti-ban Coord Offset Option (평상시 깔끔한 텍스트, 클릭 시 콤보박스 편집)
+            if act.action_type in ("mouse_click", "mouse_drag"):
+                ab_mode = getattr(act, "coord_anti_ban", "weak")
+                offset_map = {"weak": "약", "strong": "강", "none": "해제"}
+                offset_str = offset_map.get(ab_mode, "약")
+                it_offset = QTableWidgetItem(offset_str)
+                it_offset.setTextAlignment(Qt.AlignCenter)
+                it_offset.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsEditable)
+                it_offset.setToolTip("클릭하여 안티밴 좌표 오프셋 수정 (약 / 강 / 해제)")
+            else:
+                it_offset = QTableWidgetItem("-")
+                it_offset.setTextAlignment(Qt.AlignCenter)
+                it_offset.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+            self.tbl_actions.setItem(row, 3, it_offset)
 
-            # 4. Delay
-            it_delay = QTableWidgetItem(f"{act.delay_seconds:.1f}s" if act.delay_seconds > 0 else "-")
+            # 4. Delay (평상시 깔끔한 텍스트, 클릭 시 상하 화살표 없는 직접 입력 스핀박스 편집)
+            delay_str = f"{act.delay_seconds:.1f}s" if act.delay_seconds > 0 else "-"
+            it_delay = QTableWidgetItem(delay_str)
             it_delay.setTextAlignment(Qt.AlignCenter)
+            it_delay.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsEditable)
+            it_delay.setToolTip("클릭하여 대기 시간 직접 입력 (초)")
             self.tbl_actions.setItem(row, 4, it_delay)
+
+            # 5. Log Column (평상시 깔끔한 텍스트, 클릭 시 텍스트필드 직접 입력 편집)
+            cur_log = getattr(act, "custom_log", "")
+            if not cur_log and act.action_type == "log_message":
+                cur_log = getattr(act, "log_text", "")
+            it_log = QTableWidgetItem(cur_log if cur_log else "-")
+            if cur_log:
+                it_log.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                it_log.setToolTip(cur_log)
+            else:
+                it_log.setTextAlignment(Qt.AlignCenter)
+                it_log.setToolTip("클릭하여 로그 문구 입력 (비워두면 꺼짐)")
+            it_log.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsEditable)
+            self.tbl_actions.setItem(row, 5, it_log)
+
+        # 내용과 줄바꿈에 맞춰 행 높이 자동 조절
+        self.tbl_actions.resizeRowsToContents()
+
+    def _get_action_at(self, row: int) -> Optional[Action]:
+        """Safely returns the Action instance at row index in current scenario."""
+        if self.current_scenario and 0 <= row < len(self.current_scenario.actions):
+            return self.current_scenario.actions[row]
+        return None
+
+    def _on_action_cell_clicked(self, row: int, col: int):
+        """Single click on editable column opens inline editor immediately."""
+        if col in (3, 4, 5):
+            item = self.tbl_actions.item(row, col)
+            if item and (item.flags() & Qt.ItemIsEditable):
+                self.tbl_actions.editItem(item)
+
+    def _on_action_cell_double_clicked(self, row: int, col: int):
+        """Double clicking type/coord columns opens SingleActionDialog."""
+        if col in (0, 1, 2):
+            self._on_edit_action()
+
+    def _on_inline_offset_changed(self, act: Action, new_mode: str):
+        """Inline handler for changing action anti-ban offset in table."""
+        if self._is_loading or not self.current_scenario:
+            return
+        if getattr(act, "coord_anti_ban", "weak") != new_mode:
+            self._record_undo_state()
+            act.coord_anti_ban = new_mode
+            self._mark_dirty()
+            self._on_field_changed()
+
+    def _on_inline_delay_changed(self, act: Action, new_delay: float):
+        """Inline handler for changing action delay in table."""
+        if self._is_loading or not self.current_scenario:
+            return
+        if round(getattr(act, "delay_seconds", 0.0), 2) != round(new_delay, 2):
+            self._record_undo_state()
+            act.delay_seconds = new_delay
+            self._mark_dirty()
+            self._on_field_changed()
+
+    def _on_inline_log_changed(self, act: Action, new_log: str, edit_widget: Optional[QLineEdit] = None):
+        """Inline handler for changing action log message in table."""
+        if self._is_loading or not self.current_scenario:
+            return
+        clean_log = new_log.strip()
+        if getattr(act, "custom_log", "") != clean_log:
+            self._record_undo_state()
+            act.custom_log = clean_log
+            if edit_widget:
+                edit_widget.setToolTip(clean_log if clean_log else "로그 문구 (비워두면 꺼짐)")
+            self._mark_dirty()
+            self._on_field_changed()
+
+    def _on_action_row_reordered(self, from_row: int, to_row: int):
+        """Reorders actions in the current scenario via safe drag-and-drop."""
+        if not self.current_scenario or from_row == to_row:
+            return
+        acts = self.current_scenario.actions
+        if 0 <= from_row < len(acts) and 0 <= to_row < len(acts):
+            self._record_undo_state()
+            item = acts.pop(from_row)
+            acts.insert(to_row, item)
+            self._refresh_actions_table()
+            self.tbl_actions.selectRow(to_row)
+            self._mark_dirty()
+            self._on_field_changed()
+            self.sig_log.emit("INFO", f"↕️ 액션 순서 이동: a{from_row + 1} ➔ a{to_row + 1}")
 
     # ==========================================
     # Field Change Handlers
@@ -1522,6 +1819,17 @@ class InspectorWidget(QWidget):
         offset_sec = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0))) if self.project else 1.0
         jitter = round(random.uniform(0.0, offset_sec), 3) if (should_anti_ban and offset_sec > 0) else 0.0
 
+        coord_mode = getattr(act, "coord_anti_ban", "weak")
+        if coord_mode == "none" or act.action_type not in ("mouse_click", "mouse_drag"):
+            act_offset_range = 0
+            coord_str = ""
+        elif coord_mode == "strong":
+            act_offset_range = getattr(self.project, "anti_ban_coord_strong", 15) if self.project else 15
+            coord_str = f" [좌표 강 ±{act_offset_range}px]"
+        else:
+            act_offset_range = getattr(self.project, "anti_ban_coord_weak", 5) if self.project else 5
+            coord_str = f" [좌표 약 ±{act_offset_range}px]"
+
         orig_t = act.delay_seconds if act.action_type == "delay" else getattr(act, "delay_seconds", 0.0)
         ab_t = round(orig_t + jitter, 2)
         sleep_total = ab_t if should_anti_ban else orig_t
@@ -1529,13 +1837,14 @@ class InspectorWidget(QWidget):
         if act.action_type == "delay":
             act_msg = f"{sleep_total:.2f}초 (원본 {orig_t:.2f}초 + 안티밴 {jitter:.2f}초) 대기" if (should_anti_ban and jitter > 0) else f"{sleep_total:.1f}초 대기"
         else:
-            extra_str = f" (안티밴 +{jitter:.2f}초)" if should_anti_ban and jitter > 0 else ""
-            act_msg = f"{act.get_summary()}{extra_str}"
+            time_str = f" (안티밴 +{jitter:.2f}초)" if (should_anti_ban and jitter > 0) else ""
+            act_msg = f"{act.get_summary()}{coord_str}{time_str}"
 
         try:
             InputController.execute_action(
                 act, self.target_hwnd,
                 apply_anti_ban=use_anti_ban,
+                offset_range=act_offset_range,
                 min_delay=0.0,
                 max_delay=offset_sec,
                 precomputed_jitter=jitter
@@ -1575,6 +1884,17 @@ class InspectorWidget(QWidget):
                 should_anti_ban = use_anti_ban
                 jitter = round(random.uniform(0.0, offset_sec), 3) if (should_anti_ban and offset_sec > 0) else 0.0
 
+                coord_mode = getattr(act, "coord_anti_ban", "weak")
+                if coord_mode == "none" or act.action_type not in ("mouse_click", "mouse_drag"):
+                    act_offset_range = 0
+                    coord_str = ""
+                elif coord_mode == "strong":
+                    act_offset_range = getattr(self.project, "anti_ban_coord_strong", 15) if self.project else 15
+                    coord_str = f" [좌표 강 ±{act_offset_range}px]"
+                else:
+                    act_offset_range = getattr(self.project, "anti_ban_coord_weak", 5) if self.project else 5
+                    coord_str = f" [좌표 약 ±{act_offset_range}px]"
+
                 orig_t = act.delay_seconds if act.action_type == "delay" else getattr(act, "delay_seconds", 0.0)
                 ab_t = round(orig_t + jitter, 2)
                 sleep_total = ab_t if should_anti_ban else orig_t
@@ -1582,8 +1902,8 @@ class InspectorWidget(QWidget):
                 if act.action_type == "delay":
                     act_msg = f"{sleep_total:.2f}초 (원본 {orig_t:.2f}초 + 안티밴 {jitter:.2f}초) 대기" if (should_anti_ban and jitter > 0) else f"{sleep_total:.1f}초 대기"
                 else:
-                    extra_str = f" (안티밴 +{jitter:.2f}초)" if should_anti_ban and jitter > 0 else ""
-                    act_msg = f"{act.get_summary()}{extra_str}"
+                    time_str = f" (안티밴 +{jitter:.2f}초)" if (should_anti_ban and jitter > 0) else ""
+                    act_msg = f"{act.get_summary()}{coord_str}{time_str}"
 
                 self.sig_log.emit("ACTION", f"  [{idx}/{total}] 액션 실행: {act_msg}")
 
@@ -1599,6 +1919,7 @@ class InspectorWidget(QWidget):
                         InputController.execute_action(
                             act, self.target_hwnd,
                             apply_anti_ban=use_anti_ban,
+                            offset_range=act_offset_range,
                             min_delay=0.0,
                             max_delay=offset_sec,
                             precomputed_jitter=jitter

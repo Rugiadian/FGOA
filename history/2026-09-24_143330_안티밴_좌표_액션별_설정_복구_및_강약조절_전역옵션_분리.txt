@@ -1,0 +1,41 @@
+[일시 / Timestamp]
+- 요청 일시: 2026-09-24 14:26:48
+- 완료 일시: 2026-09-24 14:33:30
+
+[요청 내용 / User Request]
+- 안티밴:타임 은 지금 만든 것 처럼 시나리오 전역에 적용하는게 맞고 
+- 안티밴:좌표는 기존처럼 액션당 지정으로 복구. 
+-- 안티밴:좌표는 기본값이 활성화 상태 
+-- 안티밴:좌표 옵션으로 해제/오프셋 약/오프셋 강 제공하고 
+-- 강약 조절은 시나리오 전역 옵션 함.
+
+[결과 요약 / Summary of Results]
+1. 안티밴 기능 이원화 구조 정립 (타임: 시나리오 전역 / 좌표: 액션당 개별 지정)
+   - 안티밴 타임: 기존대로 시나리오 재생 창(BottomToolBar)에서 시나리오 전역 일괄 On/Off 및 +n초 오프셋 적용 유지
+   - 안티밴 좌표: 액션 시퀀스 편집기(SingleActionDialog)에서 각 액션별로 설정하도록 복구
+
+2. 액션당 좌표 안티밴 옵션 및 기본값 처리
+   - Action 데이터 모델에 coord_anti_ban 필드 추가 ("weak", "strong", "none")
+   - 액션 생성 시 기본값으로 '오프셋 약 (기본값)'("weak")이 활성화되도록 기본값 지정
+   - SingleActionDialog에 마우스 클릭/드래그 시 표시되는 '🎯 안티밴: 좌표 설정' 옵션 추가 (해제 / 오프셋 약 / 오프셋 강 제공)
+   - 기존 저장된 프로젝트 호환을 위해 이전 boolean 필드(anti_ban) 역직렬화 fallback 지원
+
+3. 좌표 오프셋 강약 조절 시나리오 전역 옵션 배치
+   - Project 데이터 모델에 anti_ban_coord_weak (기본값 ±5px), anti_ban_coord_strong (기본값 ±15px) 필드 추가 및 저장/불러오기 지원
+   - 시나리오 재생 창(ctrl_frame)에 '🎯 좌표 오프셋: 약 ±[ 5 ] px / 강 ±[ 15 ] px' 전역 스핀박스 컨트롤 배치
+   - runner, input_controller, inspector_widget, coordinate_picker_dialog에서 각 액션의 coord_anti_ban에 따라 전역에 정의된 약/강 픽셀 오프셋을 자동 적용하도록 수정
+
+4. 버전 갱신
+   - core/version.py의 __version__을 '260924.1427'로 갱신
+
+[영향 파일 목록 / Affected Files]
+- core/version.py
+- core/models.py
+- core/input_controller.py
+- core/runner.py
+- ui/action_editor_dialog.py
+- ui/main_window.py
+- ui/inspector_widget.py
+- ui/coordinate_picker_dialog.py
+- tests/test_core.py
+- history/2026-09-24_143330_안티밴_좌표_액션별_설정_복구_및_강약조절_전역옵션_분리.txt

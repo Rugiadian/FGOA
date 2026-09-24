@@ -1244,6 +1244,17 @@ class CoordinatePickerDialog(QDialog):
         offset_sec = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0))) if self.project else 1.0
         jitter = round(random.uniform(0.0, offset_sec), 3) if (should_anti_ban and offset_sec > 0) else 0.0
 
+        coord_mode = getattr(act, "coord_anti_ban", "weak")
+        if coord_mode == "none" or act.action_type not in ("mouse_click", "mouse_drag"):
+            act_offset_range = 0
+            coord_str = ""
+        elif coord_mode == "strong":
+            act_offset_range = getattr(self.project, "anti_ban_coord_strong", 15) if self.project else 15
+            coord_str = f" [좌표 강 ±{act_offset_range}px]"
+        else:
+            act_offset_range = getattr(self.project, "anti_ban_coord_weak", 5) if self.project else 5
+            coord_str = f" [좌표 약 ±{act_offset_range}px]"
+
         orig_t = act.delay_seconds if act.action_type == "delay" else getattr(act, "delay_seconds", 0.0)
         ab_t = round(orig_t + jitter, 2)
         sleep_total = ab_t if should_anti_ban else orig_t
@@ -1251,12 +1262,12 @@ class CoordinatePickerDialog(QDialog):
         if act.action_type == "delay":
             act_msg = f"{sleep_total:.2f}초 (원본 {orig_t:.2f}초 + 안티밴 {jitter:.2f}초) 대기" if (should_anti_ban and jitter > 0) else f"{sleep_total:.1f}초 대기"
         else:
-            extra_str = f" (안티밴 +{jitter:.2f}초)" if should_anti_ban and jitter > 0 else ""
-            act_msg = f"{act.get_summary()}{extra_str}"
+            time_str = f" (안티밴 +{jitter:.2f}초)" if (should_anti_ban and jitter > 0) else ""
+            act_msg = f"{act.get_summary()}{coord_str}{time_str}"
 
         # 1. Visualize on Canvas using Virtual Cursor
         if act.action_type in ("mouse_click", "mouse_drag"):
-            self.canvas.set_virtual_cursor((act.x, act.y), visible=True, clicking=True, label=f"#{self.selected_action_index + 1} {act.get_summary()}")
+            self.canvas.set_virtual_cursor((act.x, act.y), visible=True, clicking=True, label=f"#{self.selected_action_index + 1} {act.get_summary()}{coord_str}")
             QApplication.processEvents()
             time.sleep(0.2)
             self.canvas.set_virtual_cursor(None, visible=False)
@@ -1267,6 +1278,7 @@ class CoordinatePickerDialog(QDialog):
                 InputController.execute_action(
                     act, self.target_hwnd,
                     apply_anti_ban=use_anti_ban,
+                    offset_range=act_offset_range,
                     min_delay=0.0,
                     max_delay=offset_sec,
                     precomputed_jitter=jitter
@@ -1310,6 +1322,18 @@ class CoordinatePickerDialog(QDialog):
 
                 should_anti_ban = use_anti_ban
                 jitter = round(random.uniform(0.0, offset_sec), 3) if (should_anti_ban and offset_sec > 0) else 0.0
+
+                coord_mode = getattr(act, "coord_anti_ban", "weak")
+                if coord_mode == "none" or act.action_type not in ("mouse_click", "mouse_drag"):
+                    act_offset_range = 0
+                    coord_str = ""
+                elif coord_mode == "strong":
+                    act_offset_range = getattr(self.project, "anti_ban_coord_strong", 15) if self.project else 15
+                    coord_str = f" [좌표 강 ±{act_offset_range}px]"
+                else:
+                    act_offset_range = getattr(self.project, "anti_ban_coord_weak", 5) if self.project else 5
+                    coord_str = f" [좌표 약 ±{act_offset_range}px]"
+
                 orig_t = act.delay_seconds if act.action_type == "delay" else getattr(act, "delay_seconds", 0.0)
                 ab_t = round(orig_t + jitter, 2)
                 sleep_total = ab_t if should_anti_ban else orig_t
@@ -1317,8 +1341,8 @@ class CoordinatePickerDialog(QDialog):
                 if act.action_type == "delay":
                     act_msg = f"{sleep_total:.2f}초 (원본 {orig_t:.2f}초 + 안티밴 {jitter:.2f}초) 대기" if (should_anti_ban and jitter > 0) else f"{sleep_total:.1f}초 대기"
                 else:
-                    extra_str = f" (안티밴 +{jitter:.2f}초)" if should_anti_ban and jitter > 0 else ""
-                    act_msg = f"{act.get_summary()}{extra_str}"
+                    time_str = f" (안티밴 +{jitter:.2f}초)" if (should_anti_ban and jitter > 0) else ""
+                    act_msg = f"{act.get_summary()}{coord_str}{time_str}"
 
                 self.lbl_guide.setText(f"▶ [{idx + 1}/{total}] 테스트 중: {act_msg}")
 
@@ -1330,12 +1354,19 @@ class CoordinatePickerDialog(QDialog):
                     time.sleep(0.08)
 
                     # Click effect
-                    self.canvas.set_virtual_cursor((act.x, act.y), visible=True, clicking=True, label=f"#{idx + 1} 좌클릭!")
+                    self.canvas.set_virtual_cursor((act.x, act.y), visible=True, clicking=True, label=f"#{idx + 1} 좌클릭!{coord_str}")
                     QApplication.processEvents()
                     time.sleep(0.12)
 
                     if self.target_hwnd:
-                        InputController.execute_action(act, self.target_hwnd, apply_anti_ban=use_anti_ban, precomputed_jitter=jitter)
+                        InputController.execute_action(
+                            act, self.target_hwnd,
+                            apply_anti_ban=use_anti_ban,
+                            offset_range=act_offset_range,
+                            min_delay=0.0,
+                            max_delay=offset_sec,
+                            precomputed_jitter=jitter
+                        )
 
                 elif act.action_type == "mouse_drag":
                     # Interpolated drag animation
@@ -1345,12 +1376,19 @@ class CoordinatePickerDialog(QDialog):
                             break
                         interp_x = act.x + (act.end_x - act.x) * (s / steps)
                         interp_y = act.y + (act.end_y - act.y) * (s / steps)
-                        self.canvas.set_virtual_cursor((interp_x, interp_y), visible=True, clicking=True, label=f"#{idx + 1} 드래그 중...")
+                        self.canvas.set_virtual_cursor((interp_x, interp_y), visible=True, clicking=True, label=f"#{idx + 1} 드래그 중...{coord_str}")
                         QApplication.processEvents()
                         time.sleep(0.04)
 
                     if self.target_hwnd:
-                        InputController.execute_action(act, self.target_hwnd, apply_anti_ban=use_anti_ban, precomputed_jitter=jitter)
+                        InputController.execute_action(
+                            act, self.target_hwnd,
+                            apply_anti_ban=use_anti_ban,
+                            offset_range=act_offset_range,
+                            min_delay=0.0,
+                            max_delay=offset_sec,
+                            precomputed_jitter=jitter
+                        )
 
                 elif act.action_type == "delay":
                     sleep_total = ab_t if should_anti_ban else orig_t
@@ -1364,7 +1402,14 @@ class CoordinatePickerDialog(QDialog):
                         QApplication.processEvents()
                 else:
                     if self.target_hwnd:
-                        InputController.execute_action(act, self.target_hwnd, apply_anti_ban=use_anti_ban, precomputed_jitter=jitter)
+                        InputController.execute_action(
+                            act, self.target_hwnd,
+                            apply_anti_ban=use_anti_ban,
+                            offset_range=0,
+                            min_delay=0.0,
+                            max_delay=offset_sec,
+                            precomputed_jitter=jitter
+                        )
 
                 time.sleep(0.04)
                 QApplication.processEvents()

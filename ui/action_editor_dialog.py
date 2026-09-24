@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox,
     QSpinBox, QDoubleSpinBox, QLineEdit, QGroupBox, QMessageBox,
-    QFormLayout, QApplication, QCheckBox
+    QFormLayout, QApplication, QCheckBox, QButtonGroup, QGridLayout
 )
 from PyQt5.QtCore import Qt
 from core.models import Action
@@ -29,36 +29,77 @@ class SingleActionDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle("액션 속성 설정")
-        self.resize(480, 440)
+        self.resize(520, 520)
         self.action = copy.deepcopy(action) if action else Action()
         self.target_hwnd = target_hwnd
         self.reference_image_path = reference_image_path
         self.scenario = scenario
+        self.type_buttons = {}
         self._init_ui()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(10)
 
+        # 1. Action Type: Exposed as visible buttons instead of dropdown scroll menu
+        grp_type = QGroupBox("📌 액션 유형 선택")
+        type_grid = QGridLayout(grp_type)
+        type_grid.setSpacing(6)
+
+        self.btn_group_type = QButtonGroup(self)
+        self.btn_group_type.setExclusive(True)
+
+        action_types_def = [
+            ("mouse_click", "🖱️ 클릭", 0, 0),
+            ("mouse_drag", "↔️ 드래그", 0, 1),
+            ("key_press", "⌨️ 키 입력", 0, 2),
+            ("text_type", "📝 텍스트", 0, 3),
+            ("delay", "⏳ 정밀 대기", 1, 0),
+            ("sound_beep", "🔔 비프음", 1, 1),
+            ("log_message", "📋 로그", 1, 2),
+        ]
+
+        btn_style = """
+            QPushButton {
+                padding: 7px 10px;
+                font-size: 9.5pt;
+                font-weight: 500;
+                border: 1px solid #cbd5e1;
+                border-radius: 5px;
+                background-color: #f8fafc;
+                color: #1e293b;
+                min-height: 28px;
+            }
+            QPushButton:hover {
+                background-color: #e2e8f0;
+                border-color: #94a3b8;
+            }
+            QPushButton:checked {
+                background-color: #2563eb;
+                color: #ffffff;
+                font-weight: bold;
+                border: 1px solid #1d4ed8;
+            }
+        """
+
+        cur_type = self.action.action_type or "mouse_click"
+        for t_code, t_label, r, c in action_types_def:
+            btn = QPushButton(t_label)
+            btn.setCheckable(True)
+            btn.setStyleSheet(btn_style)
+            if t_code == cur_type:
+                btn.setChecked(True)
+            btn.clicked.connect(lambda checked, tc=t_code: self._on_type_button_clicked(tc))
+            self.btn_group_type.addButton(btn)
+            self.type_buttons[t_code] = btn
+            type_grid.addWidget(btn, r, c)
+
+        layout.addWidget(grp_type)
+
+        # 2. Dynamic containers in form
         form = QFormLayout()
         form.setSpacing(10)
 
-        # Action Type
-        self.combo_type = QComboBox()
-        self.combo_type.addItem("마우스 클릭 (좌/우/더블)", "mouse_click")
-        self.combo_type.addItem("마우스 드래그 앤 드롭", "mouse_drag")
-        self.combo_type.addItem("키보드 단축키/키 입력", "key_press")
-        self.combo_type.addItem("텍스트 타이핑", "text_type")
-        self.combo_type.addItem("대기 (Sleep/Delay)", "delay")
-        self.combo_type.addItem("비프 사운드", "sound_beep")
-        self.combo_type.addItem("로그 메시지", "log_message")
-
-        idx = self.combo_type.findData(self.action.action_type)
-        if idx >= 0:
-            self.combo_type.setCurrentIndex(idx)
-        self.combo_type.currentIndexChanged.connect(self._on_type_changed)
-        form.addRow("액션 유형:", self.combo_type)
-
-        # Dynamic containers
         # 1. Mouse Click fields
         self.grp_click = QGroupBox("마우스 클릭 설정")
         l_click = QFormLayout(self.grp_click)
@@ -152,17 +193,52 @@ class SingleActionDialog(QDialog):
         l_text.addRow("입력할 문자열:", self.txt_content)
         form.addRow(self.grp_text)
 
-        # 5. Delay fields
-        self.grp_delay = QGroupBox("대기 시간 설정")
-        l_delay = QFormLayout(self.grp_delay)
+        # 5. Delay fields: 누르기 쉬운 큰 -/+ 버튼 (0.5초, 1초 단위 제공)
+        self.grp_delay = QGroupBox("⏳ 대기 시간 설정 (초)")
+        v_delay = QVBoxLayout(self.grp_delay)
+        v_delay.setSpacing(6)
+
+        delay_btn_layout = QHBoxLayout()
+        delay_btn_layout.setSpacing(6)
+
+        btn_sub_1s = QPushButton("-1.0초")
+        btn_sub_1s.setToolTip("1.0초 감소")
+        btn_sub_1s.setStyleSheet("height: 36px; min-width: 60px; font-weight: bold; font-size: 10pt; color: #dc2626; background: #fef2f2; border: 1px solid #fca5a5; border-radius: 4px;")
+        btn_sub_1s.clicked.connect(lambda: self._adjust_delay(-1.0))
+        delay_btn_layout.addWidget(btn_sub_1s)
+
+        btn_sub_05s = QPushButton("-0.5초")
+        btn_sub_05s.setToolTip("0.5초 감소")
+        btn_sub_05s.setStyleSheet("height: 36px; min-width: 60px; font-weight: bold; font-size: 10pt; color: #ea580c; background: #fff7ed; border: 1px solid #fdba74; border-radius: 4px;")
+        btn_sub_05s.clicked.connect(lambda: self._adjust_delay(-0.5))
+        delay_btn_layout.addWidget(btn_sub_05s)
+
         self.spin_delay = QDoubleSpinBox()
-        self.spin_delay.setRange(0.01, 3600.0)
+        self.spin_delay.setRange(0.0, 3600.0)
+        self.spin_delay.setSingleStep(0.1)
+        self.spin_delay.setDecimals(2)
         self.spin_delay.setValue(self.action.delay_seconds)
         self.spin_delay.setSuffix(" 초")
-        l_delay.addRow("대기 시간:", self.spin_delay)
+        self.spin_delay.setAlignment(Qt.AlignCenter)
+        self.spin_delay.setStyleSheet("height: 36px; font-size: 11pt; font-weight: bold;")
+        delay_btn_layout.addWidget(self.spin_delay, 1)
+
+        btn_add_05s = QPushButton("+0.5초")
+        btn_add_05s.setToolTip("0.5초 증가")
+        btn_add_05s.setStyleSheet("height: 36px; min-width: 60px; font-weight: bold; font-size: 10pt; color: #16a34a; background: #f0fdf4; border: 1px solid #86efac; border-radius: 4px;")
+        btn_add_05s.clicked.connect(lambda: self._adjust_delay(+0.5))
+        delay_btn_layout.addWidget(btn_add_05s)
+
+        btn_add_1s = QPushButton("+1.0초")
+        btn_add_1s.setToolTip("1.0초 증가")
+        btn_add_1s.setStyleSheet("height: 36px; min-width: 60px; font-weight: bold; font-size: 10pt; color: #15803d; background: #dcfce7; border: 1px solid #4ade80; border-radius: 4px;")
+        btn_add_1s.clicked.connect(lambda: self._adjust_delay(+1.0))
+        delay_btn_layout.addWidget(btn_add_1s)
+
+        v_delay.addLayout(delay_btn_layout)
         form.addRow(self.grp_delay)
 
-        # 6. Log Message fields
+        # 6. Log Message fields (for log_message action type)
         self.grp_log = QGroupBox("로그 메시지 설정")
         l_log = QFormLayout(self.grp_log)
         self.txt_log = QLineEdit(self.action.log_text)
@@ -170,17 +246,17 @@ class SingleActionDialog(QDialog):
         l_log.addRow("로그 문장:", self.txt_log)
         form.addRow(self.grp_log)
 
-        # 7. Custom log output option for all actions
+        # 7. Custom log output option: 활성화 체크 안해도 바로 입력 가능, 비어있으면 자동 오프
         self.grp_custom_log = QGroupBox("💬 액션 로그 출력 옵션")
-        l_cl = QFormLayout(self.grp_custom_log)
-        self.chk_custom_log = QCheckBox("이 액션 실행 시 원하는 문장으로 로그 출력")
+        l_cl = QVBoxLayout(self.grp_custom_log)
+        l_cl.setSpacing(4)
+        lbl_cl_desc = QLabel("로그 문장 (비워두면 자동 꺼짐 / 입력 시 자동 활성화):")
+        lbl_cl_desc.setStyleSheet("color: #475569; font-size: 8.5pt;")
         self.txt_custom_log = QLineEdit(getattr(self.action, "custom_log", ""))
-        self.txt_custom_log.setPlaceholderText("로그에 출력할 문장 입력 (예: 1라운드 스킬 발동)")
-        self.chk_custom_log.setChecked(bool(getattr(self.action, "custom_log", "")))
-        self.txt_custom_log.setEnabled(self.chk_custom_log.isChecked())
-        self.chk_custom_log.toggled.connect(self.txt_custom_log.setEnabled)
-        l_cl.addRow(self.chk_custom_log)
-        l_cl.addRow("로그 문장:", self.txt_custom_log)
+        self.txt_custom_log.setPlaceholderText("원하는 로그 문장을 입력하세요 (예: 1라운드 스킬 발동, 비워두면 출력 안 함)")
+        self.txt_custom_log.setEnabled(True)
+        l_cl.addWidget(lbl_cl_desc)
+        l_cl.addWidget(self.txt_custom_log)
         form.addRow(self.grp_custom_log)
 
         # 8. Coordinate anti-ban options (for mouse_click & mouse_drag)
@@ -213,28 +289,42 @@ class SingleActionDialog(QDialog):
         btn_cancel = QPushButton("취소")
         btn_cancel.clicked.connect(self.reject)
         btn_ok = QPushButton("확인")
-        btn_ok.setStyleSheet("background-color: #1b5e20; color: white; font-weight: bold;")
+        btn_ok.setStyleSheet("background-color: #1b5e20; color: white; font-weight: bold; padding: 6px 16px;")
         btn_ok.clicked.connect(self._on_ok)
         btns.addWidget(btn_cancel)
         btns.addWidget(btn_ok)
         layout.addLayout(btns)
 
-    def _on_type_changed(self):
+    def _adjust_delay(self, delta: float):
+        """Adjusts delay seconds by delta and clamps to [0.0, 3600.0]."""
+        cur = self.spin_delay.value()
+        new_val = max(0.0, min(3600.0, round(cur + delta, 2)))
+        self.spin_delay.setValue(new_val)
+
+    def _on_type_button_clicked(self, action_type: str):
+        """Handles action type button click."""
+        self.action.action_type = action_type
         self._update_visibility()
 
     def _update_visibility(self):
-        current_type = self.combo_type.currentData()
+        current_type = self.action.action_type
         self.grp_click.setVisible(current_type in ("mouse_click", "mouse_drag"))
         self.grp_drag.setVisible(current_type == "mouse_drag")
         self.grp_key.setVisible(current_type == "key_press")
         self.grp_text.setVisible(current_type == "text_type")
-        self.grp_delay.setVisible(current_type == "delay")
         self.grp_log.setVisible(current_type == "log_message")
         self.grp_custom_log.setVisible(current_type != "log_message")
         self.grp_coord_antiban.setVisible(current_type in ("mouse_click", "mouse_drag"))
 
+        # 대기 시간 설정: delay 액션일 때는 주 대기 시간, 기타 액션일 때는 실행 후 대기 시간으로 항상 제공
+        if current_type == "delay":
+            self.grp_delay.setTitle("⏳ 정밀 대기 시간 설정 (초)")
+        else:
+            self.grp_delay.setTitle("⏳ 액션 실행 후 대기 시간 (초)")
+        self.grp_delay.setVisible(True)
+
     def _on_ok(self):
-        self.action.action_type = self.combo_type.currentData()
+        # Action type is already set via type button
         if self.action.action_type in ("mouse_click", "mouse_drag"):
             self.action.x = self.spin_x.value()
             self.action.y = self.spin_y.value()
@@ -258,13 +348,14 @@ class SingleActionDialog(QDialog):
         elif self.action.action_type == "text_type":
             self.action.text = self.txt_content.text()
 
-        elif self.action.action_type == "delay":
-            self.action.delay_seconds = self.spin_delay.value()
-
         elif self.action.action_type == "log_message":
             self.action.log_text = self.txt_log.text().strip()
 
-        self.action.custom_log = self.txt_custom_log.text().strip() if self.chk_custom_log.isChecked() else ""
+        # 대기 시간: 모든 액션에서 설정된 값 저장
+        self.action.delay_seconds = self.spin_delay.value()
+
+        # 커스텀 로그: 비어있으면 자동으로 "" (Off로 인식)
+        self.action.custom_log = self.txt_custom_log.text().strip()
 
         self.accept()
 

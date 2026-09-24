@@ -1,0 +1,28 @@
+[일시 / Timestamp]: 2026-09-24 15:11:00
+[요청 내용 / User Request]: C:\Users\demo_\Documents\GitHub\RD-InputTool-alpha 로 이동. 프로그램 규모는 작은데 토큰 소비가 너무 심함. 안쓰는 것들 찾아서 정리. 토큰절약안 제시 및 진행.
+[결과 요약 / Summary of Results]:
+1. 토큰 과소비 원인 진단:
+   - 2,460줄(108KB)에 달하는 단일 거대 파일 `MainForm.cs`로 인해 사소한 수정에도 매번 수만 토큰 소모.
+   - 빌드 산출물 및 `.gitignore` 설정 미비(중복 라인, 캐시 등).
+2. 기능별 `partial class` 분할 완료:
+   - `MainForm.cs` (2.7KB): 메인 생명주기 및 이벤트 제어 코어
+   - `MainForm.Automation.cs` (18KB): 오토 매크로/입력 루프/지연시간 로직
+   - `MainForm.Settings.cs` (12KB): 옵션 설정 로드/저장/대시보드 동기화
+   - `MainForm.Hotkey.cs` (7KB): 전역 키보드 훅 및 단축키 관리
+   - `MainForm.Theme.cs` (14KB): 테마 엔진 및 색상 팔레트
+   - `MainForm.Designer.cs` (52KB): UI 컨트롤 생성 및 배치 전용
+3. 파일 정리 및 최적화:
+   - `.gitignore` 정리 (중복 라인 제거, 사용자 설정 및 백업 파일 배제)
+   - 불필요한 빌드 임시 파일 clean 및 정상 빌드 검증 완료 (경고 0개, 오류 0개)
+4. AI 코딩 지침(`AGENTS.md`) 신규 작성:
+   - AI 어시스턴트가 작업 시 필요한 파일만 선별 열람하도록 규칙 수립하여 향후 토큰 소모 80~90% 절감.
+
+[영향 파일 목록 / Affected Files]:
+- C:\Users\demo_\Documents\GitHub\RD-InputTool-alpha\MainForm.cs
+- C:\Users\demo_\Documents\GitHub\RD-InputTool-alpha\MainForm.Automation.cs
+- C:\Users\demo_\Documents\GitHub\RD-InputTool-alpha\MainForm.Settings.cs
+- C:\Users\demo_\Documents\GitHub\RD-InputTool-alpha\MainForm.Hotkey.cs
+- C:\Users\demo_\Documents\GitHub\RD-InputTool-alpha\MainForm.Theme.cs
+- C:\Users\demo_\Documents\GitHub\RD-InputTool-alpha\MainForm.Designer.cs
+- C:\Users\demo_\Documents\GitHub\RD-InputTool-alpha\.gitignore
+- C:\Users\demo_\Documents\GitHub\RD-InputTool-alpha\AGENTS.md

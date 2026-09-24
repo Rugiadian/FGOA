@@ -175,6 +175,26 @@ class TestCoreModels(unittest.TestCase):
         self.assertEqual(orig_t, 1.5)
         self.assertGreaterEqual(final_t, 1.5)  # strictly +n seconds, never minus!
 
+        # 3. Action coordinate anti-ban defaults to "weak" (기본값 활성화 상태)
+        new_act = Action(action_type="mouse_click", x=100, y=100)
+        self.assertEqual(new_act.coord_anti_ban, "weak")
+
+        # 4. Project coordinate weak/strong settings serialization
+        proj_coord = Project(anti_ban_coord_weak=7, anti_ban_coord_strong=20)
+        d_coord = proj_coord.to_dict()
+        self.assertEqual(d_coord["anti_ban_coord_weak"], 7)
+        self.assertEqual(d_coord["anti_ban_coord_strong"], 20)
+
+        proj_coord_loaded = Project.from_dict(d_coord)
+        self.assertEqual(proj_coord_loaded.anti_ban_coord_weak, 7)
+        self.assertEqual(proj_coord_loaded.anti_ban_coord_strong, 20)
+
+        # 5. Legacy backward compatibility
+        act_legacy_false = Action.from_dict({"action_type": "mouse_click", "anti_ban": False})
+        self.assertEqual(act_legacy_false.coord_anti_ban, "none")
+        act_legacy_true = Action.from_dict({"action_type": "mouse_click", "anti_ban": True})
+        self.assertEqual(act_legacy_true.coord_anti_ban, "weak")
+
 
 if __name__ == "__main__":
     unittest.main()

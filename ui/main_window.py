@@ -20,8 +20,8 @@ from PyQt5.QtWidgets import (
     QFrame, QAbstractItemView, QShortcut, QDockWidget, QMenu,
     QAction, QInputDialog, QSizePolicy
 )
-from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence
-from PyQt5.QtCore import Qt, QTimer, QFileSystemWatcher, QProcess, QByteArray
+from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QDrag
+from PyQt5.QtCore import Qt, QTimer, QFileSystemWatcher, QProcess, QByteArray, pyqtSignal, QMimeData
 
 from core.models import Project, Scenario, Condition, Action, ColorPoint
 from core.window_manager import WindowManager, WindowInfo
@@ -38,6 +38,76 @@ from ui.preset_dialog import SavePresetDialog, PresetManagerDialog
 
 CONFIG_FILE = "fgoa_config.json"
 TEMP_RELOAD_FILE = "_temp_reload_project.json"
+
+
+class DraggableScenarioTableWidget(QTableWidget):
+    """QTableWidget supporting safe mouse drag-and-drop scenario row reordering without item loss."""
+    sig_row_reordered = pyqtSignal(int, int)  # (from_row, to_row)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._drag_start_pos = None
+        self._drag_start_row = -1
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_start_pos = event.pos()
+            self._drag_start_row = self.rowAt(event.pos().y())
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (
+            (event.buttons() & Qt.LeftButton)
+            and self._drag_start_pos is not None
+            and self._drag_start_row >= 0
+        ):
+            dist = (event.pos() - self._drag_start_pos).manhattanLength()
+            if dist >= QApplication.startDragDistance():
+                drag = QDrag(self)
+                mime = QMimeData()
+                mime.setData("application/x-fgoa-scen-row", str(self._drag_start_row).encode("utf-8"))
+                drag.setMimeData(mime)
+                self._drag_start_pos = None
+                drag.exec_(Qt.MoveAction)
+                self._drag_start_row = -1
+                return
+        super().mouseMoveEvent(event)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat("application/x-fgoa-scen-row"):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasFormat("application/x-fgoa-scen-row"):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasFormat("application/x-fgoa-scen-row"):
+            data_bytes = event.mimeData().data("application/x-fgoa-scen-row").data()
+            try:
+                from_row = int(data_bytes.decode("utf-8"))
+            except Exception:
+                from_row = -1
+            to_row = self.rowAt(event.pos().y())
+            if to_row < 0:
+                to_row = self.rowCount() - 1
+            if to_row < 0:
+                to_row = 0
+            event.acceptProposedAction()
+            if from_row != to_row and from_row >= 0 and to_row >= 0:
+                self.sig_row_reordered.emit(from_row, to_row)
+        else:
+            event.ignore()
 
 
 class MainWindow(QMainWindow):
@@ -422,8 +492,9 @@ class MainWindow(QMainWindow):
         l_layout.addLayout(tb_layout)
 
         # Scenario Table (Full height)
-        self.tbl_scenarios = QTableWidget()
+        self.tbl_scenarios = DraggableScenarioTableWidget()
         self.tbl_scenarios.setColumnCount(7)
+        self.tbl_scenarios.sig_row_reordered.connect(self._on_scenario_row_reordered)
         self.tbl_scenarios.setHorizontalHeaderLabels([
             "순서", "고유 #", "활성", "시나리오 이름", "인식 조건 (Eye)", "분기 (일치/불일치)", "액션"
         ])
@@ -590,13 +661,12 @@ class MainWindow(QMainWindow):
 
         c_layout.addSpacing(15)
 
-        self.chk_anti_ban = QCheckBox("🛡️ 안티밴")
+        self.chk_anti_ban = QCheckBox("🛡️ 타임 안티밴")
         self.chk_anti_ban.setChecked(self.project.anti_ban_enabled)
         self.chk_anti_ban.setToolTip(
-            "시나리오 재생 안티밴 모드 (시나리오 전체 일괄 적용):\n"
-            "- 액션 시퀀스 전체에 안티밴 일괄 적용\n"
-            "- 마우스 좌표에 무작위 픽셀 오프셋 분산\n"
-            "- 액션 실행 및 대기 시간에 +n초 가변 지연시간 무작위 추가 (단축 없이 +0~+n초)"
+            "시나리오 재생 타임 안티밴 모드 (시나리오 전역 일괄 적용):\n"
+            "- 시나리오 재생 시 액션 지연 시간에 +n초 가변 지연시간 무작위 추가 (단축 없이 +0~+n초)\n"
+            "- 좌표 오프셋은 각 액션별(해제/약/강)로 지정됩니다."
         )
         self.chk_anti_ban.toggled.connect(self._on_anti_ban_toggled)
         c_layout.addWidget(self.chk_anti_ban)
@@ -611,10 +681,36 @@ class MainWindow(QMainWindow):
         self.spin_anti_ban_offset.setSuffix(" 초")
         init_offset = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0)))
         self.spin_anti_ban_offset.setValue(init_offset)
-        self.spin_anti_ban_offset.setToolTip("안티밴 적용 시 무작위로 추가될 최대 지연시간 (+0.0 ~ +n초)")
+        self.spin_anti_ban_offset.setToolTip("타임 안티밴 적용 시 무작위로 추가될 최대 지연시간 (+0.0 ~ +n초)")
         self.spin_anti_ban_offset.setEnabled(self.project.anti_ban_enabled)
         self.spin_anti_ban_offset.valueChanged.connect(self._on_anti_ban_offset_changed)
         c_layout.addWidget(self.spin_anti_ban_offset)
+
+        c_layout.addSpacing(15)
+
+        # Coordinate Anti-ban Global Strength (강약 조절)
+        c_layout.addWidget(QLabel("🎯 좌표 오프셋:"))
+        lbl_w = QLabel("약: ±")
+        lbl_w.setStyleSheet("font-size: 8.5pt;")
+        c_layout.addWidget(lbl_w)
+        self.spin_coord_weak = QSpinBox()
+        self.spin_coord_weak.setRange(1, 100)
+        self.spin_coord_weak.setValue(getattr(self.project, "anti_ban_coord_weak", 5))
+        self.spin_coord_weak.setSuffix(" px")
+        self.spin_coord_weak.setToolTip("액션의 좌표 안티밴이 '약'일 때 적용할 무작위 픽셀 오차 (±N px)")
+        self.spin_coord_weak.valueChanged.connect(self._on_coord_weak_changed)
+        c_layout.addWidget(self.spin_coord_weak)
+
+        lbl_s = QLabel("강: ±")
+        lbl_s.setStyleSheet("font-size: 8.5pt;")
+        c_layout.addWidget(lbl_s)
+        self.spin_coord_strong = QSpinBox()
+        self.spin_coord_strong.setRange(1, 200)
+        self.spin_coord_strong.setValue(getattr(self.project, "anti_ban_coord_strong", 15))
+        self.spin_coord_strong.setSuffix(" px")
+        self.spin_coord_strong.setToolTip("액션의 좌표 안티밴이 '강'일 때 적용할 무작위 픽셀 오차 (±N px)")
+        self.spin_coord_strong.valueChanged.connect(self._on_coord_strong_changed)
+        c_layout.addWidget(self.spin_coord_strong)
 
         c_layout.addStretch()
 
@@ -1402,6 +1498,18 @@ class MainWindow(QMainWindow):
         self._refresh_scenario_table()
         self.tbl_scenarios.selectRow(row + 1)
 
+    def _on_scenario_row_reordered(self, from_row: int, to_row: int):
+        """Reorders scenarios in the project via drag-and-drop."""
+        if not self.project or not self.project.scenarios or from_row == to_row:
+            return
+        scens = self.project.scenarios
+        if 0 <= from_row < len(scens) and 0 <= to_row < len(scens):
+            self._push_scenario_undo_state(f"시나리오 #{scens[from_row].scenario_number} 드래그 이동")
+            scen = scens.pop(from_row)
+            scens.insert(to_row, scen)
+            self._refresh_scenario_table()
+            self.tbl_scenarios.selectRow(to_row)
+
     # ==========================================
     # Target Window Management
     # ==========================================
@@ -1592,6 +1700,12 @@ class MainWindow(QMainWindow):
         self.project.anti_ban_offset_seconds = val
         self.project.anti_ban_max_delay = val
 
+    def _on_coord_weak_changed(self, val: int):
+        self.project.anti_ban_coord_weak = val
+
+    def _on_coord_strong_changed(self, val: int):
+        self.project.anti_ban_coord_strong = val
+
     # ==========================================
     # Save & Open Project
     # ==========================================
@@ -1627,6 +1741,10 @@ class MainWindow(QMainWindow):
                 if hasattr(self, "spin_anti_ban_offset"):
                     self.spin_anti_ban_offset.setValue(cur_off)
                     self.spin_anti_ban_offset.setEnabled(self.project.anti_ban_enabled)
+                if hasattr(self, "spin_coord_weak"):
+                    self.spin_coord_weak.setValue(getattr(self.project, "anti_ban_coord_weak", 5))
+                if hasattr(self, "spin_coord_strong"):
+                    self.spin_coord_strong.setValue(getattr(self.project, "anti_ban_coord_strong", 15))
                 self._refresh_scenario_table()
                 if self.project.scenarios:
                     self.tbl_scenarios.selectRow(0)
