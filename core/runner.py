@@ -137,7 +137,7 @@ class WorkflowRunner(QThread):
                     # 2. Check screen recognition condition (until_match / while_match)
                     eff_cond = scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition
                     if scen.loop_mode in ("until_match", "while_match") and eff_cond and eff_cond.points:
-                        matched, _ = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
+                        matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
                         if scen.loop_mode == "until_match" and matched:
                             end_idx = self.project.find_matching_loop_end(current_index)
                             self.sig_log.emit("SUCCESS", f"🔁 [루프 s{scen.scenario_number}] '{scen.name}': 탈출 인식 조건 충족! 루프 종료.")
@@ -147,7 +147,9 @@ class WorkflowRunner(QThread):
                             continue
                         elif scen.loop_mode == "while_match" and not matched:
                             end_idx = self.project.find_matching_loop_end(current_index)
-                            self.sig_log.emit("INFO", f"🔁 [루프 s{scen.scenario_number}] '{scen.name}': 지속 조건 불일치. 루프 종료.")
+                            mismatch_info = ConditionEvaluator.format_mismatch_log(point_results)
+                            mismatch_tail = f" [{mismatch_info}]" if mismatch_info else ""
+                            self.sig_log.emit("INFO", f"🔁 [루프 s{scen.scenario_number}] '{scen.name}': 지속 조건 불일치{mismatch_tail}. 루프 종료.")
                             if scen.id in loop_counters:
                                 del loop_counters[scen.id]
                             current_index = (end_idx + 1) if end_idx is not None else (current_index + 1)
@@ -192,6 +194,7 @@ class WorkflowRunner(QThread):
                 attempt = 0
                 max_attempts = (scen.retry_max_count + 1) if (scen.on_mismatch == "retry") else 1
                 eff_cond = scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition
+                point_results = []
 
                 while attempt < max_attempts and self._is_running:
                     matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
@@ -199,7 +202,9 @@ class WorkflowRunner(QThread):
                         break
                     attempt += 1
                     if attempt < max_attempts and self._is_running:
-                        self.sig_log.emit("INFO", f"⏳ [#{scen.step_number}] '{scen.name}' 조건 불일치 - 재시도 대기 ({attempt}/{scen.retry_max_count}회, {scen.retry_interval_sec:.1f}초 후 재검사)...")
+                        mismatch_info = ConditionEvaluator.format_mismatch_log(point_results)
+                        mismatch_str = f"\n     └ 불일치: {mismatch_info}" if mismatch_info else ""
+                        self.sig_log.emit("INFO", f"⏳ [#{scen.step_number}] '{scen.name}' 조건 불일치{mismatch_str} - 재시도 대기 ({attempt}/{scen.retry_max_count}회, {scen.retry_interval_sec:.1f}초 후 재검사)...")
                         time.sleep(scen.retry_interval_sec)
 
                 # Handle evaluation outcome
@@ -240,9 +245,11 @@ class WorkflowRunner(QThread):
 
                 else:
                     self.sig_scenario_completed.emit(scen.id, "mismatch")
+                    mismatch_info = ConditionEvaluator.format_mismatch_log(point_results)
+                    mismatch_str = f" [불일치: {mismatch_info}]" if mismatch_info else ""
                     if scen.on_mismatch == "retry":
                         fail_action = getattr(scen, "retry_fail_action", "stop")
-                        self.sig_log.emit("WARN", f"[#{scen.step_number}] '{scen.name}' 조건 재시도({scen.retry_max_count}회) 모두 소진! (실패 처리: {fail_action})")
+                        self.sig_log.emit("WARN", f"[#{scen.step_number}] '{scen.name}' 조건 재시도({scen.retry_max_count}회) 모두 소진!{mismatch_str} (실패 처리: {fail_action})")
                         if fail_action == "stop":
                             self.sig_log.emit("ERROR", f"[#{scen.step_number}] 조건 재시도 실패로 오토 실행을 정지합니다.")
                             self._is_running = False

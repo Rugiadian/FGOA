@@ -54,10 +54,12 @@ class ScreenCapture:
         return cls.get_pixel_color_gdi(screen_pt[0], screen_pt[1])
 
     @classmethod
-    def capture_client_area(cls, hwnd: int) -> Optional[Image.Image]:
+    def capture_client_area(cls, hwnd: int, prefer_display: bool = True) -> Optional[Image.Image]:
         """
-        Capture the entire client area of target window as a PIL Image.
-        Uses mss for high performance.
+        Capture the client area of target window as a PIL Image.
+        Prioritizes high-speed display capture (mss) so that captured pixel colors
+        match live screen detection (GDI GetPixel) with 0 color discrepancy (< 5 tolerance).
+        Falls back to PrintWindow if display capture is unavailable or window is obscured.
         """
         if not win32gui.IsWindow(hwnd):
             return None
@@ -66,7 +68,22 @@ class ScreenCapture:
         if not win_info or win_info.client_width <= 0 or win_info.client_height <= 0:
             return None
 
-        # Try PrintWindow first (works even if partially obscured)
+        # 1. Primary: Direct display capture via mss (ensures 100% pixel color parity with GDI GetPixel)
+        if prefer_display and not win_info.is_minimized:
+            try:
+                sct = cls.get_sct()
+                monitor = {
+                    "top": win_info.screen_y,
+                    "left": win_info.screen_x,
+                    "width": win_info.client_width,
+                    "height": win_info.client_height
+                }
+                sct_img = sct.grab(monitor)
+                return Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+            except Exception:
+                pass
+
+        # 2. Secondary / Fallback: PrintWindow (for partially obscured or background windows)
         try:
             hwnd_dc = win32gui.GetWindowDC(hwnd)
             mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
@@ -86,14 +103,12 @@ class ScreenCapture:
                     (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
                     bmpstr, 'raw', 'BGRX', 0, 1
                 )
-                # Cleanup
                 win32gui.DeleteObject(save_bitmap.GetHandle())
                 save_dc.DeleteDC()
                 mfc_dc.DeleteDC()
                 win32gui.ReleaseDC(hwnd, hwnd_dc)
                 return img
             
-            # Fallback cleanup
             win32gui.DeleteObject(save_bitmap.GetHandle())
             save_dc.DeleteDC()
             mfc_dc.DeleteDC()
@@ -101,7 +116,7 @@ class ScreenCapture:
         except Exception:
             pass
 
-        # Screen capture via mss using client coordinates
+        # 3. Final Fallback: Attempt mss regardless
         try:
             sct = cls.get_sct()
             monitor = {

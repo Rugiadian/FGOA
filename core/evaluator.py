@@ -111,6 +111,39 @@ class ConditionEvaluator:
     evaluate_condition = evaluate
 
     @staticmethod
+    def format_mismatch_log(point_results: List[Dict[str, Any]], max_items: int = 3) -> str:
+        """
+        Formats mismatched points with coordinates, actual vs target RGB, and tolerance for user logs.
+        Example:
+            (120, 340) 감지 RGB(15,25,40) ≠ 기준 RGB(200,100,50) [오차: R185, G75, B10 / 허용: ±15]
+        """
+        failed_pts = [p for p in point_results if not p.get("passed", False)]
+        if not failed_pts:
+            return ""
+
+        parts = []
+        for idx, p in enumerate(failed_pts[:max_items], 1):
+            x, y = p.get("x", 0), p.get("y", 0)
+            target = p.get("target_rgb", (0, 0, 0))
+            actual = p.get("actual_rgb", (0, 0, 0))
+            tol = p.get("tolerance", 15)
+            diff_r = abs(actual[0] - target[0])
+            diff_g = abs(actual[1] - target[1])
+            diff_b = abs(actual[2] - target[2])
+            mode = p.get("match_mode", "match")
+            mode_tag = " [불일치검사]" if mode == "not_match" else ""
+            parts.append(
+                f"({x}, {y}) 감지 RGB({actual[0]},{actual[1]},{actual[2]}) ≠ "
+                f"기준 RGB({target[0]},{target[1]},{target[2]}) "
+                f"[오차: R{diff_r}, G{diff_g}, B{diff_b} / 허용: ±{tol}]{mode_tag}"
+            )
+
+        if len(failed_pts) > max_items:
+            parts.append(f"...외 {len(failed_pts) - max_items}개 불일치")
+
+        return " | ".join(parts)
+
+    @staticmethod
     def are_conditions_duplicate(cond1: Condition, cond2: Condition, coord_thresh: int = 2, color_thresh: int = 5) -> bool:
         """
         Checks whether two conditions have effectively identical detection points

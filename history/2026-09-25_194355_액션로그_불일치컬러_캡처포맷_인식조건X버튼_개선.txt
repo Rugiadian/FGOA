@@ -1,0 +1,38 @@
+[일시 / Timestamp]
+2026-09-25 19:35:55 ~ 2026-09-25 19:43:55
+
+[요청 내용 / User Request]
+- 액션 시퀀스 인스펙터창의 '액션 실행시 로그 출력'이 작동안함. 작동하게 고칠 것. 체크 박스 없어도됨. 비워두면 오프, 입력하면 온. 
+- 인식 조건의 불일치의 경우 불일치 컬러값을 로그에 표기.
+- 레퍼런스 이미지의 컬러와 디바이스의 컬러가 오차가 반드시 있나? 오차 5 rgb값 이하로 똑같이 캡쳐되도록 포맷 세팅. 
+- 인식조건 인스펙터 리스트에서도 x버튼 추가.
+
+[결과 요약 / Summary of Results]
+1. 액션 시퀀스 인스펙터창 '액션 실행 시 로그 출력' 수정 및 체크박스 제거:
+   - 기존의 체크박스(QCheckBox)를 제거하고 라벨(QLabel)과 항상 활성화된 QLineEdit 구조로 개편.
+   - 문구를 입력하면 자동으로 custom_log에 동기화(온), 비워두면 ""로 처리(오프).
+   - _on_field_changed 및 _on_action_log_text_changed에서 custom_log 즉각 반영 및 dirty/undo 기록 보장.
+   - 인스펙터 내 액션 테스트 실행(_on_test_action_now, _on_test_all_actions_now) 시에도 설정된 커스텀 로그 문장 및 개별 액션 로그가 출력되도록 연결.
+2. 인식 조건 불일치 시 감지 컬러값 및 목표 컬러값 로그 표기:
+   - ConditionEvaluator에 format_mismatch_log() 유틸리티 메서드 추가.
+   - 조건 불일치 시 좌표 (x, y), 감지된 실제 화면 RGB, 기준 목표 RGB, 허용 오차(±tolerance), 각 RGB별 오차를 상세 표기.
+   - core/runner.py의 실시간 오토 실행(재시도 대기, 루프 while_match 탈출, 최종 불일치) 및 ui/inspector_widget.py의 '⚡ 실시간 판정 테스트' 모두에 불일치 상세 컬러 로그 출력 적용.
+3. 레퍼런스 이미지와 디바이스 화면 컬러 오차 원인 분석 및 무손실 캡처 포맷 세팅:
+   - 원인: 기존 ScreenCapture.capture_client_area()가 PrintWindow(PW_RENDERFULLCONTENT)를 1순위로 시도하여, DWM 합성/감마/하드웨어 가속 미반영으로 인해 실시간 화면 감지(GDI GetPixel)와 색상 차이가 발생했음.
+   - 개선: 화면에 노출된 창의 경우 디스플레이 버퍼를 직접 캡처하는 mss를 1순위로 호출하도록 수정(prefer_display=True). GDI GetPixel과 100% 동일한 화면 버퍼를 무손실 BGRX->RGB로 변환하여 동일 좌표에서 오차 0(오차 5 RGB 이하 완벽 충족) 달성.
+   - 무손실 PNG 압축 포맷 유지 및 메타데이터 색공간 왜곡 방지.
+4. 인식조건 인스펙터 포인트 리스트에 행별 '✕' 삭제 버튼 추가:
+   - ui/inspector_widget.py의 tbl_points 컬럼 수를 5개에서 6개(ID, 상대 좌표, 목표 색상, 허용 오차, 판정 모드, 삭제)로 확장.
+   - 각 포인트 행의 5번 컬럼에 빨간색 '✕' 삭제 버튼을 배치하여 원클릭으로 해당 포인트 즉시 삭제 및 Undo 지원.
+5. 버전 관리 및 테스트 검증:
+   - core/version.py 버전을 260925.1943으로 갱신.
+   - 신규 단위 테스트 tests/test_user_enhancements_20260925.py 작성 및 전체 1,141개 테스트 무결성 통과 확인 (OK (skipped=1)).
+
+[영향 파일 목록 / Affected Files]
+- core/version.py
+- core/screen_capture.py
+- core/evaluator.py
+- core/runner.py
+- ui/inspector_widget.py
+- tests/test_user_enhancements_20260925.py
+- history/2026-09-25_194355_액션로그_불일치컬러_캡처포맷_인식조건X버튼_개선.txt

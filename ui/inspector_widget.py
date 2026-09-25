@@ -754,8 +754,8 @@ class InspectorWidget(QWidget):
 
         # Points Table
         self.tbl_points = QTableWidget()
-        self.tbl_points.setColumnCount(5)
-        self.tbl_points.setHorizontalHeaderLabels(["ID", "상대 좌표 (X, Y)", "목표 색상", "허용 오차", "판정 모드"])
+        self.tbl_points.setColumnCount(6)
+        self.tbl_points.setHorizontalHeaderLabels(["ID", "상대 좌표 (X, Y)", "목표 색상", "허용 오차", "판정 모드", "삭제"])
         hdr_pts = self.tbl_points.horizontalHeader()
         hdr_pts.setSectionResizeMode(0, QHeaderView.Fixed)
         hdr_pts.resizeSection(0, 32)
@@ -764,6 +764,8 @@ class InspectorWidget(QWidget):
         hdr_pts.setSectionResizeMode(3, QHeaderView.Fixed)
         hdr_pts.resizeSection(3, 70)
         hdr_pts.setSectionResizeMode(4, QHeaderView.Stretch)
+        hdr_pts.setSectionResizeMode(5, QHeaderView.Fixed)
+        hdr_pts.resizeSection(5, 38)
         self.tbl_points.verticalHeader().setDefaultSectionSize(24)
         self.tbl_points.setSelectionBehavior(QTableWidget.SelectRows)
         self.tbl_points.setMinimumHeight(80)
@@ -1101,17 +1103,16 @@ class InspectorWidget(QWidget):
         act_ctrl_row2.addStretch()
         layout.addLayout(act_ctrl_row2)
 
-        # Row 3: Action Custom Log Option (항상 입력 가능, 비어있으면 자동 꺼짐)
+        # Row 3: Action Custom Log Option (비워두면 오프, 입력하면 온)
         log_bar = QHBoxLayout()
         log_bar.setSpacing(6)
-        self.chk_action_log = QCheckBox("액션 실행 시 로그 출력:")
-        self.chk_action_log.setToolTip("이 시나리오의 액션들이 실행될 때 로그 창에 원하는 문장을 출력합니다. (문장을 입력하면 자동으로 켜집니다)")
+        lbl_action_log = QLabel("💬 액션 실행 시 로그 출력:")
+        lbl_action_log.setToolTip("이 시나리오의 액션들이 실행될 때 로그 창에 출력할 문장입니다. (비워두면 오프, 입력하면 온)")
         self.txt_action_log = QLineEdit()
         self.txt_action_log.setPlaceholderText("원하는 로그 문장을 입력하세요 (비워두면 출력 안 함)")
         self.txt_action_log.setEnabled(True)
-        self.chk_action_log.toggled.connect(self._on_action_log_toggled)
         self.txt_action_log.textChanged.connect(self._on_action_log_text_changed)
-        log_bar.addWidget(self.chk_action_log)
+        log_bar.addWidget(lbl_action_log)
         log_bar.addWidget(self.txt_action_log, 1)
         layout.addLayout(log_bar)
 
@@ -1235,12 +1236,9 @@ class InspectorWidget(QWidget):
 
             # 5. Action Custom Log
             custom_log = getattr(scenario, "custom_log", "")
-            self.chk_action_log.blockSignals(True)
             self.txt_action_log.blockSignals(True)
-            self.chk_action_log.setChecked(bool(custom_log))
             self.txt_action_log.setText(custom_log)
-            self.txt_action_log.setEnabled(bool(custom_log))
-            self.chk_action_log.blockSignals(False)
+            self.txt_action_log.setEnabled(True)
             self.txt_action_log.blockSignals(False)
 
             # 6. Update 50px Reference Thumbnails (Condition Card & Action Card)
@@ -1488,16 +1486,12 @@ class InspectorWidget(QWidget):
             self._update_reference_thumbnails()
 
     def _on_action_log_toggled(self, checked: bool):
-        if not self._is_loading and self.current_scenario:
-            self.current_scenario.custom_log = self.txt_action_log.text().strip() if checked else ""
-            self._on_field_changed()
+        # Kept for backward compatibility
+        pass
 
     def _on_action_log_text_changed(self, text: str):
-        clean = text.strip()
-        self.chk_action_log.blockSignals(True)
-        self.chk_action_log.setChecked(bool(clean))
-        self.chk_action_log.blockSignals(False)
         if not self._is_loading and self.current_scenario:
+            clean = text.strip()
             self.current_scenario.custom_log = clean
             self._on_field_changed()
 
@@ -1588,6 +1582,14 @@ class InspectorWidget(QWidget):
             combo_m.setCurrentIndex(1 if pt.match_mode == "not_match" else 0)
             combo_m.currentIndexChanged.connect(lambda idx, p=pt: self._on_point_mode_changed(p, idx))
             self.tbl_points.setCellWidget(row, 4, combo_m)
+
+            # 5. Delete Button (✕)
+            btn_del = QPushButton("✕")
+            btn_del.setToolTip("이 인식 조건 포인트 삭제")
+            btn_del.setFixedSize(24, 22)
+            btn_del.setStyleSheet("color: #ef4444; font-weight: bold; border: 1px solid #fca5a5; border-radius: 3px; background-color: #fef2f2; padding: 0;")
+            btn_del.clicked.connect(lambda _, p=pt: self._on_delete_single_point(p))
+            self.tbl_points.setCellWidget(row, 5, btn_del)
 
     # ==========================================
     # Condition (Module) Management Methods
@@ -2062,6 +2064,8 @@ class InspectorWidget(QWidget):
         self.current_scenario.retry_max_count = self.spin_retries.value()
         self.current_scenario.retry_interval_sec = self.spin_retry_sec.value()
         self.current_scenario.post_delay_seconds = self.spin_post_delay.value()
+        if hasattr(self, "txt_action_log"):
+            self.current_scenario.custom_log = self.txt_action_log.text().strip()
 
         if self.current_scenario.condition:
             self.current_scenario.condition.logic_operator = self.combo_cond_logic.currentData()
@@ -2240,6 +2244,17 @@ class InspectorWidget(QWidget):
         self.tbl_points.selectRow(len(eff_cond.points) - 1)
         self._on_field_changed()
 
+    def _on_delete_single_point(self, pt: ColorPoint):
+        eff_cond = self._get_active_condition()
+        if not self.current_scenario or not eff_cond:
+            return
+        if pt in eff_cond.points:
+            self._record_undo_state()
+            eff_cond.points.remove(pt)
+            self._refresh_points_table()
+            self._on_field_changed()
+            self.sig_log.emit("INFO", f"🗑️ 인식 조건 포인트 ({pt.x}, {pt.y}) 삭제됨")
+
     def _on_delete_point(self):
         eff_cond = self._get_active_condition()
         if not self.current_scenario or not eff_cond:
@@ -2249,9 +2264,11 @@ class InspectorWidget(QWidget):
             return
         row = rows[0].row()
         if 0 <= row < len(eff_cond.points):
+            self._record_undo_state()
             del eff_cond.points[row]
-        self._refresh_points_table()
-        self._on_field_changed()
+            self._refresh_points_table()
+            self._on_field_changed()
+            self.sig_log.emit("INFO", f"🗑️ 선택한 인식 조건 포인트 삭제됨")
 
     def _on_test_condition_now(self):
         eff_cond = self._get_active_condition()
@@ -2276,7 +2293,9 @@ class InspectorWidget(QWidget):
                 fail_count = sum(1 for d in details if not d.get("passed", False))
                 self.lbl_cond_test_result.setText(f"❌ [불일치] 총 {len(cond.points)}개 중 {fail_count}개 포인트 불일치")
                 self.lbl_cond_test_result.setStyleSheet("color: #dc2626; font-weight: bold;")
-                self.sig_log.emit("WARN", f"[{self.current_scenario.name}] 실시간 판정 테스트: 불일치 ({fail_count}개 포인트 오차 초과)")
+                mismatch_info = ConditionEvaluator.format_mismatch_log(details, max_items=5)
+                mismatch_str = f"\n  └ 불일치: {mismatch_info}" if mismatch_info else ""
+                self.sig_log.emit("WARN", f"[{self.current_scenario.name}] 실시간 판정 테스트: 불일치 ({fail_count}개 포인트 오차 초과){mismatch_str}")
         except Exception as e:
             self.lbl_cond_test_result.setVisible(True)
             self.lbl_cond_test_result.setText(f"⚠️ 판정 오류: {e}")
@@ -2545,6 +2564,11 @@ class InspectorWidget(QWidget):
             act_msg = f"{act.get_summary()}{coord_str}{time_str}"
 
         try:
+            if act.action_type == "log_message":
+                self.sig_log.emit("USER", f"  [사용자 로그] {act.log_text}")
+            elif getattr(act, "custom_log", ""):
+                self.sig_log.emit("USER", f"  [사용자 로그] {act.custom_log}")
+
             InputController.execute_action(
                 act, self.target_hwnd,
                 apply_anti_ban=use_anti_ban,
@@ -2571,6 +2595,9 @@ class InspectorWidget(QWidget):
 
         total = len(actions)
         self.sig_log.emit("INFO", f"▶ [{self.current_scenario.name}] 전체 액션 시퀀스 테스트 시작 (총 {total}개)...")
+        scen_log = self.txt_action_log.text().strip() if hasattr(self, "txt_action_log") else getattr(self.current_scenario, "custom_log", "")
+        if scen_log:
+            self.sig_log.emit("USER", f"  [액션 로그] {scen_log}")
 
         if hasattr(self, "btn_test_all_act"):
             self.btn_test_all_act.setEnabled(False)
@@ -2610,6 +2637,11 @@ class InspectorWidget(QWidget):
                     act_msg = f"{act.get_summary()}{coord_str}{time_str}"
 
                 self.sig_log.emit("ACTION", f"  [{idx}/{total}] 액션 실행: {act_msg}")
+
+                if act.action_type == "log_message":
+                    self.sig_log.emit("USER", f"  [사용자 로그] {act.log_text}")
+                elif getattr(act, "custom_log", ""):
+                    self.sig_log.emit("USER", f"  [사용자 로그] {act.custom_log}")
 
                 if act.action_type == "delay" and act.delay_seconds > 0.05:
                     remaining = sleep_total
