@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import (
     QFrame, QAbstractItemView, QShortcut, QDockWidget, QMenu,
     QAction, QInputDialog, QSizePolicy, QApplication, QTabWidget, QStyle
 )
-from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QDrag, QCursor
+from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QDrag, QCursor, QPixmap
 from PyQt5.QtCore import Qt, QTimer, QFileSystemWatcher, QProcess, QByteArray, pyqtSignal, QMimeData
 
 from core.models import Project, Scenario, Condition, Action, ColorPoint, ActionSequence
@@ -37,6 +37,7 @@ from ui.widgets.color_badge import WarningBadge
 from ui.widgets.flow_layout import FlowLayout
 from ui.preset_dialog import SavePresetDialog, PresetManagerDialog
 from ui.action_overlay import ActionOverlayWindow
+from core.path_utils import to_absolute_path, to_relative_path
 
 
 CONFIG_FILE = "fgoa_config.json"
@@ -70,8 +71,8 @@ class DraggableScenarioTableWidget(QTableWidget):
             return
 
         # Fixed-width compact columns:
-        # 0: 순서 (34px), 1: 고유 ID (s1, s2...) (48px), 2: 활성 (38px)
-        fixed_sum = 34 + 48 + 38
+        # 0: 스냅샷 (48px), 1: 고유 ID (s1, s2...) (48px), 2: 활성 (38px)
+        fixed_sum = 48 + 48 + 38
         rem = max(320, w - fixed_sum)
 
         # Distribute remaining width proportionally:
@@ -82,7 +83,7 @@ class DraggableScenarioTableWidget(QTableWidget):
         w_branch = max(65, rem - w_name - w_cond - w_act)
 
         header = self.horizontalHeader()
-        header.resizeSection(0, 34)
+        header.resizeSection(0, 48)
         header.resizeSection(1, 48)
         header.resizeSection(2, 38)
         header.resizeSection(3, w_name)
@@ -540,7 +541,7 @@ class MainWindow(QMainWindow):
         self.tbl_scenarios.setColumnCount(7)
         self.tbl_scenarios.sig_row_reordered.connect(self._on_scenario_row_reordered)
         self.tbl_scenarios.setHorizontalHeaderLabels([
-            "순서", "고유 ID", "활성", "시나리오 이름", "인식조건 모듈", "액션시퀀스 모듈", "분기"
+            "스냅샷", "고유 ID", "활성", "시나리오 이름", "인식조건 모듈", "액션시퀀스 모듈", "분기"
         ])
         
         # Responsive header resizing (Interactive mode allowing user adjustment and dynamic proportionality)
@@ -1087,11 +1088,35 @@ class MainWindow(QMainWindow):
 
     def _update_table_row(self, row: int, scen: Scenario, depth: int = 0):
 
-        # 0. Step # (실행 순서 번호)
-        it_num = QTableWidgetItem(str(scen.step_number))
-        it_num.setTextAlignment(Qt.AlignCenter)
-        it_num.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-        self.tbl_scenarios.setItem(row, 0, it_num)
+        # 0. Snapshot (레퍼런스 이미지 스냅샷 - 인식조건 이미지 기본값, 없으면 빈칸)
+        eff_ref = scen.get_effective_reference_image(self.project)
+        abs_ref = to_absolute_path(eff_ref) if eff_ref else None
+        if abs_ref and os.path.isfile(abs_ref):
+            pix = QPixmap(abs_ref)
+            if not pix.isNull():
+                thumb = pix.scaled(44, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                lbl_thumb = QLabel()
+                lbl_thumb.setPixmap(thumb)
+                lbl_thumb.setAlignment(Qt.AlignCenter)
+                lbl_thumb.setToolTip(f"📸 레퍼런스 스냅샷: {os.path.basename(abs_ref)}")
+                lbl_thumb.setStyleSheet("background-color: transparent;")
+
+                box = QWidget()
+                bl = QHBoxLayout(box)
+                bl.setContentsMargins(1, 1, 1, 1)
+                bl.setAlignment(Qt.AlignCenter)
+                bl.addWidget(lbl_thumb)
+                self.tbl_scenarios.setCellWidget(row, 0, box)
+            else:
+                self.tbl_scenarios.setCellWidget(row, 0, None)
+                it_empty = QTableWidgetItem("")
+                it_empty.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                self.tbl_scenarios.setItem(row, 0, it_empty)
+        else:
+            self.tbl_scenarios.setCellWidget(row, 0, None)
+            it_empty = QTableWidgetItem("")
+            it_empty.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.tbl_scenarios.setItem(row, 0, it_empty)
 
         # 1. Scenario # (시나리오 고유 번호)
         it_uid = QTableWidgetItem(f"s{scen.scenario_number}")
@@ -1516,11 +1541,15 @@ class MainWindow(QMainWindow):
             self.inspector._refresh_points_table()
 
     def _on_scenario_cell_double_clicked(self, row: int, col: int):
-        """Handles fast module swapping when user double-clicks Condition (col 4) or ActionSequence (col 5)."""
+        """Handles fast module swapping or snapshot inspection on double click."""
         if not (0 <= row < len(self.project.scenarios)):
             return
         scen = self.project.scenarios[row]
-        if col == 4:
+        if col == 0:
+            self.tbl_scenarios.selectRow(row)
+            if hasattr(self, "inspector") and self.inspector:
+                self.inspector._on_node_snapshot_clicked()
+        elif col == 4:
             self._show_condition_module_picker(scen)
         elif col == 5:
             self._show_sequence_module_picker(scen)

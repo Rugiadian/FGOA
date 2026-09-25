@@ -35,7 +35,7 @@ from core.models import Action, Project
 from core.screen_capture import ScreenCapture
 from core.input_controller import InputController
 from core.dummy_canvas import create_dummy_canvas_qimage
-from core.path_utils import to_relative_path, to_absolute_path
+from core.path_utils import to_relative_path, to_absolute_path, get_references_dir
 from ui.qt_image_utils import pil_to_qpixmap, qimage_to_pil
 
 
@@ -1044,7 +1044,8 @@ class CoordinatePickerDialog(QDialog):
 
         pil_img = ScreenCapture.capture_client_area(self.target_hwnd)
         if pil_img:
-            save_dir = os.path.join(os.path.expanduser("~"), ".fgoa_refs")
+            # Save to reference gallery directory (references/) so it appears in Reference Gallery
+            save_dir = get_references_dir()
             os.makedirs(save_dir, exist_ok=True)
             import datetime
             now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1057,13 +1058,14 @@ class CoordinatePickerDialog(QDialog):
                 ref_path = os.path.join(save_dir, f"capture_{now_str}_{idx}.png")
             try:
                 pil_img.save(ref_path)
-                self.current_image_path = ref_path
-                self._save_last_used_image(ref_path)
+                rel_path = to_relative_path(ref_path)
+                self.current_image_path = rel_path
+                self._save_last_used_image(rel_path)
             except Exception:
                 pass
             self.canvas.set_pil_image(pil_img)
             if not silent:
-                self.lbl_guide.setText("📸 타겟 게임 창의 화면을 새로 캡처하여 배경에 로드했습니다.")
+                self.lbl_guide.setText(f"📸 타겟 게임 창의 화면을 캡처하여 레퍼런스 갤러리에 저장했습니다. ({os.path.basename(ref_path)})")
             return True
         elif not silent:
             self.lbl_guide.setText("⚠️ 타겟 창의 클라이언트 영역을 캡처할 수 없습니다.")
@@ -1076,16 +1078,17 @@ class CoordinatePickerDialog(QDialog):
             self.lbl_guide.setText("⚠️ 클립보드에 복사된 이미지가 없습니다.")
             return
 
-        save_dir = os.path.join(os.path.expanduser("~"), ".fgoa_refs")
+        save_dir = get_references_dir()
         os.makedirs(save_dir, exist_ok=True)
         import datetime
         now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         ref_path = os.path.join(save_dir, f"clip_{now_str}.png")
         pix.save(ref_path, "PNG")
-        self.current_image_path = ref_path
-        self._save_last_used_image(ref_path)
+        rel_path = to_relative_path(ref_path)
+        self.current_image_path = rel_path
+        self._save_last_used_image(rel_path)
         self.canvas.load_image_from_path(ref_path)
-        self.lbl_guide.setText("📋 클립보드 이미지를 배경으로 로드했습니다.")
+        self.lbl_guide.setText(f"📋 클립보드 이미지를 레퍼런스 갤러리에 저장했습니다. ({os.path.basename(ref_path)})")
 
     # Canvas Interaction Callbacks
     def _on_pixel_hovered(self, lx: int, ly: int):

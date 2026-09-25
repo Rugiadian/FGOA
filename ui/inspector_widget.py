@@ -221,22 +221,36 @@ class ClickableThumbnailLabel(QLabel):
             self.clicked.emit()
         super().mousePressEvent(event)
 
-    def set_image(self, path: Optional[str]) -> bool:
-        """Sets and scales reference image to width 50px."""
+    def set_image(self, path: Optional[str], hide_on_empty: bool = True, max_w: Optional[int] = None, max_h: Optional[int] = None) -> bool:
+        """Sets and scales reference image. If hide_on_empty is False, displays a clean placeholder when empty."""
         self.image_path = path
+        target_w = max_w if max_w else (self.width() if self.width() > 0 else 50)
+        target_h = max_h if max_h else (self.height() if self.height() > 0 else 30)
+
         if path and os.path.isfile(path):
             pix = QPixmap(path)
             if not pix.isNull():
-                # Scale width strictly to 50px, keep aspect ratio
-                scaled = pix.scaledToWidth(50, Qt.SmoothTransformation)
-                if scaled.height() > 32:
-                    scaled = scaled.scaled(50, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                scaled = pix.scaled(target_w, target_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.setPixmap(scaled)
+                self.setStyleSheet(
+                    f"QLabel {{ border: 1.5px solid {self.border_color}; border-radius: 4px; background-color: #0f172a; }} "
+                    f"QLabel:hover {{ border: 2px solid #60a5fa; background-color: #1e293b; }}"
+                )
                 self.show()
                 return True
+
         self.clear()
-        self.hide()
-        return False
+        if hide_on_empty:
+            self.hide()
+            return False
+        else:
+            self.setStyleSheet(
+                f"QLabel {{ border: 1.5px dashed #475569; border-radius: 4px; background-color: #0f172a; color: #64748b; font-size: 8pt; }} "
+                f"QLabel:hover {{ border: 1.5px dashed #94a3b8; background-color: #1e293b; color: #94a3b8; }}"
+            )
+            self.setText("빈칸")
+            self.show()
+            return False
 
 
 class InspectorWidget(QWidget):
@@ -433,9 +447,14 @@ class InspectorWidget(QWidget):
     def _create_header_card(self) -> QFrame:
         card = QFrame()
         card.setObjectName("inspector_card")
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(4)
+        main_card_layout = QHBoxLayout(card)
+        main_card_layout.setContentsMargins(6, 6, 6, 6)
+        main_card_layout.setSpacing(8)
+
+        # Left Info Layout: Identity, Name, and Node Type
+        info_layout = QVBoxLayout()
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        info_layout.setSpacing(4)
 
         # Top Row: [실행 #1] [고유 #101] [v] 시나리오 활성화 | UUID
         top_row = QHBoxLayout()
@@ -475,7 +494,7 @@ class InspectorWidget(QWidget):
         self.lbl_id = QLabel("ID: scen_...")
         self.lbl_id.setStyleSheet("color: #64748b; font-family: monospace; font-size: 8pt;")
         top_row.addWidget(self.lbl_id)
-        layout.addLayout(top_row)
+        info_layout.addLayout(top_row)
 
         # Name Row: 이름 [ QLineEdit ]
         name_row = QHBoxLayout()
@@ -487,7 +506,7 @@ class InspectorWidget(QWidget):
         self.txt_name.setPlaceholderText("시나리오 설명 또는 목적 입력...")
         self.txt_name.textChanged.connect(self._on_field_changed)
         name_row.addWidget(self.txt_name, 1)
-        layout.addLayout(name_row)
+        info_layout.addLayout(name_row)
 
         # Node Type & Loop Control Row
         node_row = QHBoxLayout()
@@ -535,7 +554,30 @@ class InspectorWidget(QWidget):
         node_row.addWidget(self.lbl_loop_end_info)
 
         node_row.addStretch()
-        layout.addLayout(node_row)
+        info_layout.addLayout(node_row)
+        main_card_layout.addLayout(info_layout, 1)
+
+        # Right Column: Scenario Node Reference Snapshot Display
+        snap_box = QWidget()
+        snap_box_layout = QVBoxLayout(snap_box)
+        snap_box_layout.setContentsMargins(2, 0, 2, 0)
+        snap_box_layout.setSpacing(2)
+        snap_box_layout.setAlignment(Qt.AlignCenter)
+
+        self.lbl_node_snapshot = ClickableThumbnailLabel(
+            border_color="#3b82f6",
+            tooltip="📸 시나리오 노드 레퍼런스 이미지 스냅샷\n(인식 조건 이미지를 기본값으로 불러오며, 지정되지 않으면 빈칸으로 둡니다)"
+        )
+        self.lbl_node_snapshot.setFixedSize(76, 52)
+        self.lbl_node_snapshot.clicked.connect(self._on_node_snapshot_clicked)
+
+        lbl_snap_sub = QLabel("📸 노드 스냅샷")
+        lbl_snap_sub.setStyleSheet("font-size: 7.5pt; color: #64748b; font-weight: bold;")
+        lbl_snap_sub.setAlignment(Qt.AlignCenter)
+
+        snap_box_layout.addWidget(self.lbl_node_snapshot)
+        snap_box_layout.addWidget(lbl_snap_sub)
+        main_card_layout.addWidget(snap_box, 0, Qt.AlignVCenter | Qt.AlignRight)
 
         return card
 
@@ -1235,6 +1277,28 @@ class InspectorWidget(QWidget):
         if act_path:
             act_path = to_absolute_path(act_path)
 
+        # 1. Scenario Node Reference Snapshot (Header Card)
+        if hasattr(self, "lbl_node_snapshot"):
+            eff_snap_path = self.current_scenario.get_effective_reference_image(self.project)
+            abs_snap = to_absolute_path(eff_snap_path) if eff_snap_path else None
+            if abs_snap and os.path.isfile(abs_snap):
+                self.lbl_node_snapshot.set_image(abs_snap, hide_on_empty=False, max_w=76, max_h=52)
+                fname = os.path.basename(abs_snap)
+                source_tag = "노드 고유 지정" if self.current_scenario.reference_image_path else "인식조건 연동 (기본값)"
+                self.lbl_node_snapshot.setToolTip(
+                    f"📸 시나리오 노드 스냅샷 [{source_tag}]\n"
+                    f"파일: {fname}\n"
+                    f"클릭: 스냅샷 변경 / 갤러리 / 캡처 메뉴 열기"
+                )
+            else:
+                self.lbl_node_snapshot.set_image(None, hide_on_empty=False, max_w=76, max_h=52)
+                self.lbl_node_snapshot.setToolTip(
+                    "📸 시나리오 노드 스냅샷 (지정 안 됨 - 빈칸)\n"
+                    "인식 조건에 지정된 레퍼런스 이미지를 기본값으로 불러오며,\n"
+                    "클릭하여 갤러리 또는 타겟 창 캡처로 노드 스냅샷을 지정할 수 있습니다."
+                )
+
+        # 2. Condition Card Thumbnail
         if hasattr(self, "lbl_thumb_cond"):
             has_cond = self.lbl_thumb_cond.set_image(cond_path)
             if has_cond and cond_path:
@@ -1243,6 +1307,7 @@ class InspectorWidget(QWidget):
                     f"👁️ 인식 조건 레퍼런스 (가로 50px)\n클릭 시 조건/색상 편집기 열기\n파일: {fname}"
                 )
 
+        # 3. Action Card Thumbnail
         if hasattr(self, "lbl_thumb_act"):
             has_act = self.lbl_thumb_act.set_image(act_path)
             if has_act and act_path:
@@ -1250,6 +1315,71 @@ class InspectorWidget(QWidget):
                 self.lbl_thumb_act.setToolTip(
                     f"🎯 액션 좌표 지정 레퍼런스 (가로 50px)\n클릭 시 액션 좌표 지정 작업창 열기\n파일: {fname}"
                 )
+
+    def _on_node_snapshot_clicked(self):
+        """Displays options menu when user clicks the scenario node snapshot box."""
+        if not self.current_scenario:
+            return
+
+        menu = QMenu(self)
+        act_gallery = menu.addAction("🖼️ 레퍼런스 갤러리에서 선택...")
+        act_capture = menu.addAction("📸 현재 게임창 캡처하여 지정...")
+        menu.addSeparator()
+
+        eff_cond = self._get_active_condition()
+        if eff_cond and getattr(eff_cond, "reference_image_path", None):
+            act_edit_cond_img = menu.addAction("🎯 이미지에서 인식 조건 좌표 지정...")
+        else:
+            act_edit_cond_img = None
+
+        if self.current_scenario.reference_image_path is not None:
+            act_reset_cond = menu.addAction("🔄 인식 조건 레퍼런스 이미지로 초기화 (기본값)")
+        else:
+            act_reset_cond = None
+
+        act_clear = menu.addAction("❌ 스냅샷 비우기 (빈칸으로 두기)")
+
+        selected = menu.exec_(QCursor.pos())
+        if selected == act_gallery:
+            from ui.reference_gallery_dialog import ReferenceGalleryDialog
+            dlg = ReferenceGalleryDialog(self.project, target_hwnd=self.target_hwnd, picker_mode=True, parent=self)
+            if dlg.exec_() == QDialog.Accepted:
+                sel_path = dlg.get_selected_image_path()
+                if sel_path and os.path.exists(sel_path):
+                    self.current_scenario.reference_image_path = to_relative_path(sel_path)
+                    self._on_field_changed()
+                    self._update_reference_thumbnails()
+        elif selected == act_capture:
+            if not self.target_hwnd:
+                QMessageBox.warning(self, "타겟 창 없음", "타겟 게임 창이 선택되어 있지 않습니다.")
+                return
+            img = ScreenCapture.capture_client_area(self.target_hwnd)
+            if img:
+                from core.path_utils import get_references_dir
+                save_dir = get_references_dir()
+                os.makedirs(save_dir, exist_ok=True)
+                import datetime
+                now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                fname = f"capture_{now_str}.png"
+                ref_path = os.path.join(save_dir, fname)
+                img.save(ref_path, "PNG")
+                rel_path = to_relative_path(ref_path)
+                self.current_scenario.reference_image_path = rel_path
+                self._on_field_changed()
+                self._update_reference_thumbnails()
+                QMessageBox.information(self, "캡처 완료", f"타겟 창 화면을 캡처하여 노드 스냅샷으로 저장했습니다:\n{fname}")
+            else:
+                QMessageBox.warning(self, "캡처 실패", "타겟 창을 캡처할 수 없습니다.")
+        elif act_edit_cond_img and selected == act_edit_cond_img:
+            self._on_open_canvas_editor()
+        elif act_reset_cond and selected == act_reset_cond:
+            self.current_scenario.reference_image_path = None
+            self._on_field_changed()
+            self._update_reference_thumbnails()
+        elif selected == act_clear:
+            self.current_scenario.reference_image_path = ""
+            self._on_field_changed()
+            self._update_reference_thumbnails()
 
     def _on_action_log_toggled(self, checked: bool):
         if not self._is_loading and self.current_scenario:

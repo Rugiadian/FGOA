@@ -22,6 +22,7 @@ from core.evaluator import ConditionEvaluator
 from ui.canvas_view import CanvasView
 from ui.magnifier_widget import MagnifierWidget
 from ui.widgets.color_badge import ColorChipWidget, WarningBadge
+from core.path_utils import get_references_dir, to_relative_path, to_absolute_path
 from ui.reference_gallery_dialog import ReferenceGalleryDialog
 from ui.qt_image_utils import qimage_to_pil
 
@@ -500,8 +501,8 @@ class ConditionEditorDialog(QDialog):
                 QMessageBox.warning(self, "캡처 실패", "타겟 창의 클라이언트 영역을 캡처할 수 없습니다.")
             return
 
-        # Save to temporary reference image in user's temp or project dir
-        save_dir = os.path.join(os.path.expanduser("~"), ".fgoa_refs")
+        # Save to reference gallery directory (references/) so it appears in Reference Gallery
+        save_dir = get_references_dir()
         os.makedirs(save_dir, exist_ok=True)
         import datetime
         now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -514,10 +515,14 @@ class ConditionEditorDialog(QDialog):
             ref_path = os.path.join(save_dir, f"capture_{now_str}_{idx}.png")
         pil_img.save(ref_path)
 
-        self.condition.reference_image_path = ref_path
+        rel_path = to_relative_path(ref_path)
+        self.condition.reference_image_path = rel_path
         self.canvas.load_image_from_path(ref_path)
         if not silent:
-            QMessageBox.information(self, "캡처 완료", f"타겟 창 화면을 레퍼런스로 등록했습니다.\n({ref_path})")
+            QMessageBox.information(
+                self, "캡처 완료",
+                f"타겟 창 화면을 캡처하여 레퍼런스 갤러리에 저장했습니다.\n({os.path.basename(ref_path)})"
+            )
 
     def _on_paste_clipboard(self):
         clipboard = QApplication.clipboard()
@@ -526,16 +531,20 @@ class ConditionEditorDialog(QDialog):
             QMessageBox.warning(self, "클립보드", "클립보드에 복사된 이미지가 없습니다.")
             return
 
-        save_dir = os.path.join(os.path.expanduser("~"), ".fgoa_refs")
+        save_dir = get_references_dir()
         os.makedirs(save_dir, exist_ok=True)
         import datetime
         now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         ref_path = os.path.join(save_dir, f"clip_{now_str}.png")
         pix.save(ref_path, "PNG")
 
-        self.condition.reference_image_path = ref_path
+        rel_path = to_relative_path(ref_path)
+        self.condition.reference_image_path = rel_path
         self.canvas.load_image_from_path(ref_path)
-        QMessageBox.information(self, "붙여넣기 완료", "클립보드 이미지를 레퍼런스로 등록했습니다.")
+        QMessageBox.information(
+            self, "붙여넣기 완료",
+            f"클립보드 이미지를 레퍼런스 갤러리에 저장했습니다.\n({os.path.basename(ref_path)})"
+        )
 
     def _on_open_gallery(self):
         dlg = ReferenceGalleryDialog(self.project, target_hwnd=self.target_hwnd, picker_mode=True, parent=self)
