@@ -199,6 +199,7 @@ class WorkflowRunner(QThread):
                         break
                     attempt += 1
                     if attempt < max_attempts and self._is_running:
+                        self.sig_log.emit("INFO", f"⏳ [#{scen.step_number}] '{scen.name}' 조건 불일치 - 재시도 대기 ({attempt}/{scen.retry_max_count}회, {scen.retry_interval_sec:.1f}초 후 재검사)...")
                         time.sleep(scen.retry_interval_sec)
 
                 # Handle evaluation outcome

@@ -297,19 +297,25 @@ class InspectorWidget(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Stacked widget: 0 = Empty State, 1 = Scenario Content
-        self.stack = QStackedWidget()
-        main_layout.addWidget(self.stack)
+        # ==========================================
+        # 0. Condition & Branching Panel (Eye & Brain)
+        # ==========================================
+        self.condition_panel = QWidget()
+        self.condition_panel.setObjectName("condition_panel")
+        cp_layout = QVBoxLayout(self.condition_panel)
+        cp_layout.setContentsMargins(0, 0, 0, 0)
+        cp_layout.setSpacing(0)
 
-        # 0: Empty state widget
-        self.empty_widget = self._create_empty_widget()
-        self.stack.addWidget(self.empty_widget)
+        self.condition_stack = QStackedWidget()
+        cp_layout.addWidget(self.condition_stack)
 
-        # 1: Content widget
-        self.content_widget = QWidget()
-        cw_layout = QVBoxLayout(self.content_widget)
-        cw_layout.setContentsMargins(4, 4, 4, 4)
-        cw_layout.setSpacing(4)
+        self.empty_condition_widget = self._create_empty_condition_widget()
+        self.condition_stack.addWidget(self.empty_condition_widget)
+
+        self.condition_content_widget = QWidget()
+        cc_layout = QVBoxLayout(self.condition_content_widget)
+        cc_layout.setContentsMargins(4, 4, 4, 4)
+        cc_layout.setSpacing(4)
 
         # 1.0 Pane Title Header Bar with Save, Cancel, Undo, Redo controls
         self.pane_header = QFrame()
@@ -318,7 +324,7 @@ class InspectorWidget(QWidget):
         ph_layout.setContentsMargins(8, 4, 8, 4)
         ph_layout.setSpacing(6)
 
-        lbl_inspector_title = QLabel("🔍 시나리오 인스펙터")
+        lbl_inspector_title = QLabel("👁️ 인식 조건 및 분기")
         lbl_inspector_title.setStyleSheet("font-weight: bold; font-size: 9.5pt;")
         ph_layout.addWidget(lbl_inspector_title)
 
@@ -363,17 +369,13 @@ class InspectorWidget(QWidget):
         self.lbl_inspector_status = QLabel("시나리오 설정")
         self.lbl_inspector_status.setStyleSheet("color: #64748b; font-size: 8.5pt;")
         ph_layout.addWidget(self.lbl_inspector_status)
-        cw_layout.addWidget(self.pane_header)
+        cc_layout.addWidget(self.pane_header)
 
         # 1.1 Header Card (Compact: 실행 순서, 고유 번호, 활성, 이름)
         self.header_card = self._create_header_card()
-        cw_layout.addWidget(self.header_card)
+        cc_layout.addWidget(self.header_card)
 
-        # 1.2 Vertical Splitter: [Top: 인식 조건 & 판단 (Eye & Brain)] / [Bottom: 액션 시퀀스 (Hand)]
-        self.v_splitter = QSplitter(Qt.Vertical)
-        self.v_splitter.setObjectName("inspector_v_splitter")
-
-        # Top Pane: 인식 조건 & Brain
+        # Condition & Branch cards in scroll area
         upper_scroll = QScrollArea()
         upper_scroll.setWidgetResizable(True)
         upper_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -390,9 +392,65 @@ class InspectorWidget(QWidget):
 
         upper_layout.addStretch()
         upper_scroll.setWidget(upper_container)
-        self.v_splitter.addWidget(upper_scroll)
+        cc_layout.addWidget(upper_scroll, 1)
 
-        # Bottom Pane: 액션 시퀀스 Hand
+        self.condition_stack.addWidget(self.condition_content_widget)
+        self.condition_stack.setCurrentIndex(0)
+
+        # ==========================================
+        # 1. Action Sequence Panel (Hand)
+        # ==========================================
+        self.action_panel = QWidget()
+        self.action_panel.setObjectName("action_panel")
+        ap_layout = QVBoxLayout(self.action_panel)
+        ap_layout.setContentsMargins(0, 0, 0, 0)
+        ap_layout.setSpacing(0)
+
+        self.action_stack = QStackedWidget()
+        ap_layout.addWidget(self.action_stack)
+
+        self.empty_action_widget = self._create_empty_action_widget()
+        self.action_stack.addWidget(self.empty_action_widget)
+
+        self.action_content_widget = QWidget()
+        ac_layout = QVBoxLayout(self.action_content_widget)
+        ac_layout.setContentsMargins(4, 4, 4, 4)
+        ac_layout.setSpacing(4)
+
+        # Action Pane Header Bar
+        self.action_pane_header = QFrame()
+        self.action_pane_header.setObjectName("card_frame")
+        aph_layout = QHBoxLayout(self.action_pane_header)
+        aph_layout.setContentsMargins(8, 4, 8, 4)
+        aph_layout.setSpacing(6)
+
+        lbl_action_title = QLabel("✋ 액션 시퀀스 (Hand)")
+        lbl_action_title.setStyleSheet("font-weight: bold; font-size: 9.5pt;")
+        aph_layout.addWidget(lbl_action_title)
+
+        self.lbl_action_status = QLabel("")
+        self.lbl_action_status.setStyleSheet("color: #64748b; font-size: 8.5pt;")
+        aph_layout.addWidget(self.lbl_action_status)
+
+        aph_layout.addStretch()
+
+        self.btn_cancel_action = QPushButton("↩️ 취소")
+        self.btn_cancel_action.setToolTip("수정한 내용을 원래 상태로 되돌립니다.")
+        self.btn_cancel_action.clicked.connect(self._on_cancel_inspector)
+        self.btn_cancel_action.setEnabled(False)
+        aph_layout.addWidget(self.btn_cancel_action)
+
+        self.btn_save_action = QPushButton("💾 저장")
+        self.btn_save_action.setObjectName("btn_primary")
+        self.btn_save_action.setStyleSheet("font-weight: bold; padding: 2px 10px;")
+        self.btn_save_action.setToolTip("액션 시퀀스 변경사항을 저장합니다. (Ctrl+S)")
+        self.btn_save_action.clicked.connect(self._on_save_inspector)
+        self.btn_save_action.setEnabled(False)
+        aph_layout.addWidget(self.btn_save_action)
+
+        ac_layout.addWidget(self.action_pane_header)
+
+        # Action card in scroll area
         lower_scroll = QScrollArea()
         lower_scroll.setWidgetResizable(True)
         lower_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -406,40 +464,74 @@ class InspectorWidget(QWidget):
 
         lower_layout.addStretch()
         lower_scroll.setWidget(lower_container)
-        self.v_splitter.addWidget(lower_scroll)
+        ac_layout.addWidget(lower_scroll, 1)
 
-        # Splitter ratio: 54% upper, 46% lower
+        self.action_stack.addWidget(self.action_content_widget)
+        self.action_stack.setCurrentIndex(0)
+
+        # Vertical Splitter for default container or standalone fallback:
+        self.v_splitter = QSplitter(Qt.Vertical)
+        self.v_splitter.setObjectName("inspector_v_splitter")
+        self.v_splitter.addWidget(self.condition_panel)
+        self.v_splitter.addWidget(self.action_panel)
         self.v_splitter.setStretchFactor(0, 54)
         self.v_splitter.setStretchFactor(1, 46)
         self.v_splitter.setSizes([340, 290])
 
-        cw_layout.addWidget(self.v_splitter, 1)
+        main_layout.addWidget(self.v_splitter)
 
-        self.stack.addWidget(self.content_widget)
-        self.stack.setCurrentIndex(0)
+        # Backwards compatibility aliases
+        self.stack = self.condition_stack
+        self.empty_widget = self.empty_condition_widget
 
-    def _create_empty_widget(self) -> QWidget:
+    def _create_empty_condition_widget(self) -> QWidget:
         w = QWidget()
         layout = QVBoxLayout(w)
         layout.setAlignment(Qt.AlignCenter)
         layout.setSpacing(10)
 
-        icon_lbl = QLabel("🛠️")
+        icon_lbl = QLabel("👁️")
         icon_lbl.setAlignment(Qt.AlignCenter)
         icon_lbl.setStyleSheet("font-size: 36pt;")
         layout.addWidget(icon_lbl)
 
-        title_lbl = QLabel("시나리오 인스펙터")
+        title_lbl = QLabel("인식 조건 및 분기 (Eye & Brain)")
         title_lbl.setAlignment(Qt.AlignCenter)
         title_lbl.setStyleSheet("font-size: 12pt; font-weight: bold; color: #334155;")
         layout.addWidget(title_lbl)
 
-        desc_lbl = QLabel("왼쪽 시나리오 목록에서 항목을 클릭하면\n상세 조건(상단) 및 액션(하단) 편집기가 표시됩니다.\n빈 공간을 클릭해도 선택 상태가 유지됩니다.")
+        desc_lbl = QLabel("왼쪽 시나리오 목록에서 항목을 클릭하면\n화면 인식 색상 조건 및 분기 규칙 편집기가 표시됩니다.")
         desc_lbl.setAlignment(Qt.AlignCenter)
         desc_lbl.setStyleSheet("color: #64748b; font-size: 9pt; line-height: 140%;")
         layout.addWidget(desc_lbl)
 
         return w
+
+    def _create_empty_action_widget(self) -> QWidget:
+        w = QWidget()
+        layout = QVBoxLayout(w)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(10)
+
+        icon_lbl = QLabel("✋")
+        icon_lbl.setAlignment(Qt.AlignCenter)
+        icon_lbl.setStyleSheet("font-size: 36pt;")
+        layout.addWidget(icon_lbl)
+
+        title_lbl = QLabel("액션 시퀀스 (Hand)")
+        title_lbl.setAlignment(Qt.AlignCenter)
+        title_lbl.setStyleSheet("font-size: 12pt; font-weight: bold; color: #334155;")
+        layout.addWidget(title_lbl)
+
+        desc_lbl = QLabel("왼쪽 시나리오 목록에서 항목을 클릭하면\n마우스 클릭, 드래그, 키 입력 등 동작 시퀀스 편집기가 표시됩니다.")
+        desc_lbl.setAlignment(Qt.AlignCenter)
+        desc_lbl.setStyleSheet("color: #64748b; font-size: 9pt; line-height: 140%;")
+        layout.addWidget(desc_lbl)
+
+        return w
+
+    def _create_empty_widget(self) -> QWidget:
+        return self._create_empty_condition_widget()
 
     # ==========================================
     # Header Card (Identity)
@@ -1042,6 +1134,10 @@ class InspectorWidget(QWidget):
 
         if not scenario:
             self.current_scenario = None
+            if hasattr(self, "condition_stack"):
+                self.condition_stack.setCurrentIndex(0)
+            if hasattr(self, "action_stack"):
+                self.action_stack.setCurrentIndex(0)
             self.stack.setCurrentIndex(0)
             self.inspector_undo_stack.clear()
             self.inspector_redo_stack.clear()
@@ -1062,7 +1158,13 @@ class InspectorWidget(QWidget):
         """Populates UI controls from a Scenario instance."""
         self._is_loading = True
         try:
+            if hasattr(self, "condition_stack"):
+                self.condition_stack.setCurrentIndex(1)
+            if hasattr(self, "action_stack"):
+                self.action_stack.setCurrentIndex(1)
             self.stack.setCurrentIndex(1)
+            if hasattr(self, "lbl_action_status"):
+                self.lbl_action_status.setText(f"s{scenario.scenario_number} [{scenario.name}]")
             self._populate_jump_combos()
 
             # 1. Header & Identity
@@ -1172,6 +1274,10 @@ class InspectorWidget(QWidget):
 
         self.btn_save_inspector.setEnabled(has_scen and self.is_dirty)
         self.btn_cancel_inspector.setEnabled(has_scen and self.is_dirty)
+        if hasattr(self, "btn_save_action"):
+            self.btn_save_action.setEnabled(has_scen and self.is_dirty)
+        if hasattr(self, "btn_cancel_action"):
+            self.btn_cancel_action.setEnabled(has_scen and self.is_dirty)
         self.btn_undo_inspector.setEnabled(can_undo)
         self.btn_redo_inspector.setEnabled(can_redo)
 

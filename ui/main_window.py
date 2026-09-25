@@ -37,6 +37,8 @@ from ui.widgets.color_badge import WarningBadge
 from ui.widgets.flow_layout import FlowLayout
 from ui.preset_dialog import SavePresetDialog, PresetManagerDialog
 from ui.action_overlay import ActionOverlayWindow
+from core.global_hotkey import GlobalHotkeyListener
+from ui.floating_stop_widget import GlobalFloatingStopWidget
 from core.path_utils import to_absolute_path, to_relative_path
 
 
@@ -239,6 +241,33 @@ class MainWindow(QMainWindow):
         if self.project.scenarios:
             self.tbl_scenarios.selectRow(0)
 
+        # Global hotkey and floating emergency stop widget
+        self._init_global_hotkey_and_floating_stop()
+
+    def _init_global_hotkey_and_floating_stop(self):
+        """Initializes global F6 keyboard listener and always-on-top floating emergency stop widget."""
+        self.global_hotkey = GlobalHotkeyListener(None)
+        self.global_hotkey.sig_stop_hotkey.connect(self._on_global_hotkey_stop)
+        self.global_hotkey.start()
+        self.destroyed.connect(self._cleanup_global_hotkey)
+
+        self.floating_stop = GlobalFloatingStopWidget(None)
+        self.floating_stop.sig_stop_requested.connect(self._on_stop_execution)
+        self.floating_stop.sig_pause_requested.connect(self._on_pause_execution)
+
+    def _cleanup_global_hotkey(self):
+        if hasattr(self, "global_hotkey") and self.global_hotkey:
+            try:
+                self.global_hotkey.stop_listening()
+            except Exception:
+                pass
+
+    def _on_global_hotkey_stop(self):
+        """Global F6 / Pause hotkey handler (operates system-wide even when FGOA is not focused)."""
+        if self.runner and self.runner.isRunning():
+            self._append_log("WARN", "🛑 [전역 단축키] F6 긴급 정지가 수신되었습니다.")
+            self._on_stop_execution()
+
     def _update_window_title(self):
         """Update window title with application version and current project filename."""
         title = f"FGOA v{__version__} - 화면 인식 스마트 윈도우 오토 툴"
@@ -308,6 +337,16 @@ class MainWindow(QMainWindow):
             pass
 
     def closeEvent(self, event):
+        if hasattr(self, "global_hotkey") and self.global_hotkey:
+            try:
+                self.global_hotkey.stop_listening()
+            except Exception:
+                pass
+        if hasattr(self, "floating_stop") and self.floating_stop:
+            try:
+                self.floating_stop.close()
+            except Exception:
+                pass
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             try:
                 self.popup_play_bar.close()
@@ -320,6 +359,13 @@ class MainWindow(QMainWindow):
                 pass
         self._save_app_config()
         super().closeEvent(event)
+
+    def __del__(self):
+        if hasattr(self, "global_hotkey") and self.global_hotkey:
+            try:
+                self.global_hotkey.stop_listening()
+            except Exception:
+                pass
 
     def _init_sample_project(self):
         """Create sample scenario sequence so the user sees immediate example usage."""
@@ -627,14 +673,23 @@ class MainWindow(QMainWindow):
         self.inspector.sig_modules_manager_requested.connect(lambda: self.tab_scenario_manager.setCurrentIndex(1))
         self.inspector.sig_log.connect(self._append_log)
 
-        # Dock 2: Center Pane (Inspector)
-        self.dock_inspector = QDockWidget("🔍 인스펙터 (Inspector)", self)
+        # Dock 2: Condition & Branching Pane (Inspector: Conditions)
+        self.dock_inspector = QDockWidget("👁️ 인식 조건 및 분기 (Conditions)", self)
         self.dock_inspector.setObjectName("DockInspector")
         self.dock_inspector.setFeatures(
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetClosable
         )
-        self.dock_inspector.setWidget(self.inspector)
+        self.dock_inspector.setWidget(self.inspector.condition_panel)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_inspector)
+
+        # Dock 2-B: Action Sequence Pane (Inspector: Actions)
+        self.dock_actions = QDockWidget("✋ 액션 시퀀스 (Actions)", self)
+        self.dock_actions.setObjectName("DockActions")
+        self.dock_actions.setFeatures(
+            QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetClosable
+        )
+        self.dock_actions.setWidget(self.inspector.action_panel)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_actions)
 
         # ==========================================
         # Pane 3: Right (Real-time Log Window & Diagnostics)
@@ -683,8 +738,12 @@ class MainWindow(QMainWindow):
         menu_panels.addAction(act_dock_scen)
 
         act_dock_insp = self.dock_inspector.toggleViewAction()
-        act_dock_insp.setText("🔍 인스펙터 (Inspector)")
+        act_dock_insp.setText("👁️ 인식 조건 및 분기 (Conditions)")
         menu_panels.addAction(act_dock_insp)
+
+        act_dock_act = self.dock_actions.toggleViewAction()
+        act_dock_act.setText("✋ 액션 시퀀스 (Actions)")
+        menu_panels.addAction(act_dock_act)
 
         act_dock_log = self.dock_log.toggleViewAction()
         act_dock_log.setText("📋 실시간 실행 로그 (Console)")
@@ -740,6 +799,11 @@ class MainWindow(QMainWindow):
         self.chk_action_overlay.setToolTip("오토 실행 중 조작할 좌표나 범위를 앱 화면 위에 점선 박스/화살표로 시각화 표시합니다.")
         self.chk_action_overlay.toggled.connect(self._on_toggle_action_overlay)
         c_layout.addWidget(self.chk_action_overlay)
+
+        self.chk_floating_stop = QCheckBox("🛑 전역 플로팅 정지")
+        self.chk_floating_stop.setChecked(True)
+        self.chk_floating_stop.setToolTip("오토 실행 시 화면 최상위에 어디서나 마우스로 원클릭 정지 가능한 빨간색 플로팅 버튼을 자동 표시합니다.")
+        c_layout.addWidget(self.chk_floating_stop)
 
         c_layout.addSpacing(20)
 
@@ -1360,6 +1424,7 @@ class MainWindow(QMainWindow):
 
         builtins = [
             "기본 3열 (Default)",
+            "인식 조건 / 액션 나란히 (Side-by-Side)",
             "와이드 (하단 콘솔)",
             "세로 분할 (Tall)",
             "2 by 3 (Unity 스타일)",
@@ -1425,33 +1490,66 @@ class MainWindow(QMainWindow):
                 pass
 
         # Ensure all docks are unfloated and shown
-        for dock in (self.dock_scenarios, self.dock_inspector, self.dock_log):
+        all_docks = [self.dock_scenarios, self.dock_inspector, self.dock_log]
+        if hasattr(self, "dock_actions"):
+            all_docks.append(self.dock_actions)
+        for dock in all_docks:
             dock.setFloating(False)
             dock.show()
 
         if layout_name == "기본 3열 (Default)":
             self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
             self.splitDockWidget(self.dock_scenarios, self.dock_inspector, Qt.Horizontal)
-            self.splitDockWidget(self.dock_inspector, self.dock_log, Qt.Horizontal)
-            self.resizeDocks([self.dock_scenarios, self.dock_inspector, self.dock_log], [480, 560, 280], Qt.Horizontal)
+            if hasattr(self, "dock_actions"):
+                self.splitDockWidget(self.dock_inspector, self.dock_actions, Qt.Vertical)
+                self.splitDockWidget(self.dock_inspector, self.dock_log, Qt.Horizontal)
+                self.resizeDocks([self.dock_scenarios, self.dock_inspector, self.dock_log], [460, 580, 280], Qt.Horizontal)
+                self.resizeDocks([self.dock_inspector, self.dock_actions], [330, 290], Qt.Vertical)
+            else:
+                self.splitDockWidget(self.dock_inspector, self.dock_log, Qt.Horizontal)
+                self.resizeDocks([self.dock_scenarios, self.dock_inspector, self.dock_log], [480, 560, 280], Qt.Horizontal)
+
+        elif layout_name == "인식 조건 / 액션 나란히 (Side-by-Side)":
+            self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
+            self.splitDockWidget(self.dock_scenarios, self.dock_inspector, Qt.Horizontal)
+            if hasattr(self, "dock_actions"):
+                self.splitDockWidget(self.dock_inspector, self.dock_actions, Qt.Horizontal)
+                self.splitDockWidget(self.dock_actions, self.dock_log, Qt.Horizontal)
+                self.resizeDocks([self.dock_scenarios, self.dock_inspector, self.dock_actions, self.dock_log], [380, 420, 420, 260], Qt.Horizontal)
+            else:
+                self.splitDockWidget(self.dock_inspector, self.dock_log, Qt.Horizontal)
 
         elif layout_name == "와이드 (하단 콘솔)":
             self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
             self.splitDockWidget(self.dock_scenarios, self.dock_inspector, Qt.Horizontal)
-            self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_log)
-            self.resizeDocks([self.dock_scenarios, self.dock_inspector], [500, 700], Qt.Horizontal)
-            self.resizeDocks([self.dock_scenarios, self.dock_log], [550, 200], Qt.Vertical)
+            if hasattr(self, "dock_actions"):
+                self.splitDockWidget(self.dock_inspector, self.dock_actions, Qt.Horizontal)
+                self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_log)
+                self.resizeDocks([self.dock_scenarios, self.dock_inspector, self.dock_actions], [450, 480, 480], Qt.Horizontal)
+                self.resizeDocks([self.dock_inspector, self.dock_log], [550, 200], Qt.Vertical)
+            else:
+                self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_log)
+                self.resizeDocks([self.dock_scenarios, self.dock_inspector], [500, 700], Qt.Horizontal)
+                self.resizeDocks([self.dock_scenarios, self.dock_log], [550, 200], Qt.Vertical)
 
         elif layout_name in ("세로 분할 (Tall)", "2 by 3 (Unity 스타일)"):
             self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
             self.splitDockWidget(self.dock_scenarios, self.dock_log, Qt.Vertical)
             self.addDockWidget(Qt.RightDockWidgetArea, self.dock_inspector)
-            self.resizeDocks([self.dock_scenarios, self.dock_inspector], [450, 750], Qt.Horizontal)
-            self.resizeDocks([self.dock_scenarios, self.dock_log], [500, 280], Qt.Vertical)
+            if hasattr(self, "dock_actions"):
+                self.splitDockWidget(self.dock_inspector, self.dock_actions, Qt.Vertical)
+                self.resizeDocks([self.dock_scenarios, self.dock_inspector], [450, 750], Qt.Horizontal)
+                self.resizeDocks([self.dock_scenarios, self.dock_log], [500, 280], Qt.Vertical)
+                self.resizeDocks([self.dock_inspector, self.dock_actions], [360, 360], Qt.Vertical)
+            else:
+                self.resizeDocks([self.dock_scenarios, self.dock_inspector], [450, 750], Qt.Horizontal)
+                self.resizeDocks([self.dock_scenarios, self.dock_log], [500, 280], Qt.Vertical)
 
         elif layout_name == "탭 묶음 (Tabbed)":
             self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
             self.addDockWidget(Qt.RightDockWidgetArea, self.dock_inspector)
+            if hasattr(self, "dock_actions"):
+                self.tabifyDockWidget(self.dock_inspector, self.dock_actions)
             self.tabifyDockWidget(self.dock_inspector, self.dock_log)
             self.dock_inspector.raise_()
             self.resizeDocks([self.dock_scenarios, self.dock_inspector], [450, 750], Qt.Horizontal)
@@ -1459,9 +1557,14 @@ class MainWindow(QMainWindow):
         elif layout_name == "인스펙터 전면 (Inspector Focus)":
             self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
             self.addDockWidget(Qt.RightDockWidgetArea, self.dock_inspector)
-            self.tabifyDockWidget(self.dock_inspector, self.dock_log)
-            self.dock_inspector.raise_()
-            self.resizeDocks([self.dock_scenarios, self.dock_inspector], [320, 950], Qt.Horizontal)
+            if hasattr(self, "dock_actions"):
+                self.splitDockWidget(self.dock_inspector, self.dock_actions, Qt.Horizontal)
+                self.tabifyDockWidget(self.dock_actions, self.dock_log)
+                self.resizeDocks([self.dock_scenarios, self.dock_inspector], [280, 1050], Qt.Horizontal)
+            else:
+                self.tabifyDockWidget(self.dock_inspector, self.dock_log)
+                self.dock_inspector.raise_()
+                self.resizeDocks([self.dock_scenarios, self.dock_inspector], [320, 950], Qt.Horizontal)
 
         self.status_bar.showMessage(f"📐 레이아웃이 '{layout_name}'(으)로 변경되었습니다.", 3000)
 
@@ -2078,6 +2181,14 @@ class MainWindow(QMainWindow):
             self.popup_play_bar.set_runner_state("running", "시나리오 실행 중...")
 
         self.runner.start()
+        if hasattr(self, "floating_stop") and self.floating_stop:
+            if hasattr(self, "chk_floating_stop") and self.chk_floating_stop.isChecked():
+                self.floating_stop.set_status("오토 실행 중...")
+                self.floating_stop.set_paused_state(False)
+                geo = self.geometry()
+                self.floating_stop.move(max(20, geo.x() + geo.width() - 360), max(20, geo.y() + 40))
+                self.floating_stop.show()
+                self.floating_stop.raise_()
 
     def _on_pause_execution(self):
         if self.runner and self.runner.isRunning():
@@ -2088,6 +2199,8 @@ class MainWindow(QMainWindow):
                 self.lbl_run_status.setStyleSheet("color: #16a34a; font-weight: bold;")
                 if hasattr(self, "popup_play_bar") and self.popup_play_bar:
                     self.popup_play_bar.set_runner_state("running", "재개되어 실행 중...")
+                if hasattr(self, "floating_stop") and self.floating_stop:
+                    self.floating_stop.set_paused_state(False)
             else:
                 self.runner.pause()
                 self.btn_pause.setText("▶ 재개")
@@ -2095,6 +2208,8 @@ class MainWindow(QMainWindow):
                 self.lbl_run_status.setStyleSheet("color: #ea580c; font-weight: bold;")
                 if hasattr(self, "popup_play_bar") and self.popup_play_bar:
                     self.popup_play_bar.set_runner_state("paused", "일시정지됨")
+                if hasattr(self, "floating_stop") and self.floating_stop:
+                    self.floating_stop.set_paused_state(True)
 
     def _on_stop_execution(self):
         if self.runner:
@@ -2102,6 +2217,8 @@ class MainWindow(QMainWindow):
             self.lbl_run_status.setText("정지 요청 중...")
             self.lbl_run_status.setStyleSheet("color: #dc2626; font-weight: bold;")
         self._highlight_running_row_header(None)
+        if hasattr(self, "floating_stop") and self.floating_stop:
+            self.floating_stop.hide()
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             self.popup_play_bar.set_runner_state("stopped", "정지됨")
         if hasattr(self, "action_overlay") and self.action_overlay:
@@ -2175,6 +2292,8 @@ class MainWindow(QMainWindow):
                 self._highlight_running_row_header(row)
                 if hasattr(self, "popup_play_bar") and self.popup_play_bar:
                     self.popup_play_bar.set_runner_state("running", f"s{s.scenario_number} [{s.name}] 실행 중...")
+                if hasattr(self, "floating_stop") and self.floating_stop:
+                    self.floating_stop.set_status(f"s{s.scenario_number} [{s.name}]")
                 break
 
     def _on_scenario_completed(self, scenario_id: str, result: str):
@@ -2190,6 +2309,8 @@ class MainWindow(QMainWindow):
         self.lbl_run_status.setText(f"완료 ({reason})")
         self.lbl_run_status.setStyleSheet("font-weight: bold;")
         self._highlight_running_row_header(None)
+        if hasattr(self, "floating_stop") and self.floating_stop:
+            self.floating_stop.hide()
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             self.popup_play_bar.set_runner_state("stopped", f"완료 ({reason})")
         if hasattr(self, "action_overlay") and self.action_overlay:
