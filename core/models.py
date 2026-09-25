@@ -239,6 +239,20 @@ class Scenario:
     # Custom log and last action image path
     custom_log: str = ""  # 액션 실행 시 출력할 사용자 지정 로그 문장
     last_action_image_path: Optional[str] = None  # 액션 좌표 지정에 마지막으로 사용한 이미지
+    reference_image_path: Optional[str] = None  # 시나리오 노드 고유 레퍼런스 이미지 (None이면 인식조건 레퍼런스 이미지 자동 사용)
+
+    def get_effective_reference_image(self, project: Optional["Project"] = None) -> Optional[str]:
+        """
+        Returns effective reference image path for this scenario node.
+        Defaults to the linked Condition's reference image path if not explicitly set.
+        Returns None if neither is specified.
+        """
+        if self.reference_image_path:
+            return self.reference_image_path
+        eff_cond = self.get_effective_condition(project)
+        if eff_cond and getattr(eff_cond, "reference_image_path", None):
+            return eff_cond.reference_image_path
+        return None
 
     def is_loop_start(self) -> bool:
         return self.node_type == "loop_start"
@@ -338,7 +352,8 @@ class Scenario:
             "actions": [a.to_dict() for a in self.actions],
             "post_delay_seconds": self.post_delay_seconds,
             "custom_log": self.custom_log,
-            "last_action_image_path": to_relative_path(self.last_action_image_path)
+            "last_action_image_path": to_relative_path(self.last_action_image_path),
+            "reference_image_path": to_relative_path(self.reference_image_path)
         }
 
     @classmethod
@@ -371,7 +386,8 @@ class Scenario:
             actions=actions,
             post_delay_seconds=data.get("post_delay_seconds", 0.2),
             custom_log=data.get("custom_log", ""),
-            last_action_image_path=to_relative_path(raw_img) if raw_img else None
+            last_action_image_path=to_relative_path(raw_img) if raw_img else None,
+            reference_image_path=to_relative_path(data.get("reference_image_path")) if data.get("reference_image_path") else None
         )
 
 

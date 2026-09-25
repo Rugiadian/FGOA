@@ -24,7 +24,7 @@ class TestScenarioTableFlowAndUID(unittest.TestCase):
         table = self.main_win.tbl_scenarios
         self.assertEqual(table.columnCount(), 7)
 
-        expected_headers = ["순서", "고유 ID", "활성", "시나리오 이름", "인식조건 모듈", "액션시퀀스 모듈", "분기"]
+        expected_headers = ["스냅샷", "고유 ID", "활성", "시나리오 이름", "인식조건 모듈", "액션시퀀스 모듈", "분기"]
         headers = [table.horizontalHeaderItem(i).text() for i in range(7)]
         self.assertEqual(headers, expected_headers)
 
@@ -38,8 +38,8 @@ class TestScenarioTableFlowAndUID(unittest.TestCase):
         table.adjust_column_widths()
 
         header = table.horizontalHeader()
-        # Compact columns: 0 (34), 1 (48), 2 (38)
-        self.assertEqual(header.sectionSize(0), 34)
+        # Compact columns: 0 (48 for snapshot), 1 (48), 2 (38)
+        self.assertEqual(header.sectionSize(0), 48)
         self.assertEqual(header.sectionSize(1), 48)
         self.assertEqual(header.sectionSize(2), 38)
 
@@ -104,6 +104,47 @@ class TestScenarioTableFlowAndUID(unittest.TestCase):
         h_narrow = flow.heightForWidth(200)
         h_wide = flow.heightForWidth(800)
         self.assertGreater(h_narrow, h_wide, "FlowLayout should wrap items into more vertical rows when narrow")
+
+    def test_scenario_node_snapshot_default_and_blank(self):
+        import tempfile
+        import os
+        from PIL import Image
+
+        # 1. Scenario with condition having reference image
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = tmp.name
+        img = Image.new("RGB", (100, 100), color=(255, 0, 0))
+        img.save(tmp_path)
+
+        try:
+            cond = Condition(name="테스트조건", reference_image_path=tmp_path)
+            scen_with_img = Scenario(name="조건이미지보유", condition=cond)
+            self.assertEqual(scen_with_img.get_effective_reference_image(), tmp_path)
+
+            # Test inspector snapshot loading
+            self.inspector.set_scenario(scen_with_img, target_hwnd=0, project=self.main_win.project)
+            self.assertEqual(self.inspector.lbl_node_snapshot.image_path, tmp_path)
+
+            # 2. Scenario without reference image -> must be blank
+            scen_blank = Scenario(name="이미지없음")
+            self.assertIsNone(scen_blank.get_effective_reference_image())
+            self.inspector.set_scenario(scen_blank, target_hwnd=0, project=self.main_win.project)
+            self.assertIsNone(self.inspector.lbl_node_snapshot.image_path)
+            self.assertEqual(self.inspector.lbl_node_snapshot.text(), "빈칸")
+
+            # 3. Test scenario table row updating
+            self.main_win.project.scenarios = [scen_with_img, scen_blank]
+            self.main_win._refresh_scenario_table()
+
+            # Row 0 has widget (snapshot thumbnail)
+            self.assertIsNotNone(self.main_win.tbl_scenarios.cellWidget(0, 0))
+            # Row 1 has empty item (blank)
+            item_blank = self.main_win.tbl_scenarios.item(1, 0)
+            self.assertIsNotNone(item_blank)
+            self.assertEqual(item_blank.text(), "")
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
 
 if __name__ == "__main__":
