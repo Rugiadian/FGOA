@@ -2604,7 +2604,8 @@ class InspectorWidget(QWidget):
                 max_delay=offset_sec,
                 precomputed_jitter=jitter
             )
-            self.sig_log.emit("ACTION", f"테스트 액션 실행 완료: [{act_msg}]")
+            scen_step = f"[#{self.current_scenario.step_number}] " if getattr(self, "current_scenario", None) and getattr(self.current_scenario, "step_number", None) is not None else ""
+            self.sig_log.emit("ACTION", f"{scen_step}테스트 액션 실행 완료: [{act_msg}]")
         except Exception as e:
             self.sig_log.emit("ERROR", f"액션 실행 실패: {e}")
             QMessageBox.critical(self, "실행 오류", f"액션 실행 중 오류 발생:\n{e}")
@@ -2621,7 +2622,8 @@ class InspectorWidget(QWidget):
             return
 
         total = len(actions)
-        self.sig_log.emit("INFO", f"▶ [{self.current_scenario.name}] 전체 액션 시퀀스 테스트 시작 (총 {total}개)...")
+        scen_step = f"[#{self.current_scenario.step_number}] " if getattr(self, "current_scenario", None) and getattr(self.current_scenario, "step_number", None) is not None else ""
+        self.sig_log.emit("INFO", f"{scen_step}▶ [{self.current_scenario.name}] 전체 액션 시퀀스 테스트 시작 (총 {total}개)...")
         scen_log = self.txt_action_log.text().strip() if hasattr(self, "txt_action_log") else getattr(self.current_scenario, "custom_log", "")
         if scen_log:
             self.sig_log.emit("USER", f"  [액션 로그] {scen_log}")
@@ -2663,7 +2665,8 @@ class InspectorWidget(QWidget):
                     time_str = f" (안티밴 +{jitter:.2f}초)" if (should_anti_ban and jitter > 0) else ""
                     act_msg = f"{act.get_summary()}{coord_str}{time_str}"
 
-                self.sig_log.emit("ACTION", f"  [{idx}/{total}] 액션 실행: {act_msg}")
+                scen_step = f"[#{self.current_scenario.step_number}] " if getattr(self, "current_scenario", None) and getattr(self.current_scenario, "step_number", None) is not None else ""
+                self.sig_log.emit("ACTION", f"{scen_step}[{idx}/{total}] 액션 실행: {act_msg}")
 
                 if act.action_type == "log_message":
                     self.sig_log.emit("USER", f"  [사용자 로그] {act.log_text}")
@@ -2696,7 +2699,8 @@ class InspectorWidget(QWidget):
                 time.sleep(0.05)
                 QApplication.processEvents()
 
-            self.sig_log.emit("SUCCESS", f"✅ [{self.current_scenario.name}] 전체 액션 시퀀스({total}개) 테스트 실행 완료")
+            scen_step = f"[#{self.current_scenario.step_number}] " if getattr(self, "current_scenario", None) and getattr(self.current_scenario, "step_number", None) is not None else ""
+            self.sig_log.emit("SUCCESS", f"{scen_step}✅ [{self.current_scenario.name}] 전체 액션 시퀀스({total}개) 테스트 실행 완료")
         except Exception as e:
             self.sig_log.emit("ERROR", f"액션 시퀀스 실행 중 오류: {e}")
             QMessageBox.critical(self, "실행 오류", f"액션 시퀀스 실행 중 오류 발생:\n{e}")

@@ -311,7 +311,7 @@ QStatusBar {{
     border-top: 1px solid #e2e8f0;
 }}
 
-QTextEdit, QPlainTextEdit {{
+QTextEdit, QPlainTextEdit, QTextBrowser {{
     background-color: #ffffff;
     color: #1e293b;
     border: 1px solid #cbd5e1;
@@ -723,7 +723,7 @@ QStatusBar {{
     border-top: 1px solid #2e2e38;
 }}
 
-QTextEdit, QPlainTextEdit {{
+QTextEdit, QPlainTextEdit, QTextBrowser {{
     background-color: #141418;
     color: #d8d8e2;
     border: 1px solid #2f2f3c;

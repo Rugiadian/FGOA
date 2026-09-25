@@ -727,6 +727,9 @@ class MainWindow(QMainWindow):
         self.txt_log.setReadOnly(True)
         self.txt_log.setOpenLinks(False)
         self.txt_log.anchorClicked.connect(self._on_log_anchor_clicked)
+        log_font = QFont("Consolas", 9)
+        log_font.setStyleHint(QFont.Monospace)
+        self.txt_log.setFont(log_font)
         r_layout.addWidget(self.txt_log, 1)
 
         # Dock 3: Right Pane (Log)
@@ -2500,6 +2503,12 @@ class MainWindow(QMainWindow):
         log_id = record["id"]
         level = record["level"]
 
+        # Equalize word width for log levels (INFO, SUCCESS, ACTION, WARN, ERROR)
+        # Pad to 7 characters (length of 'SUCCESS') with non-breaking spaces for alignment
+        padded_level = level.ljust(7)
+        level_html = padded_level.replace(" ", "&nbsp;")
+        tag_prefix = f"<span style='color: {prefix_color}; font-family: Consolas, monospace;'>[{level_html}]</span>"
+
         if record.get("has_mismatch"):
             prefix_t = record.get("prefix_text", "")
             suffix_t = record.get("suffix_text", "")
@@ -2510,11 +2519,11 @@ class MainWindow(QMainWindow):
             if not record.get("expanded", False):
                 # Collapsed: Show clickable badge link to expand
                 btn_link = f"<a href='toggle-mismatch:{log_id}' style='color: #38bdf8; text-decoration: none; font-weight: bold;'>[▶ {cnt_str} 세부내역 열기]</a>"
-                return f"<div id='mismatch_{log_id}' style='margin: 1px 0;'><span style='color: {prefix_color};'>[{level}]</span> <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span></div>"
+                return f"<div id='mismatch_{log_id}' style='margin: 1px 0;'>{tag_prefix} <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span></div>"
             else:
                 # Expanded: Show clickable badge link to collapse, and formatted details indented per-point
                 btn_link = f"<a href='toggle-mismatch:{log_id}' style='color: #f87171; text-decoration: none; font-weight: bold;'>[▼ {cnt_str} 세부내역 닫기]</a>"
-                header_line = f"<span style='color: {prefix_color};'>[{level}]</span> <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span>"
+                header_line = f"{tag_prefix} <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span>"
 
                 # Format per-point detail lines
                 detail_lines = [l.strip() for l in detail_t.split("\n") if l.strip()]
@@ -2546,7 +2555,7 @@ class MainWindow(QMainWindow):
             msg_html = f"<span style='color: {color}; font-weight: bold;'>{html.escape(record['raw_msg'])}</span>"
             return f"{prefix_html} {msg_html}"
         else:
-            return f"<span style='color: {prefix_color};'>[{level}]</span> <span style='color: {color};'>{record['raw_msg']}</span>"
+            return f"{tag_prefix} <span style='color: {color};'>{record['raw_msg']}</span>"
 
     def _on_log_anchor_clicked(self, url):
         if hasattr(url, "toString"):

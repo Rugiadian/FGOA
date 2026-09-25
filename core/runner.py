@@ -88,7 +88,7 @@ class WorkflowRunner(QThread):
                 found_idx = next((i for i, s in enumerate(scenarios) if s.id == self.start_scenario_id), None)
                 if found_idx is not None:
                     current_index = found_idx
-                    self.sig_log.emit("INFO", f"▶ 선택된 노드 [#{scenarios[found_idx].step_number}] '{scenarios[found_idx].name}'부터 실행을 시작합니다.")
+                    self.sig_log.emit("INFO", f"[#{scenarios[found_idx].step_number}] ▶ 선택된 노드 '{scenarios[found_idx].name}'부터 실행을 시작합니다.")
                 self.start_scenario_id = None
 
             loop_counters = {}  # {loop_start_id: int}
@@ -106,7 +106,7 @@ class WorkflowRunner(QThread):
                     target = self._resolve_target_scenario(self._next_scenario_id)
                     if target and target in scenarios:
                         current_index = scenarios.index(target)
-                        self.sig_log.emit("INFO", f"▶ 선택된 노드 [#{target.step_number}] '{target.name}'(으)로 이동하여 진행합니다.")
+                        self.sig_log.emit("INFO", f"[#{target.step_number}] ▶ 선택된 노드 '{target.name}'(으)로 이동하여 진행합니다.")
                     self._next_scenario_id = None
 
                 scen = scenarios[current_index]
@@ -205,7 +205,7 @@ class WorkflowRunner(QThread):
                         mismatch_info = ConditionEvaluator.format_mismatch_log(point_results)
                         fail_count = sum(1 for p in point_results if not p.get("passed", False))
                         mismatch_str = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
-                        self.sig_log.emit("INFO", f"⏳ [#{scen.step_number}] '{scen.name}' 조건 불일치{mismatch_str} - 재시도 대기 ({attempt}/{scen.retry_max_count}회, {scen.retry_interval_sec:.1f}초 후 재검사)...")
+                        self.sig_log.emit("INFO", f"[#{scen.step_number}] ⏳ '{scen.name}' 조건 불일치{mismatch_str} - 재시도 대기 ({attempt}/{scen.retry_max_count}회, {scen.retry_interval_sec:.1f}초 후 재검사)...")
                         time.sleep(scen.retry_interval_sec)
 
                 # Handle evaluation outcome
@@ -236,13 +236,13 @@ class WorkflowRunner(QThread):
                             if scenarios[k].node_type == "loop_end":
                                 end_idx = k
                                 break
-                        self.sig_log.emit("INFO", f"🛑 [#{scen.step_number}] 조건 일치로 현재 루프 즉시 탈출")
+                        self.sig_log.emit("INFO", f"[#{scen.step_number}] 🛑 조건 일치로 현재 루프 즉시 탈출")
                         current_index = (end_idx + 1) if end_idx is not None else len(scenarios)
 
                     elif scen.on_match == "jump":
                         target_scen = self._resolve_target_scenario(scen.jump_target_on_match)
                         if target_scen:
-                            self.sig_log.emit("INFO", f"→ 조건 일치로 시나리오 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]로 점프")
+                            self.sig_log.emit("INFO", f"[#{scen.step_number}] → 조건 일치로 시나리오 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]로 점프")
                             current_index = scenarios.index(target_scen)
                         else:
                             self.sig_log.emit("WARN", f"점프 대상 ID '{scen.jump_target_on_match}'을 찾을 수 없어 다음 단계로 진행합니다.")
@@ -269,7 +269,7 @@ class WorkflowRunner(QThread):
                             target_id = getattr(scen, "retry_fail_jump_target", "") or scen.jump_target_on_mismatch
                             target_scen = self._resolve_target_scenario(target_id)
                             if target_scen and target_scen in scenarios:
-                                self.sig_log.emit("INFO", f"→ [#{scen.step_number}] 재시도 소진으로 시나리오 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]로 점프합니다.")
+                                self.sig_log.emit("INFO", f"[#{scen.step_number}] → 재시도 소진으로 시나리오 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]로 점프합니다.")
                                 current_index = scenarios.index(target_scen)
                             else:
                                 self.sig_log.emit("WARN", f"재시도 실패 점프 대상 ID '{target_id}'를 찾을 수 없어 오토 실행을 정지합니다.")
@@ -288,13 +288,13 @@ class WorkflowRunner(QThread):
                             if scenarios[k].node_type == "loop_end":
                                 end_idx = k
                                 break
-                        self.sig_log.emit("INFO", f"🛑 [#{scen.step_number}] 조건 불일치로 현재 루프 즉시 탈출")
+                        self.sig_log.emit("INFO", f"[#{scen.step_number}] 🛑 조건 불일치로 현재 루프 즉시 탈출")
                         current_index = (end_idx + 1) if end_idx is not None else len(scenarios)
 
                     elif scen.on_mismatch == "jump":
                         target_scen = self._resolve_target_scenario(scen.jump_target_on_mismatch)
                         if target_scen:
-                            self.sig_log.emit("INFO", f"→ 조건 불일치로 시나리오 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]로 점프")
+                            self.sig_log.emit("INFO", f"[#{scen.step_number}] → 조건 불일치로 시나리오 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]로 점프")
                             current_index = scenarios.index(target_scen)
                         else:
                             self.sig_log.emit("WARN", f"점프 대상 ID '{scen.jump_target_on_mismatch}'을 찾을 수 없어 다음 단계로 진행합니다.")
@@ -377,8 +377,8 @@ class WorkflowRunner(QThread):
             else:
                 time_str = f" (안티밴 +{jitter:.2f}초)" if (should_anti_ban and jitter > 0) else ""
                 log_msg = f"액션 실행: {act.get_summary()}{coord_str}{time_str}"
-
-            self.sig_log.emit("ACTION", f"  ▶ {log_msg}")
+            step_tag = f"[#{scenario.step_number}] " if getattr(scenario, "step_number", None) is not None else ""
+            self.sig_log.emit("ACTION", f"{step_tag}▶ {log_msg}")
 
             if act.action_type == "log_message":
                 self.sig_log.emit("USER", f"  [사용자 로그] {act.log_text}")
