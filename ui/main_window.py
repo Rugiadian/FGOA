@@ -18,12 +18,12 @@ from PyQt5.QtWidgets import (
     QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QToolBar,
     QFileDialog, QMessageBox, QSplitter, QTextEdit, QStatusBar,
     QFrame, QAbstractItemView, QShortcut, QDockWidget, QMenu,
-    QAction, QInputDialog, QSizePolicy, QApplication
+    QAction, QInputDialog, QSizePolicy, QApplication, QTabWidget, QStyle
 )
-from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QDrag
+from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QDrag, QCursor
 from PyQt5.QtCore import Qt, QTimer, QFileSystemWatcher, QProcess, QByteArray, pyqtSignal, QMimeData
 
-from core.models import Project, Scenario, Condition, Action, ColorPoint
+from core.models import Project, Scenario, Condition, Action, ColorPoint, ActionSequence
 from core.window_manager import WindowManager, WindowInfo
 from core.evaluator import ConditionEvaluator
 from core.runner import WorkflowRunner
@@ -32,6 +32,7 @@ from core.version import __version__
 from ui.theme import get_stylesheet, get_theme_colors
 from ui.window_picker_dialog import WindowPickerDialog
 from ui.inspector_widget import InspectorWidget
+from ui.modules_manager_widget import ModulesManagerWidget
 from ui.widgets.color_badge import WarningBadge
 from ui.widgets.flow_layout import FlowLayout
 from ui.preset_dialog import SavePresetDialog, PresetManagerDialog
@@ -69,15 +70,16 @@ class DraggableScenarioTableWidget(QTableWidget):
             return
 
         # Fixed-width compact columns:
-        # 0: 순서 (34px), 1: 고유 ID (s1, s2...) (48px), 2: 활성 (38px), 6: 액션 (44px)
-        fixed_sum = 34 + 48 + 38 + 44
-        rem = max(180, w - fixed_sum)
+        # 0: 순서 (34px), 1: 고유 ID (s1, s2...) (48px), 2: 활성 (38px)
+        fixed_sum = 34 + 48 + 38
+        rem = max(320, w - fixed_sum)
 
         # Distribute remaining width proportionally:
-        # 3: 시나리오 이름 (40%), 4: 인식 조건 (Eye) (33%), 5: 분기 (27%)
-        w_name = max(80, int(rem * 0.40))
-        w_cond = max(75, int(rem * 0.33))
-        w_branch = max(65, rem - w_name - w_cond)
+        # 3: 시나리오 이름 (28%), 4: 인식조건 모듈 (26%), 5: 액션시퀀스 모듈 (26%), 6: 분기 (20%)
+        w_name = max(80, int(rem * 0.28))
+        w_cond = max(85, int(rem * 0.26))
+        w_act = max(85, int(rem * 0.26))
+        w_branch = max(65, rem - w_name - w_cond - w_act)
 
         header = self.horizontalHeader()
         header.resizeSection(0, 34)
@@ -85,8 +87,8 @@ class DraggableScenarioTableWidget(QTableWidget):
         header.resizeSection(2, 38)
         header.resizeSection(3, w_name)
         header.resizeSection(4, w_cond)
-        header.resizeSection(5, w_branch)
-        header.resizeSection(6, 44)
+        header.resizeSection(5, w_act)
+        header.resizeSection(6, w_branch)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -538,7 +540,7 @@ class MainWindow(QMainWindow):
         self.tbl_scenarios.setColumnCount(7)
         self.tbl_scenarios.sig_row_reordered.connect(self._on_scenario_row_reordered)
         self.tbl_scenarios.setHorizontalHeaderLabels([
-            "순서", "고유 ID", "활성", "시나리오 이름", "인식 조건 (Eye)", "분기 (일치/불일치)", "액션"
+            "순서", "고유 ID", "활성", "시나리오 이름", "인식조건 모듈", "액션시퀀스 모듈", "분기"
         ])
         
         # Responsive header resizing (Interactive mode allowing user adjustment and dynamic proportionality)
@@ -552,17 +554,27 @@ class MainWindow(QMainWindow):
         self.tbl_scenarios.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tbl_scenarios.setAlternatingRowColors(True)
         self.tbl_scenarios.itemSelectionChanged.connect(self._on_table_selection_changed)
+        self.tbl_scenarios.cellDoubleClicked.connect(self._on_scenario_cell_double_clicked)
         self.tbl_scenarios.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tbl_scenarios.customContextMenuRequested.connect(self._on_scenario_context_menu)
         l_layout.addWidget(self.tbl_scenarios, 1)
 
-        # Dock 1: Left Pane (Scenarios)
-        self.dock_scenarios = QDockWidget("📜 시나리오 목록 (Hierarchy)", self)
+        # Dock 1: Left Pane (Scenarios & Modules Tab Widget)
+        self.tab_scenario_manager = QTabWidget()
+        self.tab_scenario_manager.setObjectName("TabScenarioManager")
+        self.tab_scenario_manager.addTab(left_pane, "📜 시나리오 흐름")
+
+        self.modules_widget = ModulesManagerWidget(self.project, self.target_hwnd, parent=self)
+        self.modules_widget.sig_module_changed.connect(self._on_modules_changed)
+        self.modules_widget.sig_log.connect(self._append_log)
+        self.tab_scenario_manager.addTab(self.modules_widget, "🧩 모듈 / 노드 목록")
+
+        self.dock_scenarios = QDockWidget("📜 시나리오 및 모듈 (Hierarchy)", self)
         self.dock_scenarios.setObjectName("DockScenarios")
         self.dock_scenarios.setFeatures(
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetClosable
         )
-        self.dock_scenarios.setWidget(left_pane)
+        self.dock_scenarios.setWidget(self.tab_scenario_manager)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
 
         # ==========================================
@@ -571,6 +583,7 @@ class MainWindow(QMainWindow):
         self.inspector = InspectorWidget(self)
         self.inspector.sig_scenario_saved.connect(self._on_inspector_scenario_saved)
         self.inspector.sig_scenario_changed.connect(self._on_inspector_scenario_changed)
+        self.inspector.sig_modules_manager_requested.connect(lambda: self.tab_scenario_manager.setCurrentIndex(1))
         self.inspector.sig_log.connect(self._append_log)
 
         # Dock 2: Center Pane (Inspector)
@@ -1123,16 +1136,53 @@ class MainWindow(QMainWindow):
         it_name.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
         self.tbl_scenarios.setItem(row, 3, it_name)
 
-        # 4. Condition Summary (시나리오 목록에서 인식조건 중복 표기 제거)
-        cond_summary = scen.get_condition_summary()
+        # 4. Condition Module (Eye)
         self.tbl_scenarios.setCellWidget(row, 4, None)
-        it_cond = QTableWidgetItem(cond_summary)
-        if scen.node_type != "normal":
+        eff_cond = scen.get_effective_condition(self.project)
+        if scen.node_type == "loop_end":
+            cond_text = "-"
+        elif eff_cond:
+            c_num = getattr(eff_cond, "condition_number", "")
+            prefix = f"[C{c_num}] " if (c_num and getattr(scen, "condition_id", None)) else "[인스턴트] "
+            cond_text = f"{prefix}{eff_cond.name} ({len(eff_cond.points)}pt)"
+        else:
+            cond_text = "(조건 없음)"
+        it_cond = QTableWidgetItem(cond_text)
+        if eff_cond and getattr(scen, "condition_id", None):
+            it_cond.setForeground(QColor("#2563eb" if self.current_theme == "light" else "#60a5fa"))
+        elif scen.node_type != "normal":
             it_cond.setForeground(QColor("#64748b"))
         it_cond.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        it_cond.setToolTip("더블 클릭하여 인식조건 모듈 교체")
         self.tbl_scenarios.setItem(row, 4, it_cond)
 
-        # 5. Branch Summary (On Match / On Mismatch / Loop)
+        # 5. ActionSequence Module (Hand)
+        self.tbl_scenarios.setCellWidget(row, 5, None)
+        eff_acts = scen.get_effective_actions(self.project)
+        if scen.node_type == "loop_end":
+            act_text = "-"
+        elif getattr(scen, "sequence_id", None):
+            seq = self.project.find_action_sequence(scen.sequence_id)
+            if seq:
+                s_num = getattr(seq, "sequence_number", "")
+                prefix = f"[A{s_num}] " if s_num else ""
+                act_text = f"{prefix}{seq.name} ({len(eff_acts)}개)"
+            else:
+                act_text = f"{len(eff_acts)}개 액션"
+        elif eff_acts:
+            act_text = f"[인스턴트] ({len(eff_acts)}개)"
+        else:
+            act_text = "(액션 없음)"
+        it_act = QTableWidgetItem(act_text)
+        if getattr(scen, "sequence_id", None):
+            it_act.setForeground(QColor("#16a34a" if self.current_theme == "light" else "#4ade80"))
+        elif scen.node_type != "normal":
+            it_act.setForeground(QColor("#64748b"))
+        it_act.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        it_act.setToolTip("더블 클릭하여 액션시퀀스 모듈 교체")
+        self.tbl_scenarios.setItem(row, 5, it_act)
+
+        # 6. Branch Summary (On Match / On Mismatch / Loop)
         if scen.node_type == "loop_start":
             it_branch = QTableWidgetItem("🔁 회차 반복 제어")
             it_branch.setForeground(QColor("#2563eb" if self.current_theme == "light" else "#60a5fa"))
@@ -1159,24 +1209,7 @@ class MainWindow(QMainWindow):
 
         it_branch.setTextAlignment(Qt.AlignCenter)
         it_branch.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-        self.tbl_scenarios.setItem(row, 5, it_branch)
-
-        # 6. Action count and Sequence info
-        if scen.node_type == "loop_end":
-            act_text = "-"
-        elif getattr(scen, "sequence_id", None):
-            seq = self.project.find_action_sequence(scen.sequence_id)
-            if seq:
-                act_text = f"🔗 {len(seq.actions)}개 [{seq.name}]"
-            else:
-                act_text = f"{len(scen.actions)}개"
-        else:
-            act_text = f"{len(scen.actions)}개"
-        it_act = QTableWidgetItem(act_text)
-        it_act.setTextAlignment(Qt.AlignCenter)
-        it_act.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-        it_act.setToolTip(scen.get_actions_summary(self.project))
-        self.tbl_scenarios.setItem(row, 6, it_act)
+        self.tbl_scenarios.setItem(row, 6, it_branch)
 
     def _get_jump_display(self, target_id: str) -> str:
         if not target_id:
@@ -1440,7 +1473,17 @@ class MainWindow(QMainWindow):
         act_load_preset = menu.addAction("📥 프리셋 보관함에서 불러오기...")
         act_load_preset.triggered.connect(self._on_open_preset_manager)
         menu.addSeparator()
-        act_add = menu.addAction("➕ 새 시나리오 추가")
+
+        curr_row = self.tbl_scenarios.rowAt(pos.y())
+        if 0 <= curr_row < len(self.project.scenarios):
+            scen = self.project.scenarios[curr_row]
+            act_pick_cond = menu.addAction(f"👁️ [s{scen.scenario_number}] 인식조건 모듈 교체...")
+            act_pick_cond.triggered.connect(lambda: self._show_condition_module_picker(scen))
+            act_pick_seq = menu.addAction(f"✋ [s{scen.scenario_number}] 액션시퀀스 모듈 교체...")
+            act_pick_seq.triggered.connect(lambda: self._show_sequence_module_picker(scen))
+            menu.addSeparator()
+
+        act_add = menu.addAction("➕ 새 시나리오 추가 (조합형)")
         act_add.triggered.connect(self._on_add_scenario)
         act_dup = menu.addAction("📋 시나리오 복제")
         act_dup.triggered.connect(self._on_duplicate_scenario)
@@ -1461,20 +1504,233 @@ class MainWindow(QMainWindow):
         menu.exec_(self.tbl_scenarios.viewport().mapToGlobal(pos))
 
     # ==========================================
+    # Modular Composite Scenario Handlers
+    # ==========================================
+    def _on_modules_changed(self):
+        """Called when modules are added/edited/deleted from ModulesManagerWidget."""
+        self._refresh_scenario_table()
+        if hasattr(self, "inspector") and self.inspector:
+            self.inspector._populate_condition_combo()
+            self.inspector._populate_sequence_combo()
+            self.inspector._refresh_actions_table()
+            self.inspector._refresh_points_table()
+
+    def _on_scenario_cell_double_clicked(self, row: int, col: int):
+        """Handles fast module swapping when user double-clicks Condition (col 4) or ActionSequence (col 5)."""
+        if not (0 <= row < len(self.project.scenarios)):
+            return
+        scen = self.project.scenarios[row]
+        if col == 4:
+            self._show_condition_module_picker(scen)
+        elif col == 5:
+            self._show_sequence_module_picker(scen)
+
+    def _show_condition_module_picker(self, scen: Scenario):
+        """Presents quick menu to swap condition module or create a new one."""
+        menu = QMenu(self)
+        eff_cond = scen.get_effective_condition(self.project)
+        cur_title = f"[C{eff_cond.condition_number}] {eff_cond.name}" if eff_cond else "(조건 없음)"
+        header_act = menu.addAction(f"👁️ 인식조건 모듈 선택 (현재: {cur_title})")
+        header_act.setEnabled(False)
+        menu.addSeparator()
+
+        for cond in getattr(self.project, "conditions", []):
+            c_num = getattr(cond, "condition_number", "")
+            act = menu.addAction(f"🔗 [C{c_num}] {cond.name} ({len(cond.points)}개 포인트)")
+            if getattr(scen, "condition_id", None) == cond.id:
+                act.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
+            act.triggered.connect(lambda checked, c=cond: self._assign_condition_to_scenario(scen, c.id))
+
+        menu.addSeparator()
+        act_new = menu.addAction("➕ 새 인식조건 모듈 생성 및 조립...")
+        act_new.triggered.connect(lambda: self._create_and_assign_condition(scen))
+
+        if getattr(scen, "condition_id", None):
+            act_unlink = menu.addAction("🔓 인스턴트 인식 조건으로 분리 (연결 해제)")
+            act_unlink.triggered.connect(lambda: self._unlink_condition_from_scenario(scen))
+
+        act_none = menu.addAction("❌ 조건 없음 (무조건 실행)")
+        act_none.triggered.connect(lambda: self._clear_condition_from_scenario(scen))
+
+        menu.exec_(QCursor.pos())
+
+    def _assign_condition_to_scenario(self, scen: Scenario, cond_id: str):
+        self._push_scenario_undo_state(f"시나리오 s{scen.scenario_number} 인식조건 모듈 변경")
+        scen.condition_id = cond_id
+        cond = self.project.find_condition(cond_id)
+        if cond and cond.action_sequence_id and getattr(scen, "sequence_id", None) != cond.action_sequence_id:
+            scen.sequence_id = cond.action_sequence_id
+        elif cond and getattr(scen, "sequence_id", None) and not cond.action_sequence_id:
+            cond.action_sequence_id = scen.sequence_id
+
+        self._refresh_scenario_table()
+        if self.inspector.current_scenario and self.inspector.current_scenario.id == scen.id:
+            self.inspector.set_scenario(scen, self.target_hwnd, self.project)
+        if hasattr(self, "modules_widget"):
+            self.modules_widget.refresh_modules()
+        c_num = cond.condition_number if cond else ""
+        c_name = cond.name if cond else ""
+        self._append_log("INFO", f"시나리오 s{scen.scenario_number} [{scen.name}]에 인식조건 모듈 [C{c_num}] '{c_name}'이 조립되었습니다.")
+
+    def _create_and_assign_condition(self, scen: Scenario):
+        name, ok = QInputDialog.getText(
+            self, "새 인식조건 모듈 생성", "인식조건 모듈 이름:",
+            text=f"{scen.name} 인식조건"
+        )
+        if not ok or not name.strip():
+            return
+        self._push_scenario_undo_state(f"새 인식조건 모듈 생성 및 s{scen.scenario_number} 조립")
+        new_cond = Condition(
+            name=name.strip(),
+            logic_operator="AND",
+            points=[],
+            action_sequence_id=getattr(scen, "sequence_id", None)
+        )
+        self.project.add_condition(new_cond)
+        scen.condition_id = new_cond.id
+        self._refresh_scenario_table()
+        if self.inspector.current_scenario and self.inspector.current_scenario.id == scen.id:
+            self.inspector.set_scenario(scen, self.target_hwnd, self.project)
+        if hasattr(self, "modules_widget"):
+            self.modules_widget.refresh_modules()
+        self._append_log("INFO", f"새 인식조건 모듈 [C{new_cond.condition_number}] '{new_cond.name}' 생성 및 조립 완료")
+
+    def _unlink_condition_from_scenario(self, scen: Scenario):
+        if not getattr(scen, "condition_id", None):
+            return
+        self._push_scenario_undo_state(f"시나리오 s{scen.scenario_number} 인스턴트 조건 분리")
+        eff_cond = scen.get_effective_condition(self.project)
+        if eff_cond:
+            scen.condition = copy.deepcopy(eff_cond)
+        scen.condition_id = None
+        self._refresh_scenario_table()
+        if self.inspector.current_scenario and self.inspector.current_scenario.id == scen.id:
+            self.inspector.set_scenario(scen, self.target_hwnd, self.project)
+        if hasattr(self, "modules_widget"):
+            self.modules_widget.refresh_modules()
+        self._append_log("INFO", f"시나리오 s{scen.scenario_number}의 인식조건이 공용 모듈에서 인스턴트 인식 조건으로 분리되었습니다.")
+
+    def _clear_condition_from_scenario(self, scen: Scenario):
+        self._push_scenario_undo_state(f"시나리오 s{scen.scenario_number} 조건 제거")
+        scen.condition_id = None
+        scen.condition = None
+        self._refresh_scenario_table()
+        if self.inspector.current_scenario and self.inspector.current_scenario.id == scen.id:
+            self.inspector.set_scenario(scen, self.target_hwnd, self.project)
+        if hasattr(self, "modules_widget"):
+            self.modules_widget.refresh_modules()
+        self._append_log("INFO", f"시나리오 s{scen.scenario_number}의 조건이 제거되어 무조건 실행으로 변경되었습니다.")
+
+    def _show_sequence_module_picker(self, scen: Scenario):
+        """Presents quick menu to swap action sequence module or create a new one."""
+        menu = QMenu(self)
+        eff_acts = scen.get_effective_actions(self.project)
+        seq_mod = self.project.find_action_sequence(scen.sequence_id) if getattr(scen, "sequence_id", None) else None
+        cur_title = f"[A{seq_mod.sequence_number}] {seq_mod.name}" if seq_mod else f"{len(eff_acts)}개 액션"
+        header_act = menu.addAction(f"✋ 액션시퀀스 모듈 선택 (현재: {cur_title})")
+        header_act.setEnabled(False)
+        menu.addSeparator()
+
+        for seq in getattr(self.project, "action_sequences", []):
+            s_num = getattr(seq, "sequence_number", "")
+            act = menu.addAction(f"🔗 [A{s_num}] {seq.name} ({len(seq.actions)}개 액션)")
+            if getattr(scen, "sequence_id", None) == seq.id:
+                act.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
+            act.triggered.connect(lambda checked, s=seq: self._assign_sequence_to_scenario(scen, s.id))
+
+        menu.addSeparator()
+        act_new = menu.addAction("➕ 새 액션시퀀스 모듈 생성 및 조립...")
+        act_new.triggered.connect(lambda: self._create_and_assign_sequence(scen))
+
+        if getattr(scen, "sequence_id", None):
+            act_unlink = menu.addAction("🔓 인스턴트 액션 시퀀스로 분리 (연결 해제)")
+            act_unlink.triggered.connect(lambda: self._unlink_sequence_from_scenario(scen))
+
+        act_none = menu.addAction("❌ 액션 없음")
+        act_none.triggered.connect(lambda: self._clear_sequence_from_scenario(scen))
+
+        menu.exec_(QCursor.pos())
+
+    def _assign_sequence_to_scenario(self, scen: Scenario, seq_id: str):
+        self._push_scenario_undo_state(f"시나리오 s{scen.scenario_number} 액션시퀀스 모듈 변경")
+        scen.sequence_id = seq_id
+        eff_cond = scen.get_effective_condition(self.project)
+        if eff_cond:
+            eff_cond.action_sequence_id = seq_id
+
+        self._refresh_scenario_table()
+        if self.inspector.current_scenario and self.inspector.current_scenario.id == scen.id:
+            self.inspector.set_scenario(scen, self.target_hwnd, self.project)
+        if hasattr(self, "modules_widget"):
+            self.modules_widget.refresh_modules()
+        seq = self.project.find_action_sequence(seq_id)
+        s_num = seq.sequence_number if seq else ""
+        s_name = seq.name if seq else ""
+        self._append_log("INFO", f"시나리오 s{scen.scenario_number} [{scen.name}]에 액션시퀀스 모듈 [A{s_num}] '{s_name}'이 조립되었습니다.")
+
+    def _create_and_assign_sequence(self, scen: Scenario):
+        name, ok = QInputDialog.getText(
+            self, "새 액션시퀀스 모듈 생성", "액션시퀀스 모듈 이름:",
+            text=f"{scen.name} 액션시퀀스"
+        )
+        if not ok or not name.strip():
+            return
+        self._push_scenario_undo_state(f"새 액션시퀀스 모듈 생성 및 s{scen.scenario_number} 조립")
+        new_seq = ActionSequence(
+            name=name.strip(),
+            actions=[]
+        )
+        self.project.add_action_sequence(new_seq)
+        scen.sequence_id = new_seq.id
+        eff_cond = scen.get_effective_condition(self.project)
+        if eff_cond:
+            eff_cond.action_sequence_id = new_seq.id
+
+        self._refresh_scenario_table()
+        if self.inspector.current_scenario and self.inspector.current_scenario.id == scen.id:
+            self.inspector.set_scenario(scen, self.target_hwnd, self.project)
+        if hasattr(self, "modules_widget"):
+            self.modules_widget.refresh_modules()
+        self._append_log("INFO", f"새 액션시퀀스 모듈 [A{new_seq.sequence_number}] '{new_seq.name}' 생성 및 조립 완료")
+
+    def _unlink_sequence_from_scenario(self, scen: Scenario):
+        if not getattr(scen, "sequence_id", None):
+            return
+        self._push_scenario_undo_state(f"시나리오 s{scen.scenario_number} 인스턴트 액션 시퀀스 분리")
+        eff_acts = scen.get_effective_actions(self.project)
+        scen.actions = copy.deepcopy(eff_acts)
+        scen.sequence_id = None
+        self._refresh_scenario_table()
+        if self.inspector.current_scenario and self.inspector.current_scenario.id == scen.id:
+            self.inspector.set_scenario(scen, self.target_hwnd, self.project)
+        if hasattr(self, "modules_widget"):
+            self.modules_widget.refresh_modules()
+        self._append_log("INFO", f"시나리오 s{scen.scenario_number}의 액션시퀀스가 공용 모듈에서 인스턴트 액션 시퀀스로 분리되었습니다.")
+
+    def _clear_sequence_from_scenario(self, scen: Scenario):
+        self._push_scenario_undo_state(f"시나리오 s{scen.scenario_number} 액션 제거")
+        scen.sequence_id = None
+        scen.actions = []
+        self._refresh_scenario_table()
+        if self.inspector.current_scenario and self.inspector.current_scenario.id == scen.id:
+            self.inspector.set_scenario(scen, self.target_hwnd, self.project)
+        if hasattr(self, "modules_widget"):
+            self.modules_widget.refresh_modules()
+        self._append_log("INFO", f"시나리오 s{scen.scenario_number}의 액션이 제거되었습니다.")
+
+    # ==========================================
     # Toolbar Actions
     # ==========================================
     def _on_add_scenario(self):
-        new_step_num = len(self.project.scenarios) + 1
         new_scen_num = self.project.get_next_scenario_number()
-        new_scen = Scenario(
-            step_number=new_step_num,
-            scenario_number=new_scen_num,
-            name=f"시나리오 {new_scen_num}",
-            enabled=True
-        )
         self._push_scenario_undo_state(f"시나리오 #{new_scen_num} 추가")
-        self.project.scenarios.append(new_scen)
+        new_scen = self.project.create_composite_scenario(
+            name=f"시나리오 {new_scen_num}",
+            node_type="normal"
+        )
         self._refresh_scenario_table()
+        if hasattr(self, "modules_widget"):
+            self.modules_widget.refresh_modules()
         self.tbl_scenarios.selectRow(len(self.project.scenarios) - 1)
 
     def _on_add_loop_block(self):
@@ -1606,6 +1862,8 @@ class MainWindow(QMainWindow):
             self.project.target_client_height = dlg.selected_window.client_height
             self._save_app_config()
             self.inspector.set_target_hwnd(self.target_hwnd)
+            if hasattr(self, "modules_widget") and self.modules_widget:
+                self.modules_widget.target_hwnd = self.target_hwnd
             if hasattr(self, "action_overlay") and self.action_overlay:
                 self.action_overlay.set_target_hwnd(self.target_hwnd)
             self._update_target_label(dlg.selected_window)
@@ -1920,6 +2178,10 @@ class MainWindow(QMainWindow):
                 if hasattr(self, "spin_coord_strong"):
                     self.spin_coord_strong.setValue(getattr(self.project, "anti_ban_coord_strong", 15))
                 self._refresh_scenario_table()
+                if hasattr(self, "modules_widget"):
+                    self.modules_widget.set_project(self.project, self.target_hwnd)
+                if hasattr(self, "inspector"):
+                    self.inspector.set_project(self.project)
                 if self.project.scenarios:
                     self.tbl_scenarios.selectRow(0)
                 self.status_bar.showMessage(f"프로젝트 불러오기 완료: {path}", 4000)

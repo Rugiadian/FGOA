@@ -80,6 +80,7 @@ class TestNewFeatures(unittest.TestCase):
         s1 = Scenario(
             id="s1", scenario_number=1, name="카드 선택",
             condition=Condition(reference_image_path=ref_image, points=[ColorPoint(x=50, y=50)]),
+            last_action_image_path=ref_image,
             actions=[Action(action_type="mouse_click", x=200, y=300)]
         )
         proj.scenarios = [s1]

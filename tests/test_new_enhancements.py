@@ -58,13 +58,21 @@ class TestNewEnhancements(unittest.TestCase):
                 self.assertTrue(pattern.match(f), f"Filename {f} does not match timestamp pattern")
 
     def test_02_coordinate_picker_initial_image_and_memory(self):
-        """Verify CoordinatePickerDialog prioritizes scenario condition image and remembers last used."""
+        """Verify CoordinatePickerDialog decouples condition image by default and allows explicit import via button."""
+        # Clear any cached image path
+        CoordinatePickerDialog.set_last_used_image_path(None)
+
         # 1. Scenario with condition image
         cond = Condition(reference_image_path=self.dummy_img_path)
         scenario = Scenario(id="sc1", scenario_number=1, name="테스트", condition=cond)
 
-        # Launch dialog with scenario
+        # Launch dialog with scenario: condition image is decoupled by default (dummy canvas initialized)
         dlg = CoordinatePickerDialog(scenario=scenario, target_hwnd=0)
+        self.assertIsNone(dlg.current_image_path)
+        self.assertEqual(dlg.canvas.pixmap.width(), 1600)
+
+        # User clicks "연결된 인식조건 레퍼런스 이미지 가져오기"
+        dlg._on_import_linked_condition_image()
         self.assertEqual(dlg.current_image_path, self.dummy_img_path)
         self.assertIsNotNone(dlg.canvas.pixmap)
         self.assertEqual(dlg.canvas.pixmap.width(), 200)

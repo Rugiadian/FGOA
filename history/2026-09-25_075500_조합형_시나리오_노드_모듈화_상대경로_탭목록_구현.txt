@@ -1,0 +1,70 @@
+================================================================================
+FGOA 작업 내역 기록 (Work History Log)
+================================================================================
+
+1. [일시 / Timestamp]
+- 작업 일시: 2026-09-25 07:55:00
+- FGOA 버전: 260925.0754
+
+2. [요청 내용 / User Request]
+- 시나리오 노드를 조합형(Modular Composite Scenario Node)으로 변경
+  * 시나리오 노드 생성 시 내부에 '인식조건 칸(고유 번호 [C#], 이름 출력)', '액션시퀀스 칸(고유 번호 [A#], 제목 출력)' 제공
+  * 각 칸에는 새로운 인식조건과 액션시퀀스가 기본값으로 등록되며, 클릭/더블클릭을 통해 기존에 만들어둔 모듈로 자유롭게 교체/조립 가능
+  * 인식조건 및 액션시퀀스를 독립된 재사용 모듈로 관리
+- 액션시퀀스에 레퍼런스 이미지 기본값을 인식조건 레퍼런스 이미지로 자동 상속해 오던 동작 해제
+  * 액션시퀀스 좌표 지정 작업창 상단 툴바에 '연결된 인식조건 레퍼런스 이미지 가져오기' 옵션 버튼 추가 (함께 조합된 인식조건 이미지 명시적 임포트)
+- 조합형 노드 구조에 맞춰 인식조건에서 실행할 액션시퀀스를 상호 연결 (기본값으로 시나리오 내 함께 묶여있는 액션시퀀스 자동 바인딩)
+- GitHub에 레퍼런스 이미지 폴더(references/) 통합 업로드 및 상대 경로 지원
+  * 타 컴퓨터 환경에서 시나리오 파일 로딩 시 이미지 경로가 자동으로 복구되도록 상대 경로 기반 시스템 구축
+- 시나리오 목록에 겹쳐진 탭 인터페이스 추가 및 노드 목록 구현
+  * 탭 1: '시나리오 흐름' (시나리오 테이블 흐름)
+  * 탭 2: '모듈 / 노드 목록' (인식조건 [C#] 및 액션시퀀스 [A#]를 한 번에 조회/관리할 수 있는 전용 뷰)
+
+3. [결과 요약 / Summary of Results]
+- 상대 경로 및 이미지 자동 복구 모듈 구현 (core/path_utils.py):
+  * get_project_root(), get_references_dir(), to_relative_path(), to_absolute_path() 함수 제공
+  * 절대 경로를 Git 저장소 기준 상대 경로('references/xxxx.png')로 투명하게 변환
+  * 다른 컴퓨터의 절대 경로가 포함된 프로젝트도 저장소 내 동일 파일명 검색을 통해 자동 경로 복구
+- 저장소 내 레퍼런스 이미지 디렉토리 구축 (references/):
+  * 기존 프로젝트 이미지 51개를 references/로 이관하여 GitHub 동기화 가능 상태로 구성
+- 조합형 모듈 데이터 모델 아키텍처 구축 (core/models.py):
+  * Condition: condition_number (C1, C2...), action_sequence_id (연결된 액션시퀀스 모듈 ID), 상대경로 직렬화
+  * ActionSequence: sequence_number (A1, A2...), 상대경로 직렬화
+  * Scenario: condition_id, sequence_id 슬롯 추가, get_effective_condition(), get_effective_actions() 조합 노드 해석기 구현
+  * Project: conditions 리스트, 모듈 번호 관리(renumber_modules), create_composite_scenario() 팩토리 메서드 구현
+- 액션시퀀스 레퍼런스 이미지 상속 해제 및 수동 임포트 버튼 (ui/coordinate_picker_dialog.py):
+  * 조건 이미지 기본 로딩 제거 (더미 캔버스 우선)
+  * '🔗 연결된 인식조건 레퍼런스 이미지 가져오기' 버튼 추가 및 _on_import_linked_condition_image() 구현
+- 좌측 도크 탭 분할 및 모듈 테이블/스왑 UI 구현 (ui/main_window.py):
+  * 탭 1: '📜 시나리오 흐름' (C#/A# 고유 라벨 표기 컬럼 분리, 더블클릭/우클릭 시 모듈 교체 다이얼로그 팝업)
+  * 탭 2: '🧩 모듈 / 노드 목록' (ModulesManagerWidget 배치)
+- 모듈 종합 관리 위젯 신규 구현 (ui/modules_manager_widget.py):
+  * 상하 2분할 뷰: 상단 인식조건 모듈 목록(C#), 하단 액션시퀀스 모듈 목록(A#)
+  * 모듈 추가/복제/편집/삭제 및 각 모듈이 어느 시나리오에 조립되어 사용 중인지 실시간 통계 표기
+- 인스펙터 및 갤러리 연동 (ui/inspector_widget.py, ui/reference_gallery_dialog.py):
+  * 인스펙터 상단에 인식조건 모듈 선택 콤보박스, 신규 저장, 분리(언링크) 기능 제공
+  * 갤러리에서 시나리오 및 모듈 전체의 이미지 사용처(조건/액션) 종합 감지
+- 테스트 스위트 작성 및 전체 검증:
+  * tests/test_composite_scenario_modules.py 신규 6건 작성
+  * 전체 1,126건 단위 테스트 100% 통과 (0 failures, 1 skipped)
+- 버전 관리 규칙 준수: core/version.py -> 260925.0754 업데이트
+
+4. [영향 파일 목록 / Affected Files]
+- core/path_utils.py (신규)
+- references/ (신규 디렉토리 및 이미지 51개)
+- core/models.py
+- core/runner.py
+- core/version.py
+- ui/coordinate_picker_dialog.py
+- ui/modules_manager_widget.py (신규)
+- ui/inspector_widget.py
+- ui/main_window.py
+- ui/reference_gallery_dialog.py
+- ui/action_editor_dialog.py
+- ui/scenario_editor_dialog.py
+- tests/test_composite_scenario_modules.py (신규)
+- tests/test_new_enhancements.py
+- tests/test_scenario_table_flow_and_uid.py
+- tests/test_features.py
+- history/2026-09-25_075500_조합형_시나리오_노드_모듈화_상대경로_탭목록_구현.txt (신규)
+================================================================================

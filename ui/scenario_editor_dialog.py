@@ -211,9 +211,7 @@ class ScenarioEditorDialog(QDialog):
             self._update_summaries()
 
     def _on_edit_actions(self):
-        ref_path = getattr(self.scenario, "last_action_image_path", None) or (
-            self.scenario.condition.reference_image_path if self.scenario.condition else None
-        )
+        ref_path = getattr(self.scenario, "last_action_image_path", None)
         dlg = ActionEditorDialog(
             actions=self.scenario.actions,
             target_hwnd=self.target_hwnd,

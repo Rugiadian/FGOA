@@ -6,6 +6,9 @@ from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Dict, Any
 
 
+from core.path_utils import to_relative_path, to_absolute_path
+
+
 @dataclass
 class ColorPoint:
     """Represents a single color detection point relative to target window."""
@@ -38,30 +41,43 @@ class ColorPoint:
 @dataclass
 class Condition:
     """Execution condition containing multiple color detection points and logic."""
-    id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
-    name: str = "조건 1"
+    id: str = field(default_factory=lambda: f"cond_{uuid.uuid4().hex[:6]}")
+    condition_number: int = 1  # 고유 번호 (C1, C2...)
+    name: str = "새 인식조건"
     logic_operator: str = "AND"  # "AND" (all points match) or "OR" (at least one)
     reference_image_path: Optional[str] = None
     points: List[ColorPoint] = field(default_factory=list)
+    action_sequence_id: Optional[str] = None  # 자동 연결된 액션시퀀스 모듈 ID
+
+    def get_summary(self) -> str:
+        """User-friendly summary of this condition."""
+        if not self.points:
+            return "무조건 실행"
+        return f"포인트 {len(self.points)}개 ({self.logic_operator})"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
+            "condition_number": self.condition_number,
             "name": self.name,
             "logic_operator": self.logic_operator,
-            "reference_image_path": self.reference_image_path,
-            "points": [p.to_dict() for p in self.points]
+            "reference_image_path": to_relative_path(self.reference_image_path),
+            "points": [p.to_dict() for p in self.points],
+            "action_sequence_id": self.action_sequence_id
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Condition":
         points = [ColorPoint.from_dict(p) for p in data.get("points", [])]
+        raw_ref = data.get("reference_image_path")
         return cls(
-            id=data.get("id", str(uuid.uuid4())[:8]),
+            id=data.get("id", f"cond_{uuid.uuid4().hex[:6]}"),
+            condition_number=int(data.get("condition_number", 1)),
             name=data.get("name", "조건"),
             logic_operator=data.get("logic_operator", "AND"),
-            reference_image_path=data.get("reference_image_path"),
-            points=points
+            reference_image_path=to_relative_path(raw_ref) if raw_ref else None,
+            points=points,
+            action_sequence_id=data.get("action_sequence_id")
         )
 
 
@@ -145,6 +161,7 @@ class Action:
 class ActionSequence:
     """A reusable modular bundle of automation actions."""
     id: str = field(default_factory=lambda: f"seq_{uuid.uuid4().hex[:6]}")
+    sequence_number: int = 1      # 고유 번호 (A1, A2...)
     name: str = "새 액션 시퀀스"
     description: str = ""
     actions: List[Action] = field(default_factory=list)
@@ -162,27 +179,30 @@ class ActionSequence:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
+            "sequence_number": self.sequence_number,
             "name": self.name,
             "description": self.description,
             "actions": [a.to_dict() for a in self.actions],
-            "last_action_image_path": self.last_action_image_path
+            "last_action_image_path": to_relative_path(self.last_action_image_path)
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ActionSequence":
         actions = [Action.from_dict(a) for a in data.get("actions", [])]
+        raw_img = data.get("last_action_image_path")
         return cls(
             id=data.get("id", f"seq_{uuid.uuid4().hex[:6]}"),
+            sequence_number=int(data.get("sequence_number", 1)),
             name=data.get("name", "새 액션 시퀀스"),
             description=data.get("description", ""),
             actions=actions,
-            last_action_image_path=data.get("last_action_image_path")
+            last_action_image_path=to_relative_path(raw_img) if raw_img else None
         )
 
 
 @dataclass
 class Scenario:
-    """A workflow step combining Condition checking and Action execution."""
+    """A workflow step combining Condition checking and Action execution (Composite Node)."""
     id: str = field(default_factory=lambda: f"scen_{uuid.uuid4().hex[:6]}")
     step_number: int = 1          # 실행 순서 (1, 2, 3... 드래그/이동 시 재계산)
     scenario_number: int = 1      # 시나리오 고유 번호 (위치가 바뀌어도 유지되는 불변 고유 식별 번호)
@@ -195,8 +215,9 @@ class Scenario:
     loop_count: int = 5           # 반복 횟수 (또는 최대 안전 한도)
     loop_target_id: str = ""      # loop_end일 때 대응되는 loop_start의 ID
     
-    # Condition
-    condition: Optional[Condition] = None  # None means unconditional execution
+    # Modular Condition slot (references project.conditions[condition_id])
+    condition_id: Optional[str] = None
+    condition: Optional[Condition] = None  # Direct / legacy condition
     
     # Branching on match
     on_match: str = "execute"  # "execute" (run actions then next), "jump" (jump to target), "stop" (stop automation), "break_loop" (루프 탈출)
@@ -210,10 +231,9 @@ class Scenario:
     retry_fail_action: str = "stop"  # "stop" (정지), "jump" (특정 시나리오로 점프), "next" (다음 단계로 진행)
     retry_fail_jump_target: str = ""  # retry_fail_action이 "jump"일 때 대상 시나리오 ID
     
-    # Actions to execute when condition is met (or unconditional)
-    # If sequence_id is set, actions are referenced from project.action_sequences[sequence_id]
+    # Modular Action Sequence slot (references project.action_sequences[sequence_id])
     sequence_id: Optional[str] = None
-    actions: List[Action] = field(default_factory=list)
+    actions: List[Action] = field(default_factory=list)  # Standalone / fallback actions
     post_delay_seconds: float = 0.2
 
     # Custom log and last action image path
@@ -244,19 +264,13 @@ class Scenario:
             return "🔁 루프 종료 (시작으로 복귀)"
         return ""
 
-    def get_actions_summary(self, project: Optional["Project"] = None) -> str:
-        """Returns summarized text of actions in this scenario."""
-        if self.sequence_id and project:
-            seq = project.find_action_sequence(self.sequence_id)
-            if seq:
-                return f"🔗 [{seq.name}] {seq.get_summary()}"
-        actions = self.actions
-        if not actions:
-            return "(액션 없음)"
-        summaries = [a.get_summary() for a in actions]
-        if len(summaries) <= 3:
-            return " → ".join(summaries)
-        return f"{summaries[0]} → {summaries[1]} 외 {len(summaries) - 2}개"
+    def get_effective_condition(self, project: Optional["Project"] = None) -> Optional[Condition]:
+        """Returns effective condition: from linked Condition module if condition_id is set and found, else self.condition."""
+        if self.condition_id and project:
+            cond = project.find_condition(self.condition_id)
+            if cond:
+                return cond
+        return self.condition
 
     def get_effective_actions(self, project: Optional["Project"] = None) -> List[Action]:
         """Returns effective actions: from linked ActionSequence if sequence_id is set and found, else self.actions."""
@@ -266,21 +280,38 @@ class Scenario:
                 return seq.actions
         return self.actions
 
-    def get_condition_summary(self) -> str:
+    def get_actions_summary(self, project: Optional["Project"] = None) -> str:
+        """Returns summarized text of actions in this scenario."""
+        if self.sequence_id and project:
+            seq = project.find_action_sequence(self.sequence_id)
+            if seq:
+                return f"🔗 [{seq.name}] ({len(seq.actions)}개 액션) - {seq.get_summary()}"
+        actions = self.actions
+        if not actions:
+            return "(액션 없음)"
+        summaries = [a.get_summary() for a in actions]
+        if len(summaries) <= 3:
+            return " → ".join(summaries)
+        return f"{summaries[0]} → {summaries[1]} 외 {len(summaries) - 2}개"
+
+    def get_condition_summary(self, project: Optional["Project"] = None) -> str:
         """Returns summarized text of condition."""
         if self.node_type == "loop_start":
-            if self.loop_mode in ("until_match", "while_match") and self.condition and self.condition.points:
-                pts = self.condition.points
+            eff_cond = self.get_effective_condition(project)
+            if self.loop_mode in ("until_match", "while_match") and eff_cond and eff_cond.points:
+                pts = eff_cond.points
                 mode_str = "일치 시 탈출" if self.loop_mode == "until_match" else "일치 동안 반복"
                 return f"루프 탈출 조건: 포인트 {len(pts)}개 ({mode_str})"
             return f"횟수 제어 ({self.loop_count}회)"
         elif self.node_type == "loop_end":
             return "(루프 시작으로 복귀)"
             
-        if not self.condition or not self.condition.points:
+        eff_cond = self.get_effective_condition(project)
+        if not eff_cond or not eff_cond.points:
             return "무조건 실행"
-        pts = self.condition.points
-        return f"포인트 {len(pts)}개 ({self.condition.logic_operator})"
+        pts = eff_cond.points
+        c_num = getattr(eff_cond, "condition_number", 1)
+        return f"[C{c_num}] {eff_cond.name} ({len(pts)}개 {eff_cond.logic_operator})"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -293,6 +324,7 @@ class Scenario:
             "loop_mode": self.loop_mode,
             "loop_count": self.loop_count,
             "loop_target_id": self.loop_target_id,
+            "condition_id": self.condition_id,
             "condition": self.condition.to_dict() if self.condition else None,
             "on_match": self.on_match,
             "jump_target_on_match": self.jump_target_on_match,
@@ -306,7 +338,7 @@ class Scenario:
             "actions": [a.to_dict() for a in self.actions],
             "post_delay_seconds": self.post_delay_seconds,
             "custom_log": self.custom_log,
-            "last_action_image_path": self.last_action_image_path
+            "last_action_image_path": to_relative_path(self.last_action_image_path)
         }
 
     @classmethod
@@ -314,6 +346,7 @@ class Scenario:
         cond_data = data.get("condition")
         condition = Condition.from_dict(cond_data) if cond_data else None
         actions = [Action.from_dict(a) for a in data.get("actions", [])]
+        raw_img = data.get("last_action_image_path")
         return cls(
             id=data.get("id", f"scen_{uuid.uuid4().hex[:6]}"),
             step_number=data.get("step_number", 1),
@@ -324,6 +357,7 @@ class Scenario:
             loop_mode=data.get("loop_mode", "count"),
             loop_count=data.get("loop_count", 5),
             loop_target_id=data.get("loop_target_id", ""),
+            condition_id=data.get("condition_id"),
             condition=condition,
             on_match=data.get("on_match", "execute"),
             jump_target_on_match=data.get("jump_target_on_match", ""),
@@ -337,7 +371,7 @@ class Scenario:
             actions=actions,
             post_delay_seconds=data.get("post_delay_seconds", 0.2),
             custom_log=data.get("custom_log", ""),
-            last_action_image_path=data.get("last_action_image_path")
+            last_action_image_path=to_relative_path(raw_img) if raw_img else None
         )
 
 
@@ -358,6 +392,7 @@ class Project:
     anti_ban_offset_seconds: float = 1.0  # +n seconds delay offset applied globally
     anti_ban_coord_weak: int = 5          # Coordinate offset weak (약): ±5px
     anti_ban_coord_strong: int = 15       # Coordinate offset strong (강): ±15px
+    conditions: List[Condition] = field(default_factory=list)
     action_sequences: List[ActionSequence] = field(default_factory=list)
     scenarios: List[Scenario] = field(default_factory=list)
 
@@ -425,6 +460,120 @@ class Project:
         nums = [getattr(s, "scenario_number", 0) for s in self.scenarios if getattr(s, "scenario_number", 0) > 0]
         return (max(nums) + 1) if nums else 1
 
+    def get_next_condition_number(self) -> int:
+        """Generate next unique condition number (1, 2, 3...)."""
+        nums = [getattr(c, "condition_number", 0) for c in self.conditions if getattr(c, "condition_number", 0) > 0]
+        return (max(nums) + 1) if nums else 1
+
+    def get_next_sequence_number(self) -> int:
+        """Generate next unique sequence number (1, 2, 3...)."""
+        nums = [getattr(s, "sequence_number", 0) for s in self.action_sequences if getattr(s, "sequence_number", 0) > 0]
+        return (max(nums) + 1) if nums else 1
+
+    def renumber_modules(self):
+        """Ensure all conditions and sequences have unique positive numbers."""
+        used_c = set()
+        for c in self.conditions:
+            if not getattr(c, "condition_number", None) or c.condition_number in used_c:
+                c.condition_number = (max(used_c) + 1) if used_c else 1
+            used_c.add(c.condition_number)
+
+        used_s = set()
+        for s in self.action_sequences:
+            if not getattr(s, "sequence_number", None) or s.sequence_number in used_s:
+                s.sequence_number = (max(used_s) + 1) if used_s else 1
+            used_s.add(s.sequence_number)
+
+    def find_condition(self, cond_id: str) -> Optional[Condition]:
+        """Find registered Condition module by ID."""
+        for c in self.conditions:
+            if c.id == cond_id:
+                return c
+        return None
+
+    def find_condition_by_number(self, num: int) -> Optional[Condition]:
+        for c in self.conditions:
+            if getattr(c, "condition_number", None) == num:
+                return c
+        return None
+
+    def add_condition(self, cond: Condition):
+        """Add a condition module if not already present."""
+        if not any(c.id == cond.id for c in self.conditions):
+            self.conditions.append(cond)
+
+    def delete_condition(self, cond_id: str):
+        """Delete a condition module and unlink any scenarios referencing it."""
+        self.conditions = [c for c in self.conditions if c.id != cond_id]
+        for scen in self.scenarios:
+            if scen.condition_id == cond_id:
+                scen.condition_id = None
+
+    def find_action_sequence(self, seq_id: str) -> Optional[ActionSequence]:
+        """Find registered ActionSequence by ID."""
+        for seq in self.action_sequences:
+            if seq.id == seq_id:
+                return seq
+        return None
+
+    def find_action_sequence_by_number(self, num: int) -> Optional[ActionSequence]:
+        for seq in self.action_sequences:
+            if getattr(seq, "sequence_number", None) == num:
+                return seq
+        return None
+
+    def add_action_sequence(self, seq: ActionSequence):
+        """Add a new action sequence if not already present."""
+        if not any(s.id == seq.id for s in self.action_sequences):
+            self.action_sequences.append(seq)
+
+    def delete_action_sequence(self, seq_id: str):
+        """Delete an action sequence and unlink any scenarios referencing it."""
+        self.action_sequences = [s for s in self.action_sequences if s.id != seq_id]
+        for scen in self.scenarios:
+            if scen.sequence_id == seq_id:
+                scen.sequence_id = None
+        for cond in self.conditions:
+            if cond.action_sequence_id == seq_id:
+                cond.action_sequence_id = None
+
+    def create_composite_scenario(self, name: str = "새 시나리오", node_type: str = "normal", add_to_project: bool = True) -> Scenario:
+        """
+        Creates a new modular composite scenario with newly paired Condition and ActionSequence modules.
+        The condition automatically links to the bundled action sequence as default.
+        """
+        scen_num = self.get_next_scenario_number()
+        c_num = self.get_next_condition_number()
+        s_num = self.get_next_sequence_number()
+
+        seq = ActionSequence(
+            id=f"seq_{uuid.uuid4().hex[:6]}",
+            sequence_number=s_num,
+            name=f"{name} 액션"
+        )
+        cond = Condition(
+            id=f"cond_{uuid.uuid4().hex[:6]}",
+            condition_number=c_num,
+            name=f"{name} 조건",
+            action_sequence_id=seq.id
+        )
+        self.add_condition(cond)
+        self.add_action_sequence(seq)
+
+        scen = Scenario(
+            name=name,
+            scenario_number=scen_num,
+            node_type=node_type,
+            condition_id=cond.id,
+            sequence_id=seq.id,
+            condition=cond,
+            actions=seq.actions
+        )
+        if add_to_project:
+            self.scenarios.append(scen)
+            self.renumber_steps()
+        return scen
+
     def compute_hierarchy_depths(self) -> List[int]:
         """Calculate nesting hierarchy depth (0, 1, 2...) for each scenario."""
         depths = []
@@ -488,25 +637,6 @@ class Project:
                 return s
         return None
 
-    def find_action_sequence(self, seq_id: str) -> Optional[ActionSequence]:
-        """Find registered ActionSequence by ID."""
-        for seq in self.action_sequences:
-            if seq.id == seq_id:
-                return seq
-        return None
-
-    def add_action_sequence(self, seq: ActionSequence):
-        """Add a new action sequence if not already present."""
-        if not any(s.id == seq.id for s in self.action_sequences):
-            self.action_sequences.append(seq)
-
-    def delete_action_sequence(self, seq_id: str):
-        """Delete an action sequence and unlink any scenarios referencing it."""
-        self.action_sequences = [s for s in self.action_sequences if s.id != seq_id]
-        for scen in self.scenarios:
-            if scen.sequence_id == seq_id:
-                scen.sequence_id = None
-
     def to_dict(self) -> Dict[str, Any]:
         return {
             "version": self.version,
@@ -523,12 +653,14 @@ class Project:
             "anti_ban_offset_seconds": self.anti_ban_offset_seconds,
             "anti_ban_coord_weak": self.anti_ban_coord_weak,
             "anti_ban_coord_strong": self.anti_ban_coord_strong,
+            "conditions": [c.to_dict() for c in self.conditions],
             "action_sequences": [s.to_dict() for s in self.action_sequences],
             "scenarios": [s.to_dict() for s in self.scenarios]
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Project":
+        conditions = [Condition.from_dict(c) for c in data.get("conditions", [])]
         action_sequences = [ActionSequence.from_dict(s) for s in data.get("action_sequences", [])]
         scenarios = [Scenario.from_dict(s) for s in data.get("scenarios", [])]
         offset_sec = float(data.get("anti_ban_offset_seconds", data.get("anti_ban_max_delay", 1.0)))
@@ -547,8 +679,44 @@ class Project:
             anti_ban_offset_seconds=offset_sec,
             anti_ban_coord_weak=int(data.get("anti_ban_coord_weak", 5)),
             anti_ban_coord_strong=int(data.get("anti_ban_coord_strong", 15)),
+            conditions=conditions,
             action_sequences=action_sequences,
             scenarios=scenarios
         )
+
+        # Legacy auto-migration for composite modular architecture ONLY if data lacks modular arrays
+        is_legacy = ("conditions" not in data and "action_sequences" not in data)
+        if is_legacy:
+            for scen in proj.scenarios:
+                if scen.condition and not scen.condition_id:
+                    existing = proj.find_condition(scen.condition.id)
+                    if not existing:
+                        if not getattr(scen.condition, "condition_number", None):
+                            scen.condition.condition_number = proj.get_next_condition_number()
+                        if not scen.condition.name or scen.condition.name == "조건":
+                            scen.condition.name = f"{scen.name} 조건"
+                        proj.add_condition(scen.condition)
+                        scen.condition_id = scen.condition.id
+                    else:
+                        scen.condition_id = existing.id
+
+                if scen.actions and not scen.sequence_id:
+                    s_num = proj.get_next_sequence_number()
+                    seq = ActionSequence(
+                        id=f"seq_{uuid.uuid4().hex[:6]}",
+                        sequence_number=s_num,
+                        name=f"{scen.name} 시퀀스",
+                        actions=scen.actions
+                    )
+                    proj.add_action_sequence(seq)
+                    scen.sequence_id = seq.id
+
+                # Link default action sequence in condition if not set
+                if scen.condition_id and scen.sequence_id:
+                    cond = proj.find_condition(scen.condition_id)
+                    if cond and not cond.action_sequence_id:
+                        cond.action_sequence_id = scen.sequence_id
+
         proj.renumber_steps()
+        proj.renumber_modules()
         return proj

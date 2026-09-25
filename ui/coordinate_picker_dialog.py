@@ -35,6 +35,7 @@ from core.models import Action, Project
 from core.screen_capture import ScreenCapture
 from core.input_controller import InputController
 from core.dummy_canvas import create_dummy_canvas_qimage
+from core.path_utils import to_relative_path, to_absolute_path
 from ui.qt_image_utils import pil_to_qpixmap, qimage_to_pil
 
 
@@ -552,8 +553,22 @@ class CoordinatePickerDialog(QDialog):
         return None
 
     @classmethod
-    def set_last_used_image_path(cls, path: str):
-        if not path or not os.path.exists(path):
+    def set_last_used_image_path(cls, path: Optional[str]):
+        if not path:
+            cls._last_used_image_path = None
+            config_file = "fgoa_config.json"
+            if os.path.exists(config_file):
+                try:
+                    import json
+                    with open(config_file, "r", encoding="utf-8") as f:
+                        cfg = json.load(f)
+                    cfg.pop("last_picker_image_path", None)
+                    with open(config_file, "w", encoding="utf-8") as f:
+                        json.dump(cfg, f, indent=2, ensure_ascii=False)
+                except Exception:
+                    pass
+            return
+        if not os.path.exists(path):
             return
         cls._last_used_image_path = path
         config_file = "fgoa_config.json"
@@ -605,19 +620,23 @@ class CoordinatePickerDialog(QDialog):
         self.scenario = scenario
 
         # Determine initial image:
-        # 1. image_path argument if valid
+        # 1. image_path argument if valid (and exists)
         # 2. scenario's last_action_image_path (if exists)
-        # 3. scenario's condition.reference_image_path ("'색상 인지 조건 지정창'에 등록된 이미지를 초기값으로 가져오고")
-        # 4. If scenario is provided but has neither, fallback to last used image ("마지막에 사용한 이미지를 기억해둘것")
+        # 3. Fallback to last used image in session
+        # Note: Do NOT automatically default to condition's reference image!
         resolved_img = None
-        if image_path and os.path.exists(image_path):
-            resolved_img = image_path
-        elif scenario and getattr(scenario, "last_action_image_path", None) and os.path.exists(scenario.last_action_image_path):
-            resolved_img = scenario.last_action_image_path
-        elif scenario and scenario.condition and scenario.condition.reference_image_path and os.path.exists(scenario.condition.reference_image_path):
-            resolved_img = scenario.condition.reference_image_path
-        elif scenario and CoordinatePickerDialog.get_last_used_image_path():
-            resolved_img = CoordinatePickerDialog.get_last_used_image_path()
+        if image_path:
+            abs_p = to_absolute_path(image_path)
+            if abs_p and os.path.exists(abs_p):
+                resolved_img = abs_p
+        if not resolved_img and scenario and getattr(scenario, "last_action_image_path", None):
+            abs_p = to_absolute_path(scenario.last_action_image_path)
+            if abs_p and os.path.exists(abs_p):
+                resolved_img = abs_p
+        if not resolved_img and scenario and CoordinatePickerDialog.get_last_used_image_path():
+            abs_p = to_absolute_path(CoordinatePickerDialog.get_last_used_image_path())
+            if abs_p and os.path.exists(abs_p):
+                resolved_img = abs_p
 
         self.current_image_path = resolved_img
         self.drag_mode = drag_mode
@@ -666,6 +685,13 @@ class CoordinatePickerDialog(QDialog):
         btn_gallery.setToolTip("프로젝트 레퍼런스 이미지 갤러리에서 선택합니다.")
         btn_gallery.clicked.connect(self._open_gallery)
         top_bar.addWidget(btn_gallery)
+
+        # Button to explicitly import connected condition's reference image
+        self.btn_import_linked_cond_img = QPushButton("🔗 연결된 인식조건 레퍼런스 이미지 가져오기")
+        self.btn_import_linked_cond_img.setObjectName("btn_secondary")
+        self.btn_import_linked_cond_img.setToolTip("현재 시나리오 노드에 함께 조합된 인식조건의 레퍼런스 이미지를 가져옵니다.")
+        self.btn_import_linked_cond_img.clicked.connect(self._on_import_linked_condition_image)
+        top_bar.addWidget(self.btn_import_linked_cond_img)
 
         btn_capture_win = QPushButton("📸 타겟 창 캡처")
         btn_capture_win.setToolTip("현재 타겟 게임 창의 화면을 실시간으로 캡처하여 배경에 로드합니다.")
@@ -917,10 +943,11 @@ class CoordinatePickerDialog(QDialog):
 
     def _load_initial_image(self, image_path: Optional[str]):
         loaded = False
-        target_path = image_path
+        target_path = to_absolute_path(image_path) if image_path else None
         if not target_path or not os.path.exists(target_path):
-            if getattr(self, "scenario", None) and CoordinatePickerDialog.get_last_used_image_path():
-                target_path = CoordinatePickerDialog.get_last_used_image_path()
+            last_used = CoordinatePickerDialog.get_last_used_image_path()
+            if getattr(self, "scenario", None) and last_used:
+                target_path = to_absolute_path(last_used)
 
         if target_path and os.path.exists(target_path):
             try:
@@ -941,6 +968,36 @@ class CoordinatePickerDialog(QDialog):
             dummy_qimg = create_dummy_canvas_qimage(w, h)
             self.canvas.set_qimage(dummy_qimg)
             self.canvas.set_target_resolution(w, h)
+
+    def _on_import_linked_condition_image(self):
+        """Imports reference image from the condition module linked to this scenario composite node."""
+        if not self.scenario:
+            QMessageBox.information(self, "연결된 시나리오 없음", "연결된 시나리오 노드가 없습니다.")
+            return
+
+        cond = self.scenario.get_effective_condition(self.project) if hasattr(self.scenario, "get_effective_condition") else self.scenario.condition
+        if not cond or not cond.reference_image_path:
+            QMessageBox.information(
+                self, "인식조건 이미지 없음",
+                f"현재 시나리오 [#{self.scenario.step_number}]에 연결된 인식조건에 등록된 레퍼런스 이미지가 없습니다."
+            )
+            return
+
+        abs_path = to_absolute_path(cond.reference_image_path)
+        if not abs_path or not os.path.exists(abs_path):
+            QMessageBox.warning(
+                self, "이미지 파일 없음",
+                f"연결된 인식조건의 이미지 파일 경로를 찾을 수 없습니다:\n{cond.reference_image_path}"
+            )
+            return
+
+        self.canvas.load_image_from_path(abs_path)
+        self.current_image_path = abs_path
+        self._save_last_used_image(abs_path)
+        c_name = getattr(cond, "name", "인식조건")
+        c_num = getattr(cond, "condition_number", "")
+        c_label = f"[C{c_num}] {c_name}" if c_num else c_name
+        self.lbl_guide.setText(f"🔗 연결된 인식조건 '{c_label}'의 레퍼런스 이미지를 불러왔습니다.")
 
     def showEvent(self, event):
         super().showEvent(event)

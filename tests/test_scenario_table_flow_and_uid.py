@@ -24,7 +24,7 @@ class TestScenarioTableFlowAndUID(unittest.TestCase):
         table = self.main_win.tbl_scenarios
         self.assertEqual(table.columnCount(), 7)
 
-        expected_headers = ["순서", "고유 ID", "활성", "시나리오 이름", "인식 조건 (Eye)", "분기 (일치/불일치)", "액션"]
+        expected_headers = ["순서", "고유 ID", "활성", "시나리오 이름", "인식조건 모듈", "액션시퀀스 모듈", "분기"]
         headers = [table.horizontalHeaderItem(i).text() for i in range(7)]
         self.assertEqual(headers, expected_headers)
 
@@ -38,19 +38,20 @@ class TestScenarioTableFlowAndUID(unittest.TestCase):
         table.adjust_column_widths()
 
         header = table.horizontalHeader()
-        # Compact columns: 0 (34), 1 (48), 2 (38), 6 (44)
+        # Compact columns: 0 (34), 1 (48), 2 (38)
         self.assertEqual(header.sectionSize(0), 34)
         self.assertEqual(header.sectionSize(1), 48)
         self.assertEqual(header.sectionSize(2), 38)
-        self.assertEqual(header.sectionSize(6), 44)
 
-        # Dynamic columns: 3 (name), 4 (cond), 5 (branch)
+        # Dynamic columns: 3 (name), 4 (cond), 5 (seq), 6 (branch)
         w3 = header.sectionSize(3)
         w4 = header.sectionSize(4)
         w5 = header.sectionSize(5)
-        self.assertGreater(w3, 100)
-        self.assertGreater(w4, 90)
+        w6 = header.sectionSize(6)
+        self.assertGreater(w3, 70)
+        self.assertGreater(w4, 70)
         self.assertGreater(w5, 70)
+        self.assertGreater(w6, 50)
 
     def test_scenario_uid_s_prefix_formatting(self):
         proj = Project()

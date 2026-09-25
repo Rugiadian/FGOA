@@ -364,9 +364,7 @@ class SingleActionDialog(QDialog):
         from ui.coordinate_picker_dialog import CoordinatePickerDialog
         ref_path = self.reference_image_path
         if not ref_path and hasattr(self, "scenario") and self.scenario:
-            ref_path = getattr(self.scenario, "last_action_image_path", None) or (
-                self.scenario.condition.reference_image_path if self.scenario.condition else None
-            ) or CoordinatePickerDialog.get_last_used_image_path()
+            ref_path = getattr(self.scenario, "last_action_image_path", None) or CoordinatePickerDialog.get_last_used_image_path()
         elif not ref_path:
             ref_path = CoordinatePickerDialog.get_last_used_image_path()
 

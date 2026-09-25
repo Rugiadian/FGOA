@@ -134,8 +134,9 @@ class WorkflowRunner(QThread):
                         continue
 
                     # 2. Check screen recognition condition (until_match / while_match)
-                    if scen.loop_mode in ("until_match", "while_match") and scen.condition and scen.condition.points:
-                        matched, _ = ConditionEvaluator.evaluate(scen.condition, self.hwnd)
+                    eff_cond = scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition
+                    if scen.loop_mode in ("until_match", "while_match") and eff_cond and eff_cond.points:
+                        matched, _ = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
                         if scen.loop_mode == "until_match" and matched:
                             end_idx = self.project.find_matching_loop_end(current_index)
                             self.sig_log.emit("SUCCESS", f"🔁 [루프 s{scen.scenario_number}] '{scen.name}': 탈출 인식 조건 충족! 루프 종료.")
@@ -189,9 +190,10 @@ class WorkflowRunner(QThread):
                 matched = False
                 attempt = 0
                 max_attempts = (scen.retry_max_count + 1) if (scen.on_mismatch == "retry") else 1
+                eff_cond = scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition
 
                 while attempt < max_attempts and self._is_running:
-                    matched, point_results = ConditionEvaluator.evaluate(scen.condition, self.hwnd)
+                    matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
                     if matched:
                         break
                     attempt += 1

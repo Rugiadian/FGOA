@@ -19,11 +19,12 @@ from PyQt5.QtGui import QPixmap, QIcon, QColor, QFont
 from core.models import Project, Scenario
 from core.screen_capture import ScreenCapture
 from core.window_manager import WindowManager
+from core.path_utils import get_references_dir, to_relative_path, to_absolute_path
 from ui.coordinate_picker_dialog import CoordinatePickerDialog
 from ui.qt_image_utils import pil_to_qpixmap
 
 
-REFS_DIR = os.path.expanduser("~/.fgoa_refs")
+REFS_DIR = get_references_dir()
 
 
 class ReferenceGalleryDialog(QDialog):
@@ -191,18 +192,37 @@ class ReferenceGalleryDialog(QDialog):
 
     @classmethod
     def get_all_gallery_entries(cls, project: Project) -> List[Dict[str, Any]]:
-        """Collect all reference images and compute usage across scenarios."""
+        """Collect all reference images and compute usage across scenarios and modules."""
         paths = set()
         if os.path.isdir(REFS_DIR):
             for ext in ("*.png", "*.jpg", "*.jpeg", "*.bmp"):
                 for p in glob.glob(os.path.join(REFS_DIR, ext)):
                     paths.add(os.path.normpath(os.path.abspath(p)))
 
+        # Also check project conditions
+        for cond in getattr(project, "conditions", []):
+            if cond.reference_image_path:
+                abs_p = to_absolute_path(cond.reference_image_path)
+                if abs_p and os.path.exists(abs_p):
+                    paths.add(os.path.normpath(abs_p))
+
+        # Check project action sequences
+        for seq in getattr(project, "action_sequences", []):
+            if seq.last_action_image_path:
+                abs_p = to_absolute_path(seq.last_action_image_path)
+                if abs_p and os.path.exists(abs_p):
+                    paths.add(os.path.normpath(abs_p))
+
+        # Check scenarios
         for scen in project.scenarios:
             if scen.condition and scen.condition.reference_image_path:
-                p = scen.condition.reference_image_path
-                if os.path.exists(p):
-                    paths.add(os.path.normpath(os.path.abspath(p)))
+                abs_p = to_absolute_path(scen.condition.reference_image_path)
+                if abs_p and os.path.exists(abs_p):
+                    paths.add(os.path.normpath(abs_p))
+            if getattr(scen, "last_action_image_path", None):
+                abs_p = to_absolute_path(scen.last_action_image_path)
+                if abs_p and os.path.exists(abs_p):
+                    paths.add(os.path.normpath(abs_p))
 
         entries = []
         for p in sorted(paths):
@@ -229,30 +249,61 @@ class ReferenceGalleryDialog(QDialog):
 
     @classmethod
     def compute_image_usages(cls, image_path: str, project: Project) -> List[Dict[str, str]]:
-        """Computes list of scenario usages for this image."""
+        """Computes list of scenario and module usages for this image."""
         usages = []
         norm_target = os.path.normpath(os.path.abspath(image_path))
+        target_fname = os.path.basename(norm_target)
 
+        # 1. Check Condition Modules
+        for cond in getattr(project, "conditions", []):
+            if cond.reference_image_path:
+                cond_abs = to_absolute_path(cond.reference_image_path)
+                if (cond_abs and os.path.normpath(cond_abs) == norm_target) or os.path.basename(cond.reference_image_path) == target_fname:
+                    c_num = getattr(cond, "condition_number", 1)
+                    usages.append({
+                        "scenario_name": f"모듈 [C{c_num}] {cond.name}",
+                        "type": "👁️ Eye 인식조건",
+                        "detail": f"기준 레퍼런스 (포인트 {len(cond.points)}개 판정)"
+                    })
+
+        # 2. Check Action Sequence Modules
+        for seq in getattr(project, "action_sequences", []):
+            if seq.last_action_image_path:
+                seq_abs = to_absolute_path(seq.last_action_image_path)
+                if (seq_abs and os.path.normpath(seq_abs) == norm_target) or os.path.basename(seq.last_action_image_path) == target_fname:
+                    s_num = getattr(seq, "sequence_number", 1)
+                    usages.append({
+                        "scenario_name": f"모듈 [A{s_num}] {seq.name}",
+                        "type": "✋ Hand 액션시퀀스",
+                        "detail": f"좌표 지정 기준 이미지 ({len(seq.actions)}개 액션)"
+                    })
+
+        # 3. Check Scenarios
         for scen in project.scenarios:
-            # 1. Eye Condition Check
-            if scen.condition and scen.condition.reference_image_path:
-                cond_norm = os.path.normpath(os.path.abspath(scen.condition.reference_image_path))
-                if cond_norm == norm_target:
-                    pt_count = len(scen.condition.points)
+            eff_cond = scen.get_effective_condition(project) if hasattr(scen, "get_effective_condition") else scen.condition
+            if eff_cond and eff_cond.reference_image_path:
+                cond_abs = to_absolute_path(eff_cond.reference_image_path)
+                if (cond_abs and os.path.normpath(cond_abs) == norm_target) or os.path.basename(eff_cond.reference_image_path) == target_fname:
                     usages.append({
                         "scenario_name": f"고유 s{scen.scenario_number} (실행 #{scen.step_number}) {scen.name}",
                         "type": "👁️ Eye 색상 조건",
-                        "detail": f"기준 레퍼런스 (포인트 {pt_count}개 판정)"
+                        "detail": f"시나리오 연결 조건 ({len(eff_cond.points)}개 포인트)"
                     })
 
-            # 2. Hand Action Check (if scenario is bound to this reference)
-            if scen.condition and scen.condition.reference_image_path:
-                cond_norm = os.path.normpath(os.path.abspath(scen.condition.reference_image_path))
-                if cond_norm == norm_target and scen.actions:
+            # Check scenario hand actions
+            act_img = getattr(scen, "last_action_image_path", None)
+            if not act_img and scen.actions:
+                for act in scen.actions:
+                    if getattr(act, "reference_image_path", None):
+                        act_img = act.reference_image_path
+                        break
+            if act_img:
+                act_abs = to_absolute_path(act_img)
+                if (act_abs and os.path.normpath(act_abs) == norm_target) or os.path.basename(act_img) == target_fname:
                     usages.append({
                         "scenario_name": f"고유 s{scen.scenario_number} (실행 #{scen.step_number}) {scen.name}",
                         "type": "✋ Hand 액션",
-                        "detail": f"액션 좌표 기준 이미지 ({len(scen.actions)}개 액션)"
+                        "detail": f"시나리오 액션 좌표 지정 이미지"
                     })
 
         return usages

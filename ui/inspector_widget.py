@@ -23,6 +23,7 @@ from PyQt5.QtGui import QColor, QFont, QPixmap, QKeySequence, QDrag
 from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QPoint
 
 from core.models import Scenario, Project, Condition, ColorPoint, Action, ActionSequence
+from core.path_utils import to_absolute_path, to_relative_path
 from core.screen_capture import ScreenCapture
 from core.input_controller import InputController
 from core.evaluator import ConditionEvaluator
@@ -245,6 +246,7 @@ class InspectorWidget(QWidget):
     """
     sig_scenario_saved = pyqtSignal(Scenario)
     sig_scenario_changed = pyqtSignal(Scenario)
+    sig_modules_manager_requested = pyqtSignal()
     sig_log = pyqtSignal(str, str)  # level, msg
 
     def __init__(self, parent=None):
@@ -546,6 +548,39 @@ class InspectorWidget(QWidget):
         layout.setContentsMargins(6, 10, 6, 6)
         layout.setSpacing(4)
 
+        # Condition Module Selection / Link Bar (인식조건 모듈화 연결)
+        cond_bar = QHBoxLayout()
+        cond_bar.setSpacing(4)
+        lbl_cond = QLabel("🔗 연결 조건:")
+        lbl_cond.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
+        cond_bar.addWidget(lbl_cond)
+
+        self.combo_condition = QComboBox()
+        self.combo_condition.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.combo_condition.currentIndexChanged.connect(self._on_condition_combo_changed)
+        cond_bar.addWidget(self.combo_condition, 1)
+
+        self.btn_save_as_cond = QPushButton("💾 조건으로 등록...")
+        self.btn_save_as_cond.setToolTip("현재 시나리오의 인식 조건을 재사용 가능한 '인식조건 모듈'로 등록하고 연결합니다.")
+        self.btn_save_as_cond.clicked.connect(self._on_save_as_new_condition)
+        cond_bar.addWidget(self.btn_save_as_cond)
+
+        self.btn_unlink_cond = QPushButton("🔓 연결 해제")
+        self.btn_unlink_cond.setToolTip("연결된 공용 인식조건 모듈을 해제하고 인스턴트 인식 조건으로 복제합니다.")
+        self.btn_unlink_cond.clicked.connect(self._on_unlink_condition)
+        cond_bar.addWidget(self.btn_unlink_cond)
+
+        self.btn_manage_cond = QPushButton("⚙️ 모듈 관리...")
+        self.btn_manage_cond.setToolTip("등록된 모듈(인식조건, 액션시퀀스) 관리 탭으로 이동")
+        self.btn_manage_cond.clicked.connect(self._on_manage_conditions)
+        cond_bar.addWidget(self.btn_manage_cond)
+
+        layout.addLayout(cond_bar)
+
+        self.lbl_cond_mod_status = QLabel("")
+        self.lbl_cond_mod_status.setStyleSheet("color: #64748b; font-size: 8pt; padding: 1px 2px;")
+        layout.addWidget(self.lbl_cond_mod_status)
+
         # Top row: [v] 조건 감지 활성화 | 일치 규칙: [AND/OR] | [📋 조건 가져오기...]
         top_row = QHBoxLayout()
         top_row.setSpacing(6)
@@ -778,13 +813,13 @@ class InspectorWidget(QWidget):
         seq_bar.addWidget(self.btn_save_as_seq)
 
         self.btn_unlink_seq = QPushButton("🔓 연결 해제")
-        self.btn_unlink_seq.setToolTip("연결된 공용 시퀀스를 해제하고 현재 시나리오 전용 액션으로 복제합니다.")
+        self.btn_unlink_seq.setToolTip("연결된 공용 시퀀스를 해제하고 인스턴트 액션 시퀀스로 복제합니다.")
         self.btn_unlink_seq.clicked.connect(self._on_unlink_sequence)
         seq_bar.addWidget(self.btn_unlink_seq)
 
-        self.btn_manage_seq = QPushButton("⚙️ 시퀀스 관리...")
-        self.btn_manage_seq.setToolTip("등록된 액션 시퀀스 목록 관리 (생성, 이름 변경, 복제, 삭제)")
-        self.btn_manage_seq.clicked.connect(self._on_manage_sequences)
+        self.btn_manage_seq = QPushButton("⚙️ 모듈 관리...")
+        self.btn_manage_seq.setToolTip("등록된 모듈(인식조건, 액션시퀀스) 관리 탭으로 이동")
+        self.btn_manage_seq.clicked.connect(self._on_manage_conditions)
         seq_bar.addWidget(self.btn_manage_seq)
 
         layout.addLayout(seq_bar)
@@ -1039,11 +1074,12 @@ class InspectorWidget(QWidget):
 
             self._update_branch_visibility()
 
-            # 3. Condition
-            has_cond = (scenario.condition is not None and len(scenario.condition.points) > 0)
-            self.chk_has_condition.setChecked(scenario.condition is not None)
-            if scenario.condition:
-                idx_op = self.combo_cond_logic.findData(scenario.condition.logic_operator)
+            # 3. Condition & Module Link
+            self._populate_condition_combo()
+            eff_cond = self._get_active_condition()
+            self.chk_has_condition.setChecked(eff_cond is not None)
+            if eff_cond:
+                idx_op = self.combo_cond_logic.findData(eff_cond.logic_operator)
                 if idx_op >= 0:
                     self.combo_cond_logic.setCurrentIndex(idx_op)
             self._refresh_points_table()
@@ -1185,15 +1221,19 @@ class InspectorWidget(QWidget):
             return
 
         cond_path = None
-        if self.current_scenario.condition and getattr(self.current_scenario.condition, "reference_image_path", None):
-            cond_path = self.current_scenario.condition.reference_image_path
+        eff_cond = self._get_active_condition()
+        if eff_cond and getattr(eff_cond, "reference_image_path", None):
+            cond_path = to_absolute_path(eff_cond.reference_image_path)
 
         act_path = getattr(self.current_scenario, "last_action_image_path", None)
-        if not act_path and self.current_scenario.actions:
-            for act in self.current_scenario.actions:
+        acts = self._get_active_actions_list()
+        if not act_path and acts:
+            for act in acts:
                 if getattr(act, "reference_image_path", None):
                     act_path = act.reference_image_path
                     break
+        if act_path:
+            act_path = to_absolute_path(act_path)
 
         if hasattr(self, "lbl_thumb_cond"):
             has_cond = self.lbl_thumb_cond.set_image(cond_path)
@@ -1267,11 +1307,12 @@ class InspectorWidget(QWidget):
                 self.combo_retry_fail_jump.setVisible(is_jump_fail)
 
     def _refresh_points_table(self):
-        if not self.current_scenario or not self.current_scenario.condition:
+        eff_cond = self._get_active_condition()
+        if not self.current_scenario or not eff_cond:
             self.tbl_points.setRowCount(0)
             return
 
-        pts = self.current_scenario.condition.points
+        pts = eff_cond.points
         self.tbl_points.setRowCount(len(pts))
 
         for row, pt in enumerate(pts):
@@ -1313,6 +1354,141 @@ class InspectorWidget(QWidget):
             self.tbl_points.setCellWidget(row, 4, combo_m)
 
     # ==========================================
+    # Condition (Module) Management Methods
+    # ==========================================
+    def _get_active_condition(self) -> Optional[Condition]:
+        """Returns the active Condition (from linked Condition module if condition_id is set, else scenario.condition)."""
+        if not self.current_scenario:
+            return None
+        if getattr(self.current_scenario, "condition_id", None) and self.project:
+            cond = self.project.find_condition(self.current_scenario.condition_id)
+            if cond is not None:
+                return cond
+        return self.current_scenario.condition
+
+    def _populate_condition_combo(self):
+        """Populates condition combobox with (인스턴트 인식 조건) and project condition modules."""
+        if not hasattr(self, "combo_condition"):
+            return
+        self.combo_condition.blockSignals(True)
+        self.combo_condition.clear()
+        self.combo_condition.addItem("(인스턴트 인식 조건)", "")
+
+        selected_idx = 0
+        if self.project:
+            for idx, cond in enumerate(self.project.conditions, start=1):
+                c_num = getattr(cond, "condition_number", idx)
+                self.combo_condition.addItem(f"🔗 [C{c_num}] {cond.name} ({len(cond.points)}개 포인트)", cond.id)
+                if self.current_scenario and getattr(self.current_scenario, "condition_id", None) == cond.id:
+                    selected_idx = idx
+
+        self.combo_condition.setCurrentIndex(selected_idx)
+        self.combo_condition.blockSignals(False)
+        self._update_condition_status_label()
+
+    def _update_condition_status_label(self):
+        if not hasattr(self, "lbl_cond_mod_status"):
+            return
+        if not self.current_scenario:
+            self.lbl_cond_mod_status.setText("")
+            self.btn_unlink_cond.setEnabled(False)
+            return
+
+        cond_id = getattr(self.current_scenario, "condition_id", None)
+        if cond_id and self.project:
+            cond = self.project.find_condition(cond_id)
+            if cond:
+                seq_info = ""
+                if cond.action_sequence_id:
+                    linked_seq = self.project.find_action_sequence(cond.action_sequence_id)
+                    if linked_seq:
+                        seq_info = f" ➔ 액션연결: [A{linked_seq.sequence_number}] {linked_seq.name}"
+                self.lbl_cond_mod_status.setText(f"🔗 공용 인식조건 [C{cond.condition_number}] '{cond.name}' 연결됨{seq_info}")
+                self.lbl_cond_mod_status.setStyleSheet("color: #2563eb; font-size: 8pt; font-weight: bold; padding: 1px 2px;")
+                self.btn_unlink_cond.setEnabled(True)
+                return
+        self.lbl_cond_mod_status.setText("⚡ 인스턴트 인식 조건 (모듈화하여 재사용하려면 '조건으로 등록'을 누르세요)")
+        self.lbl_cond_mod_status.setStyleSheet("color: #64748b; font-size: 8pt; padding: 1px 2px;")
+        self.btn_unlink_cond.setEnabled(False)
+
+    def _on_condition_combo_changed(self, idx: int):
+        if self._is_loading or not self.current_scenario:
+            return
+        self._record_undo_state()
+        cond_id = self.combo_condition.currentData()
+        self.current_scenario.condition_id = cond_id if cond_id else None
+
+        eff_cond = self._get_active_condition()
+        if eff_cond:
+            # If this condition has a default action_sequence_id, auto-link to scenario
+            if eff_cond.action_sequence_id and getattr(self.current_scenario, "sequence_id", None) != eff_cond.action_sequence_id:
+                self.current_scenario.sequence_id = eff_cond.action_sequence_id
+                self._populate_sequence_combo()
+                self._refresh_actions_table()
+            elif getattr(self.current_scenario, "sequence_id", None) and not eff_cond.action_sequence_id:
+                eff_cond.action_sequence_id = self.current_scenario.sequence_id
+
+            idx_op = self.combo_cond_logic.findData(eff_cond.logic_operator)
+            if idx_op >= 0:
+                self.combo_cond_logic.setCurrentIndex(idx_op)
+            self.chk_has_condition.setChecked(True)
+        else:
+            self.chk_has_condition.setChecked(False)
+
+        self._update_condition_status_label()
+        self._refresh_points_table()
+        self._update_reference_thumbnails()
+        self._mark_dirty()
+        self._on_field_changed()
+
+    def _on_save_as_new_condition(self):
+        if not self.current_scenario:
+            return
+        eff_cond = self._get_active_condition()
+        default_name = eff_cond.name if (eff_cond and eff_cond.name) else f"{self.current_scenario.name} 인식조건"
+        name, ok = QInputDialog.getText(self, "새 인식조건 모듈 등록", "인식조건 이름:", text=default_name)
+        if not ok or not name.strip():
+            return
+        self._record_undo_state()
+        points = copy.deepcopy(eff_cond.points) if eff_cond else []
+        logic_op = eff_cond.logic_operator if eff_cond else self.combo_cond_logic.currentData()
+        ref_path = getattr(eff_cond, "reference_image_path", None) if eff_cond else None
+
+        new_cond = Condition(
+            name=name.strip(),
+            logic_operator=logic_op or "AND",
+            points=points,
+            reference_image_path=ref_path,
+            action_sequence_id=getattr(self.current_scenario, "sequence_id", None)
+        )
+        if self.project:
+            self.project.add_condition(new_cond)
+        self.current_scenario.condition_id = new_cond.id
+        self._populate_condition_combo()
+        self._refresh_points_table()
+        self._update_reference_thumbnails()
+        self._mark_dirty()
+        self._on_field_changed()
+        self.sig_log.emit("INFO", f"💾 새 인식조건 모듈 [C{new_cond.condition_number}] '{new_cond.name}'이 등록되어 연결되었습니다.")
+
+    def _on_unlink_condition(self):
+        if not self.current_scenario or not getattr(self.current_scenario, "condition_id", None):
+            return
+        self._record_undo_state()
+        eff_cond = self._get_active_condition()
+        if eff_cond:
+            self.current_scenario.condition = copy.deepcopy(eff_cond)
+        self.current_scenario.condition_id = None
+        self._populate_condition_combo()
+        self._refresh_points_table()
+        self._mark_dirty()
+        self._on_field_changed()
+        self.sig_log.emit("INFO", f"🔓 인식조건 연결이 해제되어 '{self.current_scenario.name}' 인스턴트 인식 조건으로 복제되었습니다.")
+
+    def _on_manage_conditions(self):
+        self.sig_modules_manager_requested.emit()
+
+    # ==========================================
     # Action Sequence (Module) Management Methods
     # ==========================================
     def _get_active_actions_list(self) -> List[Action]:
@@ -1326,17 +1502,18 @@ class InspectorWidget(QWidget):
         return self.current_scenario.actions
 
     def _populate_sequence_combo(self):
-        """Populates sequence combobox with (시나리오 전용 액션) and project action sequences."""
+        """Populates sequence combobox with (인스턴트 액션 시퀀스) and project action sequences."""
         if not hasattr(self, "combo_sequence"):
             return
         self.combo_sequence.blockSignals(True)
         self.combo_sequence.clear()
-        self.combo_sequence.addItem("(시나리오 전용 액션)", "")
+        self.combo_sequence.addItem("(인스턴트 액션 시퀀스)", "")
 
         selected_idx = 0
         if self.project:
             for idx, seq in enumerate(self.project.action_sequences, start=1):
-                self.combo_sequence.addItem(f"🔗 [{seq.name}] ({len(seq.actions)}개 액션)", seq.id)
+                s_num = getattr(seq, "sequence_number", idx)
+                self.combo_sequence.addItem(f"🔗 [A{s_num}] {seq.name} ({len(seq.actions)}개 액션)", seq.id)
                 if self.current_scenario and getattr(self.current_scenario, "sequence_id", None) == seq.id:
                     selected_idx = idx
 
@@ -1356,11 +1533,11 @@ class InspectorWidget(QWidget):
         if seq_id and self.project:
             seq = self.project.find_action_sequence(seq_id)
             if seq:
-                self.lbl_seq_status.setText(f"🔗 공용 액션 시퀀스 '{seq.name}' 연결됨 (수정 시 공유 시나리오에 공통 적용)")
-                self.lbl_seq_status.setStyleSheet("color: #3b82f6; font-size: 8pt; font-weight: bold; padding: 1px 2px;")
+                self.lbl_seq_status.setText(f"🔗 공용 액션 시퀀스 [A{seq.sequence_number}] '{seq.name}' 연결됨 (수정 시 공유 시나리오에 공통 적용)")
+                self.lbl_seq_status.setStyleSheet("color: #16a34a; font-size: 8pt; font-weight: bold; padding: 1px 2px;")
                 self.btn_unlink_seq.setEnabled(True)
                 return
-        self.lbl_seq_status.setText("📌 현재 시나리오 전용 액션 (모듈화하여 재사용하려면 '시퀀스로 등록'을 누르세요)")
+        self.lbl_seq_status.setText("⚡ 인스턴트 액션 시퀀스 (모듈화하여 재사용하려면 '시퀀스로 등록'을 누르세요)")
         self.lbl_seq_status.setStyleSheet("color: #64748b; font-size: 8pt; padding: 1px 2px;")
         self.btn_unlink_seq.setEnabled(False)
 
@@ -1370,7 +1547,14 @@ class InspectorWidget(QWidget):
         self._record_undo_state()
         seq_id = self.combo_sequence.currentData()
         self.current_scenario.sequence_id = seq_id if seq_id else None
+
+        # Wire with condition's action_sequence_id
+        eff_cond = self._get_active_condition()
+        if eff_cond and self.current_scenario.sequence_id:
+            eff_cond.action_sequence_id = self.current_scenario.sequence_id
+
         self._update_sequence_status_label()
+        self._update_condition_status_label()
         self._refresh_actions_table()
         self._mark_dirty()
         self._on_field_changed()
@@ -1391,11 +1575,17 @@ class InspectorWidget(QWidget):
         if self.project:
             self.project.add_action_sequence(new_seq)
         self.current_scenario.sequence_id = new_seq.id
+
+        eff_cond = self._get_active_condition()
+        if eff_cond:
+            eff_cond.action_sequence_id = new_seq.id
+
         self._populate_sequence_combo()
+        self._update_condition_status_label()
         self._refresh_actions_table()
         self._mark_dirty()
         self._on_field_changed()
-        self.sig_log.emit("INFO", f"💾 새 액션 시퀀스 모듈 '{new_seq.name}'이 등록되어 연결되었습니다.")
+        self.sig_log.emit("INFO", f"💾 새 액션 시퀀스 모듈 [A{new_seq.sequence_number}] '{new_seq.name}'이 등록되어 연결되었습니다.")
 
     def _on_unlink_sequence(self):
         if not self.current_scenario or not getattr(self.current_scenario, "sequence_id", None):
@@ -1408,7 +1598,7 @@ class InspectorWidget(QWidget):
         self._refresh_actions_table()
         self._mark_dirty()
         self._on_field_changed()
-        self.sig_log.emit("INFO", f"🔓 시퀀스 연결이 해제되어 '{self.current_scenario.name}' 전용 액션으로 복제되었습니다.")
+        self.sig_log.emit("INFO", f"🔓 시퀀스 연결이 해제되어 '{self.current_scenario.name}' 인스턴트 액션 시퀀스로 복제되었습니다.")
 
     def _on_manage_sequences(self):
         if not self.project:
@@ -1706,7 +1896,8 @@ class InspectorWidget(QWidget):
             return
 
         if state == Qt.Checked:
-            if not self.current_scenario.condition:
+            eff_cond = self._get_active_condition()
+            if not eff_cond:
                 self.current_scenario.condition = Condition(
                     name=f"{self.current_scenario.name} 조건",
                     logic_operator=self.combo_cond_logic.currentData(),
@@ -1714,8 +1905,11 @@ class InspectorWidget(QWidget):
                 )
         else:
             self.current_scenario.condition = None
+            self.current_scenario.condition_id = None
+            self._populate_condition_combo()
 
         self._refresh_points_table()
+        self._update_condition_status_label()
         self._on_field_changed()
 
     def _on_point_tolerance_changed(self, point: ColorPoint, val: int):
@@ -1732,26 +1926,37 @@ class InspectorWidget(QWidget):
     def _on_copy_condition_from_other(self):
         if not self.project or not self.current_scenario:
             return
-        other_scenarios = [s for s in self.project.scenarios if s.id != self.current_scenario.id and s.condition and s.condition.points]
+        other_scenarios = [s for s in self.project.scenarios if s.id != self.current_scenario.id and s.get_effective_condition(self.project) and s.get_effective_condition(self.project).points]
         if not other_scenarios:
             QMessageBox.information(self, "조건 가져오기", "가져올 수 있는 조건을 가진 다른 시나리오가 없습니다.")
             return
 
         menu = QMenu(self)
         for s in other_scenarios:
-            action = menu.addAction(f"고유 s{s.scenario_number} [{s.name}] - {len(s.condition.points)}개 포인트 ({s.condition.logic_operator})")
+            s_cond = s.get_effective_condition(self.project)
+            action = menu.addAction(f"고유 s{s.scenario_number} [{s.name}] - {len(s_cond.points)}개 포인트 ({s_cond.logic_operator})")
             action.triggered.connect(lambda checked, src=s: self._copy_condition_from(src))
         menu.exec_(self.btn_copy_cond.mapToGlobal(self.btn_copy_cond.rect().bottomLeft()))
 
     def _copy_condition_from(self, source_scenario: Scenario):
-        if not source_scenario.condition:
+        src_cond = source_scenario.get_effective_condition(self.project) if hasattr(source_scenario, "get_effective_condition") else source_scenario.condition
+        if not src_cond:
             return
-        self.current_scenario.condition = copy.deepcopy(source_scenario.condition)
+        eff_cond = self._get_active_condition()
+        if self.current_scenario.condition_id and self.project:
+            mod_cond = self.project.find_condition(self.current_scenario.condition_id)
+            if mod_cond:
+                mod_cond.points = copy.deepcopy(src_cond.points)
+                mod_cond.logic_operator = src_cond.logic_operator
+                mod_cond.reference_image_path = src_cond.reference_image_path
+        else:
+            self.current_scenario.condition = copy.deepcopy(src_cond)
         self.chk_has_condition.setChecked(True)
-        idx_op = self.combo_cond_logic.findData(self.current_scenario.condition.logic_operator)
+        idx_op = self.combo_cond_logic.findData(src_cond.logic_operator)
         if idx_op >= 0:
             self.combo_cond_logic.setCurrentIndex(idx_op)
         self._refresh_points_table()
+        self._update_reference_thumbnails()
         self._on_field_changed()
         self.sig_log.emit("INFO", f"[{self.current_scenario.name}] 고유 s{source_scenario.scenario_number} [{source_scenario.name}]의 인식 조건을 복사하여 조합했습니다.")
 
@@ -1759,16 +1964,24 @@ class InspectorWidget(QWidget):
         if not self.current_scenario:
             return
 
+        eff_cond = self._get_active_condition()
+        if not eff_cond:
+            eff_cond = Condition(name=f"{self.current_scenario.name} 조건")
+            self.current_scenario.condition = eff_cond
+
         try:
             dlg = ConditionEditorDialog(
-                condition=self.current_scenario.condition,
+                condition=eff_cond,
                 project=self.project,
                 current_scenario_id=self.current_scenario.id,
                 target_hwnd=self.target_hwnd,
                 parent=self
             )
             if dlg.exec_() == ConditionEditorDialog.Accepted:
-                self.current_scenario.condition = dlg.get_condition()
+                updated = dlg.get_condition()
+                eff_cond.points = updated.points
+                eff_cond.logic_operator = updated.logic_operator
+                eff_cond.reference_image_path = updated.reference_image_path
                 self._refresh_points_table()
                 self._update_reference_thumbnails()
                 self._on_field_changed()
@@ -1779,28 +1992,34 @@ class InspectorWidget(QWidget):
     def _on_add_point(self):
         if not self.current_scenario:
             return
-        if not self.current_scenario.condition:
+        eff_cond = self._get_active_condition()
+        if not eff_cond:
+            eff_cond = Condition(name=f"{self.current_scenario.name} 조건")
+            self.current_scenario.condition = eff_cond
             self.chk_has_condition.setChecked(True)
 
         new_pt = ColorPoint(x=100, y=100, r=255, g=255, b=255, tolerance=20)
-        self.current_scenario.condition.points.append(new_pt)
+        eff_cond.points.append(new_pt)
         self._refresh_points_table()
-        self.tbl_points.selectRow(len(self.current_scenario.condition.points) - 1)
+        self.tbl_points.selectRow(len(eff_cond.points) - 1)
         self._on_field_changed()
 
     def _on_delete_point(self):
-        if not self.current_scenario or not self.current_scenario.condition:
+        eff_cond = self._get_active_condition()
+        if not self.current_scenario or not eff_cond:
             return
         rows = self.tbl_points.selectionModel().selectedRows()
         if not rows:
             return
         row = rows[0].row()
-        del self.current_scenario.condition.points[row]
+        if 0 <= row < len(eff_cond.points):
+            del eff_cond.points[row]
         self._refresh_points_table()
         self._on_field_changed()
 
     def _on_test_condition_now(self):
-        if not self.current_scenario or not self.current_scenario.condition:
+        eff_cond = self._get_active_condition()
+        if not self.current_scenario or not eff_cond:
             QMessageBox.information(self, "조건 없음", "테스트할 조건이 없습니다.")
             return
 
@@ -1808,7 +2027,7 @@ class InspectorWidget(QWidget):
             QMessageBox.warning(self, "타겟 창 필요", "상단에서 타겟 게임 창을 먼저 선택해주세요.")
             return
 
-        cond = self.current_scenario.condition
+        cond = eff_cond
         try:
             matched, details = ConditionEvaluator.evaluate(cond, self.target_hwnd)
 
@@ -1909,9 +2128,8 @@ class InspectorWidget(QWidget):
         act = acts[row]
 
         from ui.coordinate_picker_dialog import CoordinatePickerDialog
-        cond_ref = self.current_scenario.condition.reference_image_path if (self.current_scenario and self.current_scenario.condition) else None
         last_action_img = getattr(self.current_scenario, "last_action_image_path", None) if self.current_scenario else None
-        ref_path = last_action_img or cond_ref or CoordinatePickerDialog.get_last_used_image_path()
+        ref_path = to_absolute_path(last_action_img) if last_action_img else CoordinatePickerDialog.get_last_used_image_path()
         dlg = SingleActionDialog(
             action=act,
             target_hwnd=self.target_hwnd,
@@ -1923,7 +2141,12 @@ class InspectorWidget(QWidget):
             self._record_undo_state()
             acts[row] = dlg.get_action()
             if hasattr(dlg, "reference_image_path") and dlg.reference_image_path:
-                self.current_scenario.last_action_image_path = dlg.reference_image_path
+                rel_p = to_relative_path(dlg.reference_image_path)
+                self.current_scenario.last_action_image_path = rel_p
+                if self.current_scenario.sequence_id and self.project:
+                    seq = self.project.find_action_sequence(self.current_scenario.sequence_id)
+                    if seq:
+                        seq.last_action_image_path = rel_p
                 CoordinatePickerDialog.set_last_used_image_path(dlg.reference_image_path)
             self._refresh_actions_table()
             self.tbl_actions.selectRow(row)
@@ -1960,9 +2183,8 @@ class InspectorWidget(QWidget):
         act = acts[row] if (acts and 0 <= row < len(acts)) else None
 
         from ui.coordinate_picker_dialog import CoordinatePickerDialog
-        cond_ref = self.current_scenario.condition.reference_image_path if (self.current_scenario and self.current_scenario.condition) else None
         last_action_img = getattr(self.current_scenario, "last_action_image_path", None) if self.current_scenario else None
-        ref_path = last_action_img or cond_ref or CoordinatePickerDialog.get_last_used_image_path()
+        ref_path = to_absolute_path(last_action_img) if last_action_img else CoordinatePickerDialog.get_last_used_image_path()
         dlg = CoordinatePickerDialog(
             image_path=ref_path,
             target_hwnd=self.target_hwnd,
@@ -1983,7 +2205,12 @@ class InspectorWidget(QWidget):
             acts.clear()
             acts.extend(new_acts)
             if dlg.current_image_path:
-                self.current_scenario.last_action_image_path = dlg.current_image_path
+                rel_p = to_relative_path(dlg.current_image_path)
+                self.current_scenario.last_action_image_path = rel_p
+                if self.current_scenario.sequence_id and self.project:
+                    seq = self.project.find_action_sequence(self.current_scenario.sequence_id)
+                    if seq:
+                        seq.last_action_image_path = rel_p
                 CoordinatePickerDialog.set_last_used_image_path(dlg.current_image_path)
             self._refresh_actions_table()
             self._mark_dirty()

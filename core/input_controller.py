@@ -208,7 +208,9 @@ class InputController:
             if precomputed_jitter is not None:
                 jitter = max(0.0, precomputed_jitter)
             elif max_delay > 0:
-                jitter = round(random.uniform(0.0, max_delay), 3)
+                low = max(0.0, min_delay)
+                high = max(low, max_delay)
+                jitter = round(random.uniform(low, high), 3)
 
         # 2. Coordinate anti-ban (per-action random pixel offset)
         if offset_range > 0:
