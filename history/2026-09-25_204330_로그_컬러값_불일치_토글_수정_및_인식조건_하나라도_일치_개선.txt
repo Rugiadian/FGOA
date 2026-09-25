@@ -1,0 +1,39 @@
+[일시 / Timestamp]
+- 요청 일시: 2026-09-25 20:32:39
+- 완료 일시: 2026-09-25 20:43:30
+
+[요청 내용 / User Request]
+= 로그에서 컬러값 불일치 토글이 안 열림. 
+- 인식 조건의 '하나라도 일치'가 충족되고 조건 일치로 처리 안되는거 같음. 확인 처리 바람.
+
+[결과 요약 / Summary of Results]
+1. 로그 창 컬러값 불일치 세부내역 토글 버그 수정:
+   - 원인: QTextBrowser anchorClicked 발생 시 `toggle_mismatch:{log_id}` URL은 밑줄(_)로 인해 RFC 3986상 비표준 Scheme으로 판정되어 PyQt5의 QUrl.toString()이 빈 문자열("")을 반환, 클릭 이벤트 처리가 누락되었음.
+   - 조치:
+     * 하이픈 기반의 표준 URL Scheme `toggle-mismatch:{log_id}`로 변경.
+     * `_on_log_anchor_clicked()` 핸들러에서 `url.toString()` 및 `url.path()`를 모두 지원하도록 개선하고 하이픈/밑줄 양쪽 모두 안정적으로 log_id를 파싱하여 펼침/접힘 토글 및 재렌더링이 확실하게 동작하도록 수정.
+     * 불일치 세부 내용 HTML 렌더링 시 `html.escape` 처리를 통해 안전성 강화.
+
+2. 인식 조건 '하나라도 일치 (OR)' 판정 및 동기화 누락 수정:
+   - 원인 1: 인스펙터 위젯에서 공용 조건 모듈이 연결되어 있을 때(`condition_id` 존재), `self.current_scenario.condition`만 수정하고 실제 활성 조건(`eff_cond`)의 `logic_operator`를 갱신하지 않아 모듈의 규칙이 'AND'로 유지되는 문제 수정.
+   - 원인 2: `_on_test_condition_now` (판정 테스트 버튼) 실행 시 UI 콤보박스의 최신 선택이 `eff_cond`에 즉시 반영되지 않고, 일치/불일치 시 단순 카운트만 나와 OR 충족 여부 인지가 어려웠던 문제 개선 (일치 시 `N/M개 일치 (하나라도 일치 (OR)): 조건 부합!` 상세 피드백 제공).
+   - 원인 3: 캔버스 작업창(`ConditionEditorDialog`)에 일치 규칙(AND / OR) 선택 콤보박스가 누락되어 있어 캔버스에서 작업 후 저장 시 규칙이 지정되지 않던 문제 해결 (우측 포인트 목록 상단에 `일치 규칙: [모든 포인트 일치 (AND) / 하나라도 일치 (OR)]` 추가 및 저장/불러오기 연동).
+   - 원인 4: `ConditionEvaluator.evaluate()`에서 `logic_operator` 문자열이 소문자("or"), 한글("하나라도 일치"), 공백 포함 등 다양한 형태로 들어와도 확실하게 OR 조건으로 평가되도록 방어 로직 강화.
+   - 원인 5: `WorkflowRunner`의 실행 로그에 조건 일치 시 `(N/M개 일치, OR 충족)` 세부 태그를 함께 출력하여 사용자가 조건 충족 근거를 명확하게 확인할 수 있도록 개선.
+
+3. 단위 테스트 작성 및 전체 테스트 스위트 검증:
+   - `tests/test_mismatch_toggle_and_or_condition.py` 신규 작성 (5개 테스트 케이스: 토글 클릭 동작, OR 조건 다양한 포맷 판정, 모듈 동기화 및 실시간 테스트, 캔버스 에디터 콤보박스 연동, 러너 로그 포맷).
+   - 전체 테스트 스위트 1,146개 테스트 통과 (OK).
+
+4. 버전 갱신:
+   - `core/version.py`: `__version__ = "260925.2043"`
+
+[영향 파일 목록 / Affected Files]
+- ui/main_window.py
+- ui/inspector_widget.py
+- ui/condition_editor_dialog.py
+- core/evaluator.py
+- core/runner.py
+- core/version.py
+- tests/test_mismatch_toggle_and_or_condition.py
+- history/2026-09-25_204330_로그_컬러값_불일치_토글_수정_및_인식조건_하나라도_일치_개선.txt

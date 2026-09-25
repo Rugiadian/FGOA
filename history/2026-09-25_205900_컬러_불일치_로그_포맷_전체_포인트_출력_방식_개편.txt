@@ -1,0 +1,32 @@
+================================================================================
+[일시 / Timestamp]
+요청 시각: 2026-09-25 20:52:50
+완료 시각: 2026-09-25 20:59:15
+
+[요청 내용 / User Request]
+- 컬러 불일치 로그 방식 변경. 불일치 로그는 모든 포인트를 출력할 것. 가령 일부 불일치 일 경우에 일치된 포인트도 표기. 
+-- #1 기준: RGB 255,255,255 / 감지: RGB 200,200,200 / 오차 55,55,55
+
+[결과 요약 / Summary of Results]
+1. ConditionEvaluator.format_mismatch_log 포맷 개편:
+   - 불일치 발생 시 기존의 불일치 포인트만 축약(max_items=3)하던 방식에서, 조건에 포함된 '모든 포인트'를 순서대로 전부 출력하도록 변경.
+   - 일부 포인트만 불일치한 경우에도 일치된 포인트를 누락 없이 함께 출력하며, 포인트 상태([일치] / [불일치])를 명확히 표기.
+   - 사용자 지정 포맷 반영: `#1 기준: RGB {target} / 감지: RGB {actual} / 오차 {diff_r},{diff_g},{diff_b} [{상태}]`
+2. 인스펙터 실시간 판정 연동:
+   - ui/inspector_widget.py의 format_mismatch_log 호출 시 max_items 제한을 해제하여 전체 포인트가 표기되도록 연동.
+3. 메인 윈도우 로그 HTML 스타일링:
+   - ui/main_window.py에서 불일치 세부내역 토글 시 [일치]는 녹색, [불일치]는 빨간색으로 시각적 강조 렌더링.
+4. 테스트 검증:
+   - tests/test_user_enhancements_20260925.py 및 tests/test_recognition_conditions.py 업데이트 및 사용자 예시 전용 테스트 케이스 추가 (전체 1,147개 테스트 통과).
+5. 버전 갱신:
+   - core/version.py의 __version__을 260925.2059로 갱신.
+
+[영향 파일 목록 / Affected Files]
+- core/evaluator.py
+- ui/inspector_widget.py
+- ui/main_window.py
+- tests/test_user_enhancements_20260925.py
+- tests/test_recognition_conditions.py
+- core/version.py
+- history/2026-09-25_205900_컬러_불일치_로그_포맷_전체_포인트_출력_방식_개편.txt
+================================================================================

@@ -211,7 +211,16 @@ class WorkflowRunner(QThread):
                 # Handle evaluation outcome
                 if matched:
                     self.sig_scenario_completed.emit(scen.id, "matched")
-                    self.sig_log.emit("SUCCESS", f"[#{scen.step_number}] '{scen.name}' 조건 일치! (판정: 성공)")
+                    passed_count = sum(1 for p in point_results if p.get("passed", False))
+                    total_count = len(point_results)
+                    is_or = eff_cond and (str(getattr(eff_cond, "logic_operator", "AND")).strip().upper() in ("OR", "ANY") or "하나라도" in str(getattr(eff_cond, "logic_operator", "AND")))
+                    if is_or and total_count > 0:
+                        rule_tag = f" - {passed_count}/{total_count}개 일치, OR 충족"
+                    elif eff_cond and total_count > 0:
+                        rule_tag = f" - {total_count}/{total_count}개 일치, AND 충족"
+                    else:
+                        rule_tag = ""
+                    self.sig_log.emit("SUCCESS", f"[#{scen.step_number}] '{scen.name}' 조건 일치! (판정: 성공{rule_tag})")
 
                     if scen.on_match == "execute":
                         # Execute actions

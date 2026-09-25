@@ -1131,7 +1131,8 @@ class InspectorWidget(QWidget):
         """Bind and display a scenario in the inspector as an isolated working draft."""
         self.original_scenario = scenario
         self.target_hwnd = target_hwnd
-        self.project = project
+        if project is not None:
+            self.project = project
 
         if not scenario:
             self.current_scenario = None
@@ -2067,8 +2068,11 @@ class InspectorWidget(QWidget):
         if hasattr(self, "txt_action_log"):
             self.current_scenario.custom_log = self.txt_action_log.text().strip()
 
+        eff_cond = self._get_active_condition()
+        if eff_cond:
+            eff_cond.logic_operator = self.combo_cond_logic.currentData() or "AND"
         if self.current_scenario.condition:
-            self.current_scenario.condition.logic_operator = self.combo_cond_logic.currentData()
+            self.current_scenario.condition.logic_operator = self.combo_cond_logic.currentData() or "AND"
 
         # Node type & Loop controls
         if hasattr(self, "combo_node_type"):
@@ -2206,7 +2210,10 @@ class InspectorWidget(QWidget):
 
         eff_cond = self._get_active_condition()
         if not eff_cond:
-            eff_cond = Condition(name=f"{self.current_scenario.name} 조건")
+            eff_cond = Condition(
+                name=f"{self.current_scenario.name} 조건",
+                logic_operator=self.combo_cond_logic.currentData() or "AND"
+            )
             self.current_scenario.condition = eff_cond
 
         try:
@@ -2222,6 +2229,11 @@ class InspectorWidget(QWidget):
                 eff_cond.points = updated.points
                 eff_cond.logic_operator = updated.logic_operator
                 eff_cond.reference_image_path = updated.reference_image_path
+                idx_op = self.combo_cond_logic.findData(eff_cond.logic_operator)
+                if idx_op >= 0:
+                    self.combo_cond_logic.blockSignals(True)
+                    self.combo_cond_logic.setCurrentIndex(idx_op)
+                    self.combo_cond_logic.blockSignals(False)
                 self._refresh_points_table()
                 self._update_reference_thumbnails()
                 self._on_field_changed()
@@ -2234,7 +2246,10 @@ class InspectorWidget(QWidget):
             return
         eff_cond = self._get_active_condition()
         if not eff_cond:
-            eff_cond = Condition(name=f"{self.current_scenario.name} 조건")
+            eff_cond = Condition(
+                name=f"{self.current_scenario.name} 조건",
+                logic_operator=self.combo_cond_logic.currentData() or "AND"
+            )
             self.current_scenario.condition = eff_cond
             self.chk_has_condition.setChecked(True)
 
@@ -2280,21 +2295,34 @@ class InspectorWidget(QWidget):
             QMessageBox.warning(self, "타겟 창 필요", "상단에서 타겟 게임 창을 먼저 선택해주세요.")
             return
 
+        # Ensure latest logic_operator from UI is applied to eff_cond
+        if hasattr(self, "combo_cond_logic") and self.combo_cond_logic.currentData():
+            eff_cond.logic_operator = self.combo_cond_logic.currentData()
+            if self.current_scenario.condition:
+                self.current_scenario.condition.logic_operator = self.combo_cond_logic.currentData()
+
         cond = eff_cond
         try:
             matched, details = ConditionEvaluator.evaluate(cond, self.target_hwnd)
 
             self.lbl_cond_test_result.setVisible(True)
+            passed_count = sum(1 for d in details if d.get("passed", False))
+            total_count = len(cond.points)
+            is_or = str(getattr(cond, "logic_operator", "AND")).strip().upper() in ("OR", "ANY") or "하나라도" in str(getattr(cond, "logic_operator", "AND"))
+            rule_str = "하나라도 일치 (OR)" if is_or else "모든 포인트 일치 (AND)"
+
             if matched:
-                self.lbl_cond_test_result.setText(f"✅ [일치] {len(cond.points)}개 포인트 검사 완료: 조건 부합!")
+                match_desc = f"{passed_count}/{total_count}개 일치 ({rule_str})" if total_count > 0 else "무조건 일치"
+                self.lbl_cond_test_result.setText(f"✅ [일치] {match_desc}: 조건 부합!")
                 self.lbl_cond_test_result.setStyleSheet("color: #16a34a; font-weight: bold;")
-                self.sig_log.emit("SUCCESS", f"[{self.current_scenario.name}] 실시간 판정 테스트: 조건 일치!")
+                self.sig_log.emit("SUCCESS", f"[{self.current_scenario.name}] 실시간 판정 테스트: 조건 일치! ({match_desc})")
             else:
-                fail_count = sum(1 for d in details if not d.get("passed", False))
-                self.lbl_cond_test_result.setText(f"❌ [불일치] 총 {len(cond.points)}개 중 {fail_count}개 포인트 불일치")
-                mismatch_info = ConditionEvaluator.format_mismatch_log(details, max_items=5)
+                fail_count = total_count - passed_count
+                match_desc = f"{passed_count}/{total_count}개 일치 ({rule_str})"
+                self.lbl_cond_test_result.setText(f"❌ [불일치] {match_desc} - {fail_count}개 포인트 불일치")
+                mismatch_info = ConditionEvaluator.format_mismatch_log(details)
                 mismatch_str = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
-                self.sig_log.emit("WARN", f"[{self.current_scenario.name}] 실시간 판정 테스트: 불일치 ({fail_count}개 포인트 오차 초과){mismatch_str}")
+                self.sig_log.emit("WARN", f"[{self.current_scenario.name}] 실시간 판정 테스트: 불일치 ({match_desc}){mismatch_str}")
         except Exception as e:
             self.lbl_cond_test_result.setVisible(True)
             self.lbl_cond_test_result.setText(f"⚠️ 판정 오류: {e}")

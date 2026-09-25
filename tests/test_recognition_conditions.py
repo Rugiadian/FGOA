@@ -222,7 +222,7 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
             # 7. format_mismatch_log 줄바꿈(line break) 포맷 검증
             mismatch_str = ConditionEvaluator.format_mismatch_log(details)
             self.assertIn("\n", mismatch_str)
-            self.assertIn("(-9999, -9999)", mismatch_str)
+            self.assertIn("#1 기준: RGB 255,255,255 / 감지: RGB 0,0,0 / 오차 255,255,255", mismatch_str)
 
         # 8. WindowInfo is_minimized 속성 검증
         from core.window_manager import WindowInfo

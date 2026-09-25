@@ -12,6 +12,7 @@ import sys
 import json
 import copy
 import re
+import html
 from typing import Optional, Dict, List, Tuple, Any
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -2508,11 +2509,11 @@ class MainWindow(QMainWindow):
 
             if not record.get("expanded", False):
                 # Collapsed: Show clickable badge link to expand
-                btn_link = f"<a href='toggle_mismatch:{log_id}' style='color: #38bdf8; text-decoration: none; font-weight: bold;'>[▶ {cnt_str} 세부내역 열기]</a>"
+                btn_link = f"<a href='toggle-mismatch:{log_id}' style='color: #38bdf8; text-decoration: none; font-weight: bold;'>[▶ {cnt_str} 세부내역 열기]</a>"
                 return f"<div id='mismatch_{log_id}' style='margin: 1px 0;'><span style='color: {prefix_color};'>[{level}]</span> <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span></div>"
             else:
                 # Expanded: Show clickable badge link to collapse, and formatted details indented per-point
-                btn_link = f"<a href='toggle_mismatch:{log_id}' style='color: #f87171; text-decoration: none; font-weight: bold;'>[▼ {cnt_str} 세부내역 닫기]</a>"
+                btn_link = f"<a href='toggle-mismatch:{log_id}' style='color: #f87171; text-decoration: none; font-weight: bold;'>[▼ {cnt_str} 세부내역 닫기]</a>"
                 header_line = f"<span style='color: {prefix_color};'>[{level}]</span> <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span>"
 
                 # Format per-point detail lines
@@ -2520,7 +2521,10 @@ class MainWindow(QMainWindow):
                 formatted_items = []
                 for line in detail_lines:
                     clean_l = line.lstrip("•").strip()
-                    formatted_items.append(f"<div style='margin: 2px 0;'>&bull; {clean_l}</div>")
+                    escaped_l = html.escape(clean_l)
+                    escaped_l = escaped_l.replace("[일치]", "<span style='color: #22c55e; font-weight: bold;'>[일치]</span>")
+                    escaped_l = escaped_l.replace("[불일치]", "<span style='color: #ef4444; font-weight: bold;'>[불일치]</span>")
+                    formatted_items.append(f"<div style='margin: 2px 0;'>&bull; {escaped_l}</div>")
                 inner_details = "".join(formatted_items)
 
                 box_bg = "rgba(239, 68, 68, 0.12)" if not pal["is_light"] else "#fee2e2"
@@ -2539,16 +2543,23 @@ class MainWindow(QMainWindow):
 
         elif level == "USER":
             prefix_html = f"<span style='color: {color}; font-weight: bold;'>[사용자 로그]</span>"
-            msg_html = f"<span style='color: {color}; font-weight: bold;'>{record['raw_msg']}</span>"
+            msg_html = f"<span style='color: {color}; font-weight: bold;'>{html.escape(record['raw_msg'])}</span>"
             return f"{prefix_html} {msg_html}"
         else:
             return f"<span style='color: {prefix_color};'>[{level}]</span> <span style='color: {color};'>{record['raw_msg']}</span>"
 
     def _on_log_anchor_clicked(self, url):
-        url_str = url.toString() if hasattr(url, "toString") else str(url)
-        if url_str.startswith("toggle_mismatch:"):
+        if hasattr(url, "toString"):
+            url_str = url.toString() or url.path() or ""
+        else:
+            url_str = str(url)
+
+        if "toggle-mismatch:" in url_str or "toggle_mismatch:" in url_str:
             try:
-                log_id = int(url_str.split(":")[1])
+                for prefix in ("toggle-mismatch:", "toggle_mismatch:"):
+                    if prefix in url_str:
+                        log_id = int(url_str.split(prefix)[1].strip("/"))
+                        break
                 if hasattr(self, "_log_records") and 0 <= log_id < len(self._log_records):
                     self._log_records[log_id]["expanded"] = not self._log_records[log_id].get("expanded", False)
                     self._rerender_all_logs()

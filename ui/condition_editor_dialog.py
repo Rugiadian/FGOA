@@ -186,6 +186,23 @@ class ConditionEditorDialog(QDialog):
         grp_layout = QVBoxLayout(grp_points)
         grp_layout.setContentsMargins(4, 8, 4, 4)
 
+        # Logic Operator Selector (AND / OR)
+        logic_row = QHBoxLayout()
+        logic_row.setContentsMargins(2, 0, 2, 4)
+        lbl_logic = QLabel("일치 규칙:")
+        lbl_logic.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
+        self.combo_logic = QComboBox()
+        self.combo_logic.addItem("모든 포인트 일치 (AND)", "AND")
+        self.combo_logic.addItem("하나라도 일치 (OR)", "OR")
+        curr_logic = getattr(self.condition, "logic_operator", "AND") or "AND"
+        idx_logic = self.combo_logic.findData(curr_logic)
+        if idx_logic >= 0:
+            self.combo_logic.setCurrentIndex(idx_logic)
+        self.combo_logic.currentIndexChanged.connect(self._on_logic_changed)
+        logic_row.addWidget(lbl_logic)
+        logic_row.addWidget(self.combo_logic, 1)
+        grp_layout.addLayout(logic_row)
+
         self.tbl_points = QTableWidget()
         self.tbl_points.setColumnCount(6)
         self.tbl_points.setHorizontalHeaderLabels(["ID", "좌표", "색상", "오차", "모드", "삭제"])
@@ -286,6 +303,13 @@ class ConditionEditorDialog(QDialog):
 
         # Set canvas points
         self.canvas.set_points(self.condition.points)
+        if hasattr(self, "combo_logic") and self.condition:
+            curr_logic = getattr(self.condition, "logic_operator", "AND") or "AND"
+            idx_logic = self.combo_logic.findData(curr_logic)
+            if idx_logic >= 0:
+                self.combo_logic.blockSignals(True)
+                self.combo_logic.setCurrentIndex(idx_logic)
+                self.combo_logic.blockSignals(False)
         self._refresh_points_table()
 
     def _refresh_points_table(self):
@@ -597,7 +621,13 @@ class ConditionEditorDialog(QDialog):
         else:
             self.lbl_warning_banner.setVisible(False)
 
+    def _on_logic_changed(self):
+        if hasattr(self, "combo_logic") and self.condition:
+            self.condition.logic_operator = self.combo_logic.currentData() or "AND"
+
     def _on_save(self):
+        if hasattr(self, "combo_logic") and self.condition:
+            self.condition.logic_operator = self.combo_logic.currentData() or "AND"
         self.accept()
 
     def get_condition(self) -> Condition:

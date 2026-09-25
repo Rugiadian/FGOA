@@ -33,11 +33,39 @@ class TestNewEnhancements(unittest.TestCase):
             }
         ]
         log_str = ConditionEvaluator.format_mismatch_log(point_results)
-        self.assertIn("(100, 200)", log_str)
-        self.assertIn("감지 RGB(200,250,100)", log_str)
-        self.assertIn("기준 RGB(255,255,255)", log_str)
-        self.assertIn("±15", log_str)
-        self.assertNotIn("(300, 400)", log_str)
+        self.assertIn("#1 기준: RGB 255,255,255 / 감지: RGB 200,250,100 / 오차 55,5,155", log_str)
+        self.assertIn("[불일치]", log_str)
+        # Verify that even when partially mismatched, the matched point is also output
+        self.assertIn("#2 기준: RGB 10,20,30 / 감지: RGB 10,20,30 / 오차 0,0,0", log_str)
+        self.assertIn("[일치]", log_str)
+
+    def test_format_mismatch_log_user_example(self):
+        # Exact format test as requested by user
+        point_results = [
+            {
+                "point_id": "pt_1",
+                "x": 50,
+                "y": 60,
+                "target_rgb": (255, 255, 255),
+                "actual_rgb": (200, 200, 200),
+                "tolerance": 15,
+                "match_mode": "match",
+                "passed": False
+            },
+            {
+                "point_id": "pt_2",
+                "x": 70,
+                "y": 80,
+                "target_rgb": (100, 100, 100),
+                "actual_rgb": (100, 100, 100),
+                "tolerance": 15,
+                "match_mode": "match",
+                "passed": True
+            }
+        ]
+        log_str = ConditionEvaluator.format_mismatch_log(point_results)
+        self.assertIn("• #1 기준: RGB 255,255,255 / 감지: RGB 200,200,200 / 오차 55,55,55 [불일치]", log_str)
+        self.assertIn("• #2 기준: RGB 100,100,100 / 감지: RGB 100,100,100 / 오차 0,0,0 [일치]", log_str)
 
     def test_screen_capture_display_priority(self):
         # Verify prefer_display argument exists and mss is tried first

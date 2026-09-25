@@ -100,7 +100,8 @@ class ConditionEvaluator:
                 "passed": passed
             })
 
-        if condition.logic_operator == "OR":
+        logic_op = str(getattr(condition, "logic_operator", "AND") or "AND").strip().upper()
+        if logic_op in ("OR", "ANY") or "OR" in logic_op or "하나라도" in logic_op:
             matched = matches_count > 0
         else:  # AND
             matched = matches_count == total_points
@@ -111,35 +112,41 @@ class ConditionEvaluator:
     evaluate_condition = evaluate
 
     @staticmethod
-    def format_mismatch_log(point_results: List[Dict[str, Any]], max_items: int = 3) -> str:
+    def format_mismatch_log(point_results: List[Dict[str, Any]], max_items: Optional[int] = None) -> str:
         """
-        Formats mismatched points with coordinates, actual vs target RGB, and tolerance for user logs.
+        Formats all detection points with target RGB, actual RGB, error, and match status.
+        Outputs all points when mismatch occurs, including matched points.
         Example:
-            (120, 340) 감지 RGB(15,25,40) ≠ 기준 RGB(200,100,50) [오차: R185, G75, B10 / 허용: ±15]
+            • #1 기준: RGB 255,255,255 / 감지: RGB 200,200,200 / 오차 55,55,55 [불일치]
+            • #2 기준: RGB 10,20,30 / 감지: RGB 10,20,30 / 오차 0,0,0 [일치]
         """
-        failed_pts = [p for p in point_results if not p.get("passed", False)]
-        if not failed_pts:
+        if not point_results:
+            return ""
+
+        # Only produce log if at least one point failed
+        if not any(not p.get("passed", False) for p in point_results):
             return ""
 
         lines = []
-        for idx, p in enumerate(failed_pts[:max_items], 1):
-            x, y = p.get("x", 0), p.get("y", 0)
+        target_pts = point_results if max_items is None else point_results[:max_items]
+        for idx, p in enumerate(target_pts, 1):
             target = p.get("target_rgb", (0, 0, 0))
             actual = p.get("actual_rgb", (0, 0, 0))
-            tol = p.get("tolerance", 15)
+            passed = p.get("passed", False)
+            status_str = "일치" if passed else "불일치"
             diff_r = abs(actual[0] - target[0])
             diff_g = abs(actual[1] - target[1])
             diff_b = abs(actual[2] - target[2])
             mode = p.get("match_mode", "match")
             mode_tag = " [불일치검사]" if mode == "not_match" else ""
             lines.append(
-                f"• #{idx} ({x}, {y}) 감지 RGB({actual[0]},{actual[1]},{actual[2]}) ≠ "
-                f"기준 RGB({target[0]},{target[1]},{target[2]}) "
-                f"[오차: R{diff_r}, G{diff_g}, B{diff_b} / 허용: ±{tol}]{mode_tag}"
+                f"• #{idx} 기준: RGB {target[0]},{target[1]},{target[2]} / "
+                f"감지: RGB {actual[0]},{actual[1]},{actual[2]} / "
+                f"오차 {diff_r},{diff_g},{diff_b} [{status_str}]{mode_tag}"
             )
 
-        if len(failed_pts) > max_items:
-            lines.append(f"• ...외 {len(failed_pts) - max_items}개 불일치")
+        if max_items is not None and len(point_results) > max_items:
+            lines.append(f"• ...외 {len(point_results) - max_items}개 포인트")
 
         return "\n".join(lines)
 
