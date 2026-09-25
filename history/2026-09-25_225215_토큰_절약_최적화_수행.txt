@@ -1,0 +1,42 @@
+================================================================================
+FGOA 작업 내역 기록 (Work History Log)
+================================================================================
+
+1. [일시 / Timestamp]
+- 요청 일시: 2026-09-25 22:49:40
+- 완료 일시: 2026-09-25 22:53:00
+
+2. [요청 내용 / User Request]
+토큰 절약 최적화 진행
+
+3. [결과 요약 / Summary of Results]
+(1) .geminiignore 인덱싱 제외 목록 대폭 강화:
+    - 머신별 동적 설정 파일(`fgoa_config*.json`) 패턴 추가 (예제 파일 `!fgoa_config.example.json`만 유지)
+    - Git 내부 메타데이터(`.git/`) 및 PyInstaller 빌드 부산물(`build/`, `dist/`, `*.spec`) 제외 추가
+    - 테스트 커버리지 파일(`.coverage`, `htmlcov/`) 및 임시/백업 파일(`*.bak`, `*.tmp`, `*.swp`) 제외 추가
+
+(2) AGENTS.md 토큰 최적화 규칙 5대 수칙 고도화:
+    - 대형 파일 전신 열람 금지 및 30~60줄 이내 슬라이스 검사(Surgical Slice Inspection) 규칙 명문화
+    - CLI 실행 시 출력 필터링(`Select-Object -First`, `findstr` 타깃팅)으로 컨텍스트 오버플로우 방지
+    - C++ 레벨 Qt stderr 경고 사전 차단 수칙 명시
+    - 답변 생성 시 불필요한 전체 코드 전문 재출력 지양 및 Diff/핵심 요약 중심 답변 원칙 수립
+    - 신규 기능 추가 시 거대 파일 비대화 방지 및 컴포넌트 분리 원칙(Modularization Principle) 추가
+
+(3) 무의미한 콘솔 잡음/경고 원천 제거:
+    - `ui/reference_gallery_dialog.py`: `pix.isNull()` 체크 누락으로 테스트 시 콘솔에 지속 출력되던 `QPixmap::scaled: Pixmap is a null pixmap` 잡음 경고 원천 차단
+
+(4) 비대해진 로컬 로그 파일 정리:
+    - 약 420KB에 달하던 `fgoa_crash.log` 및 `fgoa_debug.log` 초기화
+
+(5) 버전 갱신:
+    - `core/version.py`: `__version__`을 260925.2252로 갱신
+
+4. [영향 파일 목록 / Affected Files]
+- .geminiignore (수정)
+- AGENTS.md (수정)
+- core/version.py (수정)
+- ui/reference_gallery_dialog.py (수정)
+- fgoa_crash.log (초기화)
+- fgoa_debug.log (초기화)
+- history/2026-09-25_225215_토큰_절약_최적화_수행.txt (생성)
+================================================================================

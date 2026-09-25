@@ -5,24 +5,31 @@
 history/
 history/**
 
-# 2. Python 캐시 및 컴파일된 바이트코드
+# 2. Git 저장소 및 버전 관리 메타데이터
+.git/
+**/.git/**
+
+# 3. Python 캐시 및 컴파일된 바이트코드
 __pycache__/
 **/__pycache__/**
 *.py[cod]
 *$py.class
 .pytest_cache/
+.coverage
+htmlcov/
 
-# 3. 로그 및 크래시 리포트
+# 4. 로그 및 크래시 리포트
 *.log
 fgoa_crash.log
 fgoa_debug.log
 
-# 4. 대용량 테스트/프로젝트 JSON 덤프 및 런타임 설정
+# 5. 대용량 테스트/프로젝트 JSON 덤프 및 머신별 설정
 event 1.json
 fgoa_project.json
-fgoa_config.json
+fgoa_config*.json
+!fgoa_config.example.json
 
-# 5. 레퍼런스 이미지 및 대용량 바이너리 미디어 (AI 컨텍스트 주입 배제)
+# 6. 레퍼런스 이미지 및 대용량 바이너리 미디어 (AI 컨텍스트 주입 배제)
 references/
 references/**
 *.png
@@ -32,14 +39,23 @@ references/**
 *.ico
 *.gif
 
-# 6. IDE 및 빌드 임시 파일
+# 7. IDE, 에디터 및 빌드 임시 파일
 .vs/
 .idea/
 .vscode/
+build/
+dist/
+*.spec
 [Tt]emp/
 [Tt]mp/
+*.bak
+*.tmp
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store
 
-# 7. 가상 환경
+# 8. 가상 환경
 venv/
 .venv/
 env/
