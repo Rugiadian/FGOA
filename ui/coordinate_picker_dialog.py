@@ -538,7 +538,8 @@ class CoordinatePickerDialog(QDialog):
     def get_last_used_image_path(cls) -> Optional[str]:
         if cls._last_used_image_path and os.path.exists(cls._last_used_image_path):
             return cls._last_used_image_path
-        config_file = "fgoa_config.json"
+        from core.config import get_config_filepath
+        config_file = get_config_filepath()
         if os.path.exists(config_file):
             try:
                 import json
@@ -554,9 +555,10 @@ class CoordinatePickerDialog(QDialog):
 
     @classmethod
     def set_last_used_image_path(cls, path: Optional[str]):
+        from core.config import get_config_filepath
+        config_file = get_config_filepath()
         if not path:
             cls._last_used_image_path = None
-            config_file = "fgoa_config.json"
             if os.path.exists(config_file):
                 try:
                     import json
@@ -571,7 +573,6 @@ class CoordinatePickerDialog(QDialog):
         if not os.path.exists(path):
             return
         cls._last_used_image_path = path
-        config_file = "fgoa_config.json"
         try:
             import json
             cfg = {}

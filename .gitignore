@@ -49,5 +49,6 @@ $RECYCLE.BIN/
 .plastic/
 *.plastic
 
-# User-specific runtime configurations
-fgoa_config.json
+# User-specific runtime configurations (machine-specific configs)
+fgoa_config*.json
+!fgoa_config.example.json

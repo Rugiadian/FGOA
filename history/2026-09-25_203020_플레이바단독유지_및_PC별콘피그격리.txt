@@ -1,0 +1,39 @@
+======================================================================
+[FGOA 작업 이력 로그]
+======================================================================
+
+1. 일시 (Timestamp)
+   - 요청 시각: 2026-09-25 20:26:04
+   - 완료 시각: 2026-09-25 20:30:20
+
+2. 사용자 요청 내용 (User Request)
+   - "플레이바 말고 다른 상태바가 하나 더 떠있는데 상태바 빼고 플레이바만 남겨."
+   - "콘피그 파일을 실행중인 PC마다 다르게 저장해서 깃에서 충돌 안나게 하고 싶음. 다른 방법이어도 좋음"
+
+3. 작업 결과 요약 (Summary of Results)
+   - 1. 중복 플로팅 상태바 제거 및 플레이바 단독 유지:
+     * 오토 실행 시 화면에 자동으로 떠서 중복 상태 표시를 하던 `GlobalFloatingStopWidget` (`floating_stop`)의 자동 팝업 로직을 `_on_start_execution`에서 제거.
+     * `chk_floating_stop`의 기본값을 해제(`setChecked(False)`)하여 사용자가 원치 않는 중복 상태바가 뜨지 않도록 처리.
+     * 오토 실행 시 오직 다기능 미니 플레이바(`PopupPlayBar`)만 단독으로 화면에 열리고 상태 및 정지/재개 컨트롤을 수행하도록 일원화.
+   - 2. 실행 PC별 설정 파일 격리 및 Git 충돌 원천 방지:
+     * `core/config.py` 신설: 현재 실행 중인 PC의 컴퓨터 이름(Hostname)을 감지하여 `fgoa_config_{COMPUTERNAME}.json` 형태로 PC별 고유 설정 파일을 동적 생성/관리하도록 구현 (`get_config_filepath`).
+     * 기존 `fgoa_config.json`이 존재할 경우 최초 1회 자동으로 해당 PC의 설정 파일로 복사/마이그레이션하여 사용자 기존 설정 완벽 보존.
+     * `ui/main_window.py` 및 `ui/coordinate_picker_dialog.py`의 모든 설정 입출력을 `get_config_filepath()`로 통합.
+     * `.gitignore`에 `fgoa_config*.json` 패턴을 등록하여 PC별 설정 파일이 Git 추적 대상에서 완전히 배제되도록 설정.
+     * Git 인덱스에 남아있던 `fgoa_config.json`을 캐시 제거(`git rm --cached`)하여 여러 PC 간의 Git Pull/Push 충돌을 영구적으로 방지.
+     * 기본 예시 파일 `fgoa_config.example.json` 제공.
+   - 3. 버전 갱신 및 검증:
+     * `core/version.py`: `__version__ = "260925.2029"`으로 갱신.
+     * 전체 1,141개 단위 테스트 100% 정상 통과 검증 완료.
+
+4. 영향 파일 목록 (Affected Files)
+   - core/config.py (신규 생성)
+   - core/__init__.py (수정)
+   - core/version.py (수정)
+   - ui/main_window.py (수정)
+   - ui/coordinate_picker_dialog.py (수정)
+   - .gitignore (수정)
+   - fgoa_config.example.json (신규 생성)
+   - history/2026-09-25_203020_플레이바단독유지_및_PC별콘피그격리.txt (신규 생성)
+
+======================================================================

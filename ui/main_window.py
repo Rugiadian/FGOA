@@ -41,9 +41,10 @@ from ui.action_overlay import ActionOverlayWindow
 from core.global_hotkey import GlobalHotkeyListener
 from ui.floating_stop_widget import GlobalFloatingStopWidget
 from core.path_utils import to_absolute_path, to_relative_path
+from core.config import get_config_filepath
 
 
-CONFIG_FILE = "fgoa_config.json"
+CONFIG_FILE = get_config_filepath()
 TEMP_RELOAD_FILE = "_temp_reload_project.json"
 
 
@@ -289,9 +290,10 @@ class MainWindow(QMainWindow):
                 pass
 
     def _load_app_config(self):
-        if os.path.exists(CONFIG_FILE):
+        cfg_file = get_config_filepath()
+        if os.path.exists(cfg_file):
             try:
-                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                with open(cfg_file, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
                     self.current_theme = cfg.get("theme", "light")
                     self.current_layout_name = cfg.get("layout_name", "기본 3열 (Default)")
@@ -306,10 +308,11 @@ class MainWindow(QMainWindow):
 
     def _save_app_config(self):
         try:
+            cfg_file = get_config_filepath()
             cfg = {}
-            if os.path.exists(CONFIG_FILE):
+            if os.path.exists(cfg_file):
                 try:
-                    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                    with open(cfg_file, "r", encoding="utf-8") as f:
                         cfg = json.load(f)
                 except Exception:
                     pass
@@ -332,7 +335,7 @@ class MainWindow(QMainWindow):
             last_img = CoordinatePickerDialog.get_last_used_image_path()
             if last_img:
                 cfg["last_picker_image_path"] = last_img
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            with open(cfg_file, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2, ensure_ascii=False)
         except Exception:
             pass
@@ -804,7 +807,7 @@ class MainWindow(QMainWindow):
         c_layout.addWidget(self.chk_action_overlay)
 
         self.chk_floating_stop = QCheckBox("🛑 전역 플로팅 정지")
-        self.chk_floating_stop.setChecked(True)
+        self.chk_floating_stop.setChecked(False)
         self.chk_floating_stop.setToolTip("오토 실행 시 화면 최상위에 어디서나 마우스로 원클릭 정지 가능한 빨간색 플로팅 버튼을 자동 표시합니다.")
         c_layout.addWidget(self.chk_floating_stop)
 
@@ -2249,16 +2252,15 @@ class MainWindow(QMainWindow):
         self.lbl_run_status.setStyleSheet("color: #16a34a; font-weight: bold;")
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             self.popup_play_bar.set_runner_state("running", "시나리오 실행 중...")
+            if not self.popup_play_bar.isVisible():
+                geo = self.geometry()
+                self.popup_play_bar.move(max(0, geo.x() + geo.width() - 480), max(0, geo.y() + 60))
+                self.popup_play_bar.show()
+                self.popup_play_bar.raise_()
+                if hasattr(self, "btn_popup_playbar"):
+                    self.btn_popup_playbar.setChecked(True)
 
         self.runner.start()
-        if hasattr(self, "floating_stop") and self.floating_stop:
-            if hasattr(self, "chk_floating_stop") and self.chk_floating_stop.isChecked():
-                self.floating_stop.set_status("오토 실행 중...")
-                self.floating_stop.set_paused_state(False)
-                geo = self.geometry()
-                self.floating_stop.move(max(20, geo.x() + geo.width() - 360), max(20, geo.y() + 40))
-                self.floating_stop.show()
-                self.floating_stop.raise_()
 
     def _on_pause_execution(self):
         if self.runner and self.runner.isRunning():
