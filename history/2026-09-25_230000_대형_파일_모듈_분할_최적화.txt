@@ -1,0 +1,43 @@
+================================================================================
+FGOA 작업 내역 기록 (Work History Log)
+================================================================================
+
+1. [일시 / Timestamp]
+- 요청 일시: 2026-09-25 22:56:39
+- 완료 일시: 2026-09-25 23:00:00
+
+2. [요청 내용 / User Request]
+모두 진행해줘. (규모가 큰 파일 분할 리팩토링 진행)
+
+3. [결과 요약 / Summary of Results]
+코드베이스 내 3대 대형 파일에 대한 안전한 무중단 모듈 분할 완료:
+
+(1) ui/coordinate_picker_dialog.py (1,505줄) 분할:
+    - 2D 캔버스 엔진인 ActionCanvasView 및 CoordinateCanvas를 별도 독립 모듈 `ui/action_canvas_view.py`로 추출 (~520줄 분리)
+    - 다이얼로그 모듈 크기를 약 1,020줄로 축소
+    - 기존 캔버스 조작 및 좌표 지정 테스트 전체 통과 확인
+
+(2) ui/inspector_widget.py (2,711줄) 분할:
+    - 액션 목록 드래그 앤 드롭 및 컬럼 인라인 편집 전담 클래스(DraggableActionsTableWidget, ActionColumnDelegate)를 `ui/inspector_action_table.py`로 추출 (~160줄 분리)
+    - 썸네일 미리보기/스냅샷 클릭 위젯인 ClickableThumbnailLabel을 `ui/clickable_thumbnail.py`로 분리 (~60줄 분리)
+    - ui/inspector_widget.py에서 re-export를 적용하여 하위 호환성 100% 유지
+
+(3) ui/main_window.py (2,706줄) 분할:
+    - 시나리오 목록 드래그 앤 드롭 및 실행 하이라이트 헤더(ScenarioVerticalHeader, DraggableScenarioTableWidget)를 `ui/scenario_table_widget.py`로 추출 (~145줄 분리)
+    - ui/main_window.py에서 re-export를 적용하여 외부 테스트 및 모듈과의 의존성 100% 유지
+
+(4) 버전 및 검증:
+    - `core/version.py`: `__version__`을 260925.2259로 갱신
+    - 단위 테스트: `python -m unittest discover -b -s tests` 실행 결과 1,150개 테스트 전체 통과 (OK, skipped=1, 콘솔 잡음 0건)
+
+4. [영향 파일 목록 / Affected Files]
+- ui/action_canvas_view.py (신규 생성)
+- ui/inspector_action_table.py (신규 생성)
+- ui/clickable_thumbnail.py (신규 생성)
+- ui/scenario_table_widget.py (신규 생성)
+- ui/coordinate_picker_dialog.py (수정 - 컴포넌트 임포트)
+- ui/inspector_widget.py (수정 - 컴포넌트 임포트 및 re-export)
+- ui/main_window.py (수정 - 컴포넌트 임포트 및 re-export)
+- core/version.py (수정 - 버전 갱신)
+- history/2026-09-25_230000_대형_파일_모듈_분할_최적화.txt (생성)
+================================================================================

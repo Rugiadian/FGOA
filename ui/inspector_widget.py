@@ -31,226 +31,9 @@ from ui.widgets.color_badge import ColorChipWidget
 from ui.condition_editor_dialog import ConditionEditorDialog
 from ui.action_editor_dialog import SingleActionDialog
 
-
-class DraggableActionsTableWidget(QTableWidget):
-    """QTableWidget supporting safe mouse drag-and-drop row reordering without item loss."""
-    sig_row_reordered = pyqtSignal(int, int)  # (from_row, to_row)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setDragEnabled(True)
-        self.setAcceptDrops(True)
-        self.viewport().setAcceptDrops(True)
-        self.setDropIndicatorShown(True)
-        self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.setSelectionMode(QAbstractItemView.SingleSelection)
-        self._drag_start_pos = None
-        self._drag_start_row = -1
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._drag_start_pos = event.pos()
-            self._drag_start_row = self.rowAt(event.pos().y())
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if (
-            (event.buttons() & Qt.LeftButton)
-            and self._drag_start_pos is not None
-            and self._drag_start_row >= 0
-        ):
-            dist = (event.pos() - self._drag_start_pos).manhattanLength()
-            if dist >= QApplication.startDragDistance():
-                drag = QDrag(self)
-                mime = QMimeData()
-                mime.setData("application/x-fgoa-action-row", str(self._drag_start_row).encode("utf-8"))
-                drag.setMimeData(mime)
-                self._drag_start_pos = None
-                drag.exec_(Qt.MoveAction)
-                self._drag_start_row = -1
-                return
-        super().mouseMoveEvent(event)
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasFormat("application/x-fgoa-action-row"):
-            event.acceptProposedAction()
-        else:
-            event.ignore()
-
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasFormat("application/x-fgoa-action-row"):
-            event.acceptProposedAction()
-        else:
-            event.ignore()
-
-    def dropEvent(self, event):
-        if event.mimeData().hasFormat("application/x-fgoa-action-row"):
-            data_bytes = event.mimeData().data("application/x-fgoa-action-row").data()
-            try:
-                from_row = int(data_bytes.decode("utf-8"))
-            except Exception:
-                from_row = -1
-            to_row = self.rowAt(event.pos().y())
-            if to_row < 0:
-                to_row = self.rowCount() - 1
-            if to_row < 0:
-                to_row = 0
-            event.acceptProposedAction()
-            if from_row != to_row and from_row >= 0 and to_row >= 0:
-                self.sig_row_reordered.emit(from_row, to_row)
-        else:
-            event.ignore()
-
-
-class ActionColumnDelegate(QStyledItemDelegate):
-    """
-    Delegate for Offset (Col 3), Delay (Col 4), and Log (Col 5) columns.
-    Normally displays clean text (like Action Type column).
-    Switches to inline editor on click, and reverts to clean text after editing.
-    """
-    def __init__(self, inspector: Any, parent=None):
-        super().__init__(parent)
-        self.inspector = inspector
-
-    def createEditor(self, parent, option, index):
-        col = index.column()
-        row = index.row()
-        act = self.inspector._get_action_at(row)
-        if not act:
-            return super().createEditor(parent, option, index)
-
-        if col == 3:  # 오프셋
-            if act.action_type in ("mouse_click", "mouse_drag"):
-                combo = QComboBox(parent)
-                combo.addItem("약", "weak")
-                combo.addItem("강", "strong")
-                combo.addItem("해제", "none")
-                combo.setStyleSheet("font-size: 8.5pt;")
-                return combo
-            return None  # 비마우스 액션은 편집 불가
-
-        elif col == 4:  # 대기 시간: 화살표 숨김 (NoButtons)
-            spin = QDoubleSpinBox(parent)
-            spin.setRange(0.0, 3600.0)
-            spin.setDecimals(1)
-            spin.setSingleStep(0.1)
-            spin.setSuffix("s")
-            spin.setButtonSymbols(QAbstractSpinBox.NoButtons)
-            spin.setAlignment(Qt.AlignCenter)
-            spin.setStyleSheet("font-size: 8.5pt;")
-            return spin
-
-        elif col == 5:  # 로그
-            edit = QLineEdit(parent)
-            edit.setPlaceholderText("로그 문구 (비워두면 꺼짐)")
-            edit.setStyleSheet("font-size: 8.5pt; padding: 1px 3px;")
-            return edit
-
-        return super().createEditor(parent, option, index)
-
-    def setEditorData(self, editor, index):
-        col = index.column()
-        row = index.row()
-        act = self.inspector._get_action_at(row)
-        if not act:
-            return
-
-        if col == 3 and isinstance(editor, QComboBox):
-            cur = getattr(act, "coord_anti_ban", "weak")
-            idx = editor.findData(cur)
-            editor.setCurrentIndex(idx if idx >= 0 else 0)
-
-        elif col == 4 and isinstance(editor, QDoubleSpinBox):
-            editor.setValue(act.delay_seconds)
-            editor.selectAll()
-
-        elif col == 5 and isinstance(editor, QLineEdit):
-            cur_log = getattr(act, "custom_log", "")
-            if not cur_log and act.action_type == "log_message":
-                cur_log = getattr(act, "log_text", "")
-            editor.setText(cur_log)
-            editor.selectAll()
-
-    def setModelData(self, editor, model, index):
-        col = index.column()
-        row = index.row()
-        act = self.inspector._get_action_at(row)
-        if not act:
-            return
-
-        if col == 3 and isinstance(editor, QComboBox):
-            new_mode = editor.currentData()
-            self.inspector._on_inline_offset_changed(act, new_mode)
-            offset_map = {"weak": "약", "strong": "강", "none": "해제"}
-            model.setData(index, offset_map.get(new_mode, "약"), Qt.DisplayRole)
-
-        elif col == 4 and isinstance(editor, QDoubleSpinBox):
-            new_delay = editor.value()
-            self.inspector._on_inline_delay_changed(act, new_delay)
-            model.setData(index, f"{new_delay:.1f}s" if new_delay > 0 else "-", Qt.DisplayRole)
-
-        elif col == 5 and isinstance(editor, QLineEdit):
-            new_log = editor.text().strip()
-            self.inspector._on_inline_log_changed(act, new_log)
-            model.setData(index, new_log if new_log else "-", Qt.DisplayRole)
-
-
-class ClickableThumbnailLabel(QLabel):
-    """
-    Compact clickable 50px thumbnail widget for reference images.
-    Preserves aspect ratio and scales smoothly to width 50px.
-    """
-    clicked = pyqtSignal()
-
-    def __init__(self, border_color: str = "#3b82f6", tooltip: str = "", parent=None):
-        super().__init__(parent)
-        self.border_color = border_color
-        self.setFixedWidth(50)
-        self.setFixedHeight(30)
-        self.setAlignment(Qt.AlignCenter)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip(tooltip)
-        self.setStyleSheet(
-            f"QLabel {{ border: 1.5px solid {self.border_color}; border-radius: 4px; background-color: #0f172a; }} "
-            f"QLabel:hover {{ border: 2px solid #60a5fa; background-color: #1e293b; }}"
-        )
-        self.image_path: Optional[str] = None
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(event)
-
-    def set_image(self, path: Optional[str], hide_on_empty: bool = True, max_w: Optional[int] = None, max_h: Optional[int] = None) -> bool:
-        """Sets and scales reference image. If hide_on_empty is False, displays a clean placeholder when empty."""
-        self.image_path = path
-        target_w = max_w if max_w else (self.width() if self.width() > 0 else 50)
-        target_h = max_h if max_h else (self.height() if self.height() > 0 else 30)
-
-        if path and os.path.isfile(path):
-            pix = QPixmap(path)
-            if not pix.isNull():
-                scaled = pix.scaled(target_w, target_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.setPixmap(scaled)
-                self.setStyleSheet(
-                    f"QLabel {{ border: 1.5px solid {self.border_color}; border-radius: 4px; background-color: #0f172a; }} "
-                    f"QLabel:hover {{ border: 2px solid #60a5fa; background-color: #1e293b; }}"
-                )
-                self.show()
-                return True
-
-        self.clear()
-        if hide_on_empty:
-            self.hide()
-            return False
-        else:
-            self.setStyleSheet(
-                f"QLabel {{ border: 1.5px dashed #475569; border-radius: 4px; background-color: #0f172a; color: #64748b; font-size: 8pt; }} "
-                f"QLabel:hover {{ border: 1.5px dashed #94a3b8; background-color: #1e293b; color: #94a3b8; }}"
-            )
-            self.setText("빈칸")
-            self.show()
-            return False
+# Modular components extracted for token optimization & clean architecture
+from ui.inspector_action_table import DraggableActionsTableWidget, ActionColumnDelegate
+from ui.clickable_thumbnail import ClickableThumbnailLabel
 
 
 class InspectorWidget(QWidget):
@@ -2604,7 +2387,8 @@ class InspectorWidget(QWidget):
                 max_delay=offset_sec,
                 precomputed_jitter=jitter
             )
-            self.sig_log.emit("ACTION", f"테스트 액션 실행 완료: [{act_msg}]")
+            scen_step = f"[#{self.current_scenario.step_number}] " if getattr(self, "current_scenario", None) and getattr(self.current_scenario, "step_number", None) is not None else ""
+            self.sig_log.emit("ACTION", f"{scen_step}테스트 액션 실행 완료: [{act_msg}]")
         except Exception as e:
             self.sig_log.emit("ERROR", f"액션 실행 실패: {e}")
             QMessageBox.critical(self, "실행 오류", f"액션 실행 중 오류 발생:\n{e}")
@@ -2621,7 +2405,8 @@ class InspectorWidget(QWidget):
             return
 
         total = len(actions)
-        self.sig_log.emit("INFO", f"▶ [{self.current_scenario.name}] 전체 액션 시퀀스 테스트 시작 (총 {total}개)...")
+        scen_step = f"[#{self.current_scenario.step_number}] " if getattr(self, "current_scenario", None) and getattr(self.current_scenario, "step_number", None) is not None else ""
+        self.sig_log.emit("INFO", f"{scen_step}▶ [{self.current_scenario.name}] 전체 액션 시퀀스 테스트 시작 (총 {total}개)...")
         scen_log = self.txt_action_log.text().strip() if hasattr(self, "txt_action_log") else getattr(self.current_scenario, "custom_log", "")
         if scen_log:
             self.sig_log.emit("USER", f"  [액션 로그] {scen_log}")
@@ -2663,7 +2448,8 @@ class InspectorWidget(QWidget):
                     time_str = f" (안티밴 +{jitter:.2f}초)" if (should_anti_ban and jitter > 0) else ""
                     act_msg = f"{act.get_summary()}{coord_str}{time_str}"
 
-                self.sig_log.emit("ACTION", f"  [{idx}/{total}] 액션 실행: {act_msg}")
+                scen_step = f"[#{self.current_scenario.step_number}] " if getattr(self, "current_scenario", None) and getattr(self.current_scenario, "step_number", None) is not None else ""
+                self.sig_log.emit("ACTION", f"{scen_step}[{idx}/{total}] 액션 실행: {act_msg}")
 
                 if act.action_type == "log_message":
                     self.sig_log.emit("USER", f"  [사용자 로그] {act.log_text}")
@@ -2696,7 +2482,8 @@ class InspectorWidget(QWidget):
                 time.sleep(0.05)
                 QApplication.processEvents()
 
-            self.sig_log.emit("SUCCESS", f"✅ [{self.current_scenario.name}] 전체 액션 시퀀스({total}개) 테스트 실행 완료")
+            scen_step = f"[#{self.current_scenario.step_number}] " if getattr(self, "current_scenario", None) and getattr(self.current_scenario, "step_number", None) is not None else ""
+            self.sig_log.emit("SUCCESS", f"{scen_step}✅ [{self.current_scenario.name}] 전체 액션 시퀀스({total}개) 테스트 실행 완료")
         except Exception as e:
             self.sig_log.emit("ERROR", f"액션 시퀀스 실행 중 오류: {e}")
             QMessageBox.critical(self, "실행 오류", f"액션 시퀀스 실행 중 오류 발생:\n{e}")

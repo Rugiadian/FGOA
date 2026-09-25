@@ -1,0 +1,32 @@
+[일시 / Timestamp]
+- 요청 일시: 2026-09-25 21:24:33
+- 완료 일시: 2026-09-25 21:35:05
+
+[요청 내용 / User Request]
+- 로그 출력에 인포 석세스 액션의 단어 너비를 같게해서 [#번호]가 비슷한 열 위치에 출력되게해서 가시성 올리기.
+
+[결과 요약 / Summary of Results]
+1. 로그 레벨 태그 단어 너비 균등화 (ui/main_window.py):
+   - 로그 레벨 명칭(INFO, SUCCESS, ACTION, WARN, ERROR)을 가장 긴 'SUCCESS'(7글자) 기준으로 ljust(7) 패딩 처리.
+   - HTML 렌더링 시 연속 공백이 축소되지 않도록 공백을 '&nbsp;'로 치환하고, 모노스페이스 폰트(Consolas)를 지정하여 닫는 대괄호 ']'와 이후 메시지 시작 열 위치를 일관되게 고정.
+   - 메인 윈도우의 QTextBrowser(txt_log)에 기본 폰트로 Consolas 9pt Monospace를 명시적으로 설정.
+2. 실행 시나리오 스텝 번호 [#번호] 열 정렬 및 일관화 (core/runner.py, ui/inspector_widget.py):
+   - 러너의 액션 실행 로그에 시나리오 스텝 번호 f"[#{scenario.step_number}] ▶ {log_msg}" 접두사를 추가하여 INFO, SUCCESS 로그와 동일한 열 위치에 정렬되도록 개선.
+   - 조건 불일치 재시도 대기(⏳), 루프 탈출(🛑), 점프(→) 등 상태 기호가 붙은 로그에서도 [#{scen.step_number}]를 맨 앞에 배치하여 [#번호]가 세로로 일직선으로 정렬되도록 정돈.
+   - 인스펙터의 단일 및 시퀀스 테스트 액션 로그에도 시나리오 스텝 번호 접두사를 적용.
+3. 테마 스타일시트 보완 (ui/theme.py):
+   - 라이트 및 다크 테마 QSS 선택자에 QTextBrowser를 명시하여 모노스페이스 글꼴 규칙 일관성 보장.
+4. 단위 테스트 추가 및 전체 테스트 스위트 검증:
+   - tests/test_log_alignment.py 신규 작성 (3개 테스트 통과).
+   - 전체 테스트 스위트 (1,150개) 통과 완료.
+5. 버전 갱신:
+   - core/version.py의 __version__을 '260925.2134'로 갱신.
+
+[영향 파일 목록 / Affected Files]
+- core/version.py
+- ui/main_window.py
+- core/runner.py
+- ui/inspector_widget.py
+- ui/theme.py
+- tests/test_log_alignment.py
+- history/2026-09-25_213459_로그_레벨_단어너비_균등화_및_번호열_정렬.txt

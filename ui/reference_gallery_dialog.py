@@ -453,8 +453,11 @@ class ReferenceGalleryDialog(QDialog):
         # 1. Preview
         try:
             pix = QPixmap(entry["path"])
-            scaled = pix.scaled(580, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.lbl_preview.setPixmap(scaled)
+            if not pix.isNull():
+                scaled = pix.scaled(580, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.lbl_preview.setPixmap(scaled)
+            else:
+                self.lbl_preview.setText("이미지를 미리볼 수 없습니다.")
         except Exception:
             self.lbl_preview.setText("이미지를 미리볼 수 없습니다.")
 
