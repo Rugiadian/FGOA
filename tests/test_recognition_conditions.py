@@ -52,7 +52,6 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
         4) 선택 모드 및 키보드 방향키 미세조정(Nudge)으로 좌표 이동, 돋보기 갱신 및 경계 클램핑 검증
         5) 포인트 인라인 오차/모드 변경 및 개별/전체 삭제 검증
         """
-        print("\n=== [인식조건 시나리오 1] 캔버스 편집기 및 도구 조작 테스트 시작 ===")
         # 임시 레퍼런스 이미지 생성 (300x200 크기, 빨강/초록/파랑 영역)
         temp_img = Image.new("RGB", (300, 200), (255, 0, 0))
         for x in range(150, 300):
@@ -77,7 +76,6 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
             self.assertIsNotNone(dlg.canvas.pixmap)
             self.assertEqual(dlg.canvas.pixmap.width(), 300)
             self.assertEqual(dlg.canvas.pixmap.height(), 200)
-            print("  [성공] 레퍼런스 이미지 캔버스 로딩 및 해상도 가이드 적용 확인")
 
             # 2. 점 피커(MODE_POINT)로 점 추가
             dlg._set_tool_mode(CanvasView.MODE_POINT)
@@ -87,14 +85,12 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
             p1 = dlg.condition.points[0]
             self.assertEqual((p1.x, p1.y), (50, 50))
             self.assertEqual((p1.r, p1.g, p1.b), (255, 0, 0))
-            print("  [성공] 점 피커: 좌표 (50, 50) 및 RGB(255, 0, 0) 포인트 등록 성공")
 
             # 3. 선 피커(MODE_LINE) 연속 포인트 균등 분할 생성
             with patch("PyQt5.QtWidgets.QInputDialog.getInt", return_value=(4, True)):
                 dlg._on_canvas_line_added(10, 10, 100, 10)
             # 기존 1개 + 선 분할 4개 = 총 5개
             self.assertEqual(len(dlg.condition.points), 5)
-            print(f"  [성공] 선 피커: 4개 연속 포인트 분할 생성 (총 {len(dlg.condition.points)}개)")
 
             # 4. 방향키 넛지(Nudge) 조작 검증
             dlg.tbl_points.selectRow(0)
@@ -105,14 +101,12 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
             # 캔버스 좌측 경계 밖(-999)으로 과도하게 이동 시 클램핑 검증
             dlg._on_nudge_point(-999, 0)
             self.assertEqual(p1.x, 0)  # min clamped at 0
-            print("  [성공] 정밀 넛지: 1픽셀 이동 및 캔버스 경계값 클램핑(0 이상) 검증 완료")
 
             # 5. 인라인 오차/판정모드 변경
             dlg._on_point_tolerance_changed(p1, 35)
             self.assertEqual(p1.tolerance, 35)
             dlg._on_point_match_mode_changed(p1, 1)  # 1 = not_match
             self.assertEqual(p1.match_mode, "not_match")
-            print("  [성공] 인라인 오차(35) 및 불일치(not_match) 판정 모드 변경 완료")
 
             # 6. 개별 삭제 및 전체 비우기
             dlg.tbl_points.selectRow(0)
@@ -122,7 +116,6 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
             with patch("PyQt5.QtWidgets.QMessageBox.question", return_value=16384):  # QMessageBox.Yes
                 dlg._on_clear_all_points()
             self.assertEqual(len(dlg.condition.points), 0)
-            print("  [성공] 포인트 삭제 및 전체 비우기 정상 작동")
 
         finally:
             if os.path.exists(ref_path):
@@ -141,7 +134,6 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
         5) 무조건 실행(points=[]) 판정
         6) 극단 좌표(화면 밖, 음수 좌표) 판정 시 안전성 확인
         """
-        print("\n=== [인식조건 시나리오 2] 판정 엔진 로직 및 극단값 검증 시작 ===")
 
         # 1. AND 논리 검증 (2개 포인트)
         cond_and = Condition(
@@ -161,7 +153,6 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
             matched, details = ConditionEvaluator.evaluate(cond_and, hwnd=123)
             self.assertTrue(matched)
             self.assertTrue(all(d["passed"] for d in details))
-            print("  [성공] AND 판정: 모든 포인트 오차 범위 내 -> True 반환")
 
         # Case B: 하나만 불일치 -> False
         with patch("core.screen_capture.ScreenCapture.get_client_pixel_color", side_effect=[
@@ -171,7 +162,6 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
             matched, details = ConditionEvaluator.evaluate(cond_and, hwnd=123)
             self.assertFalse(matched)
             self.assertFalse(details[1]["passed"])
-            print("  [성공] AND 판정: 1개 포인트 오차 초과 시 -> False 반환")
 
         # 2. OR 논리 검증
         cond_or = Condition(
@@ -189,7 +179,6 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
         ]):
             matched, details = ConditionEvaluator.evaluate(cond_or, hwnd=123)
             self.assertTrue(matched)
-            print("  [성공] OR 판정: 1개 포인트만 일치해도 -> True 반환")
 
         # 3. not_match(불일치 반전) 모드 검증
         cond_invert = Condition(
@@ -203,13 +192,11 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
         with patch("core.screen_capture.ScreenCapture.get_client_pixel_color", return_value=(0, 0, 0)):
             matched, details = ConditionEvaluator.evaluate(cond_invert, hwnd=123)
             self.assertTrue(matched)
-            print("  [성공] not_match 판정: 목표 색상과 다를 때 -> True 반환")
 
         # 실제 색상이 (255, 255, 255)이면 같으므로 -> Fail(False)
         with patch("core.screen_capture.ScreenCapture.get_client_pixel_color", return_value=(255, 255, 255)):
             matched, details = ConditionEvaluator.evaluate(cond_invert, hwnd=123)
             self.assertFalse(matched)
-            print("  [성공] not_match 판정: 목표 색상과 같으면 -> False 반환")
 
         # 4. 무조건 실행(points=[]) 판정
         cond_empty = Condition(name="빈 조건", points=[])
@@ -217,7 +204,6 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
         self.assertTrue(matched)
         matched_none, _ = ConditionEvaluator.evaluate(None, hwnd=123)
         self.assertTrue(matched_none)
-        print("  [성공] 무조건 실행(points 빈 리스트 또는 None) -> 항상 True 반환")
 
         # 5. 극단 좌표(화면 밖, 음수 좌표) 안전성
         cond_extreme = Condition(
@@ -233,7 +219,6 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
             self.assertFalse(matched)
             self.assertEqual(len(details), 2)
             self.assertFalse(details[0]["passed"])
-            print("  [성공] 극단 좌표(음수/초과) 및 픽셀 읽기 실패 시 안전하게 False 반환")
 
     # =========================================================================
     # 인식조건 시나리오 3: 인스펙터 인식 조건 연동 & 고유화/중복 감지(Uniqueness)
@@ -247,7 +232,6 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
         4) 좌표 또는 색상 변경 시 중복 경고가 즉시 해제되는지 검증
         5) 인스펙터 [⚡ 판정 테스트] 버튼 클릭 시 실시간 판정 결과 라벨 표시 확인
         """
-        print("\n=== [인식조건 시나리오 3] 인스펙터 조건 연동 & 중복/고유화 검사 시작 ===")
         widget = InspectorWidget()
         proj = Project()
 
@@ -274,7 +258,6 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
         # 인스펙터 변경사항 저장 (드래프트 -> 원본 반영)
         widget._on_save_inspector()
         self.assertIsNotNone(scen2.condition)
-        print("  [성공] 인스펙터: 조건 비활성 -> 활성 토글 및 저장 시 Condition 모델 자동 생성")
 
         # 2. [📋 조건 가져오기] - scen1의 조건을 scen2로 복사
         widget._copy_condition_from(scen1)
@@ -283,7 +266,6 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
         # Deep Copy 검증: scen2의 포인트를 수정해도 scen1은 변경되지 않아야 함
         scen2.condition.points[0].x = 999
         self.assertEqual(scen1.condition.points[0].x, 100)
-        print("  [성공] 조건 가져오기(Deep Copy) 무결성: 원본 조건에 영향 없음 확인")
 
         # 3. 동일 조건 중복 감지(Uniqueness Warning) 검증
         # scen2의 포인트를 다시 scen1과 동일하게 맞춤
@@ -291,14 +273,12 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
         warnings = ConditionEvaluator.check_project_uniqueness(proj)
         self.assertIn("scen_1", warnings)
         self.assertIn("scen_2", warnings)
-        print(f"  [성공] 조건 고유화 중복 검사: 시나리오 1, 2 중복 감지 경고 확인 -> {warnings['scen_1']}")
 
         # 4. 좌표 변경 시 중복 경고 즉시 해제 확인
         scen2.condition.points[0].x = 500  # 좌표 변경
         warnings_after = ConditionEvaluator.check_project_uniqueness(proj)
         self.assertNotIn("scen_1", warnings_after)
         self.assertNotIn("scen_2", warnings_after)
-        print("  [성공] 조건 차별화 시 중복 경고 자동 해제 확인")
 
         # 5. [⚡ 판정 테스트] 버튼 클릭 시 결과 라벨 표시 확인
         widget.set_scenario(scen1, target_hwnd=123, project=proj)
@@ -306,7 +286,6 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
             widget._on_test_condition_now()
             self.assertFalse(widget.lbl_cond_test_result.isHidden())
             self.assertIn("일치", widget.lbl_cond_test_result.text())
-            print(f"  [성공] 인스펙터 실시간 판정 테스트: '{widget.lbl_cond_test_result.text()}' 정상 표출")
 
 
 if __name__ == "__main__":

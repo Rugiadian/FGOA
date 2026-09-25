@@ -17,18 +17,29 @@ __pycache__/
 fgoa_crash.log
 fgoa_debug.log
 
-# 4. 대용량 테스트/프로젝트 JSON 덤프
+# 4. 대용량 테스트/프로젝트 JSON 덤프 및 런타임 설정
 event 1.json
 fgoa_project.json
+fgoa_config.json
 
-# 5. IDE 및 빌드 임시 파일
+# 5. 레퍼런스 이미지 및 대용량 바이너리 미디어 (AI 컨텍스트 주입 배제)
+references/
+references/**
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.ico
+*.gif
+
+# 6. IDE 및 빌드 임시 파일
 .vs/
 .idea/
 .vscode/
 [Tt]emp/
 [Tt]mp/
 
-# 6. 가상 환경
+# 7. 가상 환경
 venv/
 .venv/
 env/

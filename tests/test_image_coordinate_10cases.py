@@ -68,7 +68,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         - 1600x900 더미 캔버스가 자동 생성되어 캔버스에 바인딩되는지 검증
         - 캔버스 pan, zoom 및 타겟 해상도 설정 무결성 검증
         """
-        print("\n=== [테스트 1] 인식조건 더미 캔버스 자동 생성 및 해상도/배경 검증 시작 ===")
         proj = Project(target_client_width=1600, target_client_height=900)
         cond = Condition(name="더미 캔버스 조건")
         
@@ -94,7 +93,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         # Header bar left background (e.g. at 5, 20 is header bar #0f172a)
         r, g, b = dlg.canvas.get_pixel_color_at(5, 20)
         self.assertEqual((r, g, b), (15, 23, 42), "상단 헤더 바 배경색(#0f172a)이 정확히 샘플링되어야 합니다.")
-        print("  [성공] 타겟 앱 미지정 시 1600×900 고해상도 더미 캔버스 자동 로딩 및 픽셀 샘플링 확인")
 
     def test_02_condition_point_picker_and_magnifier_color_extraction(self):
         """
@@ -103,7 +101,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         - ColorPoint 모델 추가 및 RGB 색상 추출 정확성 검증
         - 돋보기(MagnifierWidget) 및 포인트 테이블의 동기화 검증
         """
-        print("\n=== [테스트 2] 인식조건 점 피커 및 돋보기 색상 추출 검증 시작 ===")
         proj = Project(target_client_width=1600, target_client_height=900)
         cond = Condition(name="포인트 피커 조건")
         dlg = ConditionEditorDialog(condition=cond, project=proj, current_scenario_id="scen_2", target_hwnd=0)
@@ -135,7 +132,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         dlg._on_canvas_pixel_hovered(target_x, target_y)
         self.assertEqual(dlg.magnifier.canvas.center_x, target_x)
         self.assertEqual(dlg.magnifier.canvas.center_y, target_y)
-        print("  [성공] 점 피커로 더미 캔버스 UI 색상 추출, ColorPoint 등록 및 돋보기 연동 확인")
 
     def test_03_condition_line_picker_multisampling_and_grouping(self):
         """
@@ -144,7 +140,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         - 5개의 포인트가 등간격으로 계산되어 생성되는지 검증
         - 모든 포인트가 동일한 line_group_id를 공유하는지 검증
         """
-        print("\n=== [테스트 3] 인식조건 선 피커 등간격 다중 포인트 생성 및 그룹화 검증 시작 ===")
         proj = Project(target_client_width=1600, target_client_height=900)
         cond = Condition(name="선 피커 조건")
         dlg = ConditionEditorDialog(condition=cond, project=proj, current_scenario_id="scen_3", target_hwnd=0)
@@ -166,7 +161,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
             self.assertEqual(pt.line_group_id, line_group, "동일한 선 그룹 ID를 가져야 합니다.")
 
         self.assertEqual(dlg.tbl_points.rowCount(), 5)
-        print("  [성공] 선 피커 5개 등간격 포인트 자동 생성, 좌표 계산 및 라인 그룹화 무결성 확인")
 
     def test_04_condition_point_nudge_and_boundary_clamping(self):
         """
@@ -174,7 +168,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         - 포인트 선택 후 방향키 넛지 조작
         - 1px 이동 및 (0, 0) 하한 경계 클램핑 안전성 검증
         """
-        print("\n=== [테스트 4] 인식조건 1픽셀 미세조정(Nudge) 및 경계 클램핑 검증 시작 ===")
         proj = Project(target_client_width=1600, target_client_height=900)
         cond = Condition(name="넛지 조건", points=[ColorPoint(id="pt_nudge", x=5, y=5, r=255, g=0, b=0)])
         dlg = ConditionEditorDialog(condition=cond, project=proj, current_scenario_id="scen_4", target_hwnd=0)
@@ -196,7 +189,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         # Sync verification with table item
         dlg._refresh_points_table()
         self.assertIn("(0, 0)", dlg.tbl_points.item(0, 1).text())
-        print("  [성공] 1픽셀 정밀 넛지 이동 및 (0, 0) 경계 클램핑 안전 제어 확인")
 
     def test_05_condition_image_evaluator_and_tolerance_matching(self):
         """
@@ -204,7 +196,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         - ConditionEvaluator.evaluate(cond, hwnd=0, image=dummy_pil) 검증
         - 정확한 색상 일치, 오차 범위 내 판정, 오차 초과 불일치 및 OR 연산자 검증
         """
-        print("\n=== [테스트 5] 더미 캔버스/이미지 기반 조건 판정 및 허용 오차 검증 시작 ===")
         dummy_pil = create_dummy_canvas_pil(1600, 900)
 
         # Header area at (5, 20) is #0f172a -> RGB(15, 23, 42)
@@ -231,7 +222,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         cond_or = Condition(name="OR 조건", logic_operator="OR", points=[pt_fail, pt1])
         matched_or, _ = ConditionEvaluator.evaluate(cond_or, hwnd=0, image=dummy_pil)
         self.assertTrue(matched_or, "OR 조건에서 하나라도 일치하면 True를 반환해야 합니다.")
-        print("  [성공] 더미 캔버스 기반 ConditionEvaluator 정확 일치, 허용 오차 및 OR 복합 판정 검증 완료")
 
     # =========================================================================
     # [Part 2] 이미지 좌표 지정 액션 시퀀스 기능 테스트 5건
@@ -244,7 +234,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         - 더미 캔버스(1600x900) 자동 로딩 검증
         - 툴바 위젯 QSizePolicy.Fixed 및 splitter 세로 stretch factor 1 적용 확인 (여백 버그 해결 검증)
         """
-        print("\n=== [테스트 6] 액션 시퀀스 더미 캔버스 및 상단 레이아웃 여백 검증 시작 ===")
         dlg = CoordinatePickerDialog(target_hwnd=0, actions=[])
 
         # 1. Dummy canvas loaded
@@ -268,7 +257,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         bottom_widget = layout.itemAt(2).widget()
         self.assertIsNotNone(bottom_widget)
         self.assertEqual(bottom_widget.sizePolicy().verticalPolicy(), QSizePolicy.Fixed)
-        print("  [성공] 더미 캔버스 자동 로딩 및 스플리터 100% 수직 스트레치(상단 비정상 여백 제거) 구조 확인")
 
     def test_07_action_sequence_canvas_click_and_delay_recording(self):
         """
@@ -276,7 +264,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         - 조작 녹화 모드 활성화 후 2회 클릭 시뮬레이션
         - 클릭과 클릭 사이의 대기 시간(delay) 자동 삽입 검증
         """
-        print("\n=== [테스트 7] 이미지 상 클릭 조작 녹화 및 대기 시간 자동 기록 검증 시작 ===")
         dlg = CoordinatePickerDialog(target_hwnd=0, actions=[])
 
         dlg._toggle_image_recording()
@@ -305,7 +292,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
 
         dlg._toggle_image_recording()
         self.assertFalse(dlg.is_recording_mode)
-        print("  [성공] 이미지 상 클릭 위치 및 클릭 간 대기 시간(1.8초) 실시간 자동 녹화 확인")
 
     def test_08_action_sequence_canvas_drag_recording_with_duration(self):
         """
@@ -313,7 +299,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         - 드래그 동작 (이동 거리 > 15px) 감지 시 mouse_drag 액션 생성
         - 시작 좌표, 끝 좌표, 드래그 소요 시간(ms), 선행 대기 시간 기록 검증
         """
-        print("\n=== [테스트 8] 이미지 상 드래그 조작 녹화 및 소요시간/선행대기 기록 검증 시작 ===")
         dlg = CoordinatePickerDialog(target_hwnd=0, actions=[])
 
         dlg._toggle_image_recording()
@@ -348,7 +333,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         self.assertEqual(act_drag.drag_duration_ms, 450)
 
         dlg._toggle_image_recording()
-        print("  [성공] 마우스 드래그 인식, 시작/끝 좌표, 소요 시간(450ms) 및 선행 대기 시간(2.0초) 자동 등록 확인")
 
     def test_09_action_sequence_virtual_cursor_simulation_without_popup(self):
         """
@@ -356,7 +340,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         - 단일 액션 테스트 및 전체 시퀀스 테스트 실행 시 캔버스 상 가상 커서 작동
         - 완료 시 작업 흐름을 방해하는 팝업창(QMessageBox)이 전혀 뜨지 않음을 검증
         """
-        print("\n=== [테스트 9] 가상 커서 애니메이션 시뮬레이션 및 팝업창 미표시 검증 시작 ===")
         acts = [
             Action(action_type="mouse_click", x=150, y=200),
             Action(action_type="mouse_drag", x=200, y=200, end_x=300, end_y=300, drag_duration_ms=100),
@@ -376,7 +359,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
             mock_info.assert_not_called()
             self.assertIn("전체 액션 시퀀스", dlg.lbl_guide.text())
 
-        print("  [성공] 캔버스 가상 커서 시뮬레이션 및 무팝업(상태 라벨 안내) 사용자 경험 검증 완료")
 
     def test_10_action_sequence_log_time_format_and_reordering(self):
         """
@@ -384,7 +366,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         - 로그 포맷 '[ACTION] ... 액션 실행: 0.3초 (원본0.29초) 대기' 검증
         - 액션 순서 위로 이동, 아래로 이동 및 1px 방향키 미세조정 검증
         """
-        print("\n=== [테스트 10] 대기 액션 타임 개선 표기 및 시퀀스 재정렬 검증 시작 ===")
         # 1. Log time format verification
         proj = Project(anti_ban_enabled=True, anti_ban_min_delay=0.1, anti_ban_max_delay=0.1)
         scen = Scenario(id="scen_fmt_10", actions=[Action(action_type="delay", delay_seconds=0.29)])
@@ -426,7 +407,6 @@ class TestImageCoordinate10Cases(unittest.TestCase):
         self.assertEqual(dlg.actions[0].x, 101)
         self.assertEqual(dlg.actions[1].x, 200)
         self.assertEqual(dlg.selected_action_index, 0)
-        print("  [성공] 개선된 대기 타임 포맷 '0.X초 (원본0.29초) 대기', 1px 미세조정 및 시퀀스 순서 이동 검증 완료")
 
 
 if __name__ == "__main__":

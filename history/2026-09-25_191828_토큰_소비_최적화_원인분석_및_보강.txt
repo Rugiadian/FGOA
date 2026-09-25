@@ -1,0 +1,49 @@
+================================================================================
+[일시 / Timestamp]
+- 요청 시각: 2026-09-25 19:14:54
+- 완료 시각: 2026-09-25 19:18:40
+
+================================================================================
+[요청 내용 / User Request]
+토큰 소비 또 너무 심함. 최적화 진행한지 얼마 안됐는데 왜이러는지 확인 바람.
+
+================================================================================
+[결과 요약 / Summary of Results]
+1. 토큰 급증 원인 심층 분석:
+   (1) 테스트 스위트(1,138개) 실행 시 표준 출력(stdout) 대량 유입:
+       - 이전 세션들에서 `python -m unittest discover tests` 실행 시 `-b` (버퍼) 옵션이 누락되어, 테스트 코드 내에 남아있던 수십 개의 `print()` 성공/디버그 구문 및 진행 텍스트가 백그라운드 태스크 완료 메시지를 통해 에이전트 대화 컨텍스트에 수천 토큰 단위로 직접 주입됨.
+   (2) .geminiignore 누락 항목(대용량 이미지 파일 20MB+):
+       - `references/` 디렉터리에 1.4MB 상당의 게임 캡처 PNG 파일이 14개(총 20MB 이상) 존재했으나, `.geminiignore`에 `references/` 및 `*.png`, `*.jpg` 등 이미지 확장자가 누락되어 파일 인덱싱 및 워크스페이스 스캔 시 토큰 및 I/O 낭비 발생.
+   (3) 대형 파일(120KB+, 2,500줄) 반복 조회/수정 누적:
+       - `ui/main_window.py`(2,500줄) 및 `ui/inspector_widget.py`(2,000줄)의 대규모 리팩토링 및 기능 추가 작업이 한 대화 세션에 연달아 누적되면서, 매 사용자 턴마다 이전 턴들의 방대한 코드 diff와 툴 반환 결과가 매번 재전송됨.
+   (4) 로컬 크래시 로그 누적:
+       - `fgoa_crash.log`가 이전 단위 테스트들의 Synthetic Error 스택 트레이스로 인해 278KB까지 비대해져 있었음.
+
+2. 원인 해결 및 최적화 조치:
+   (1) `.geminiignore` 대폭 보강:
+       - `references/`, `references/**`, `*.png`, `*.jpg`, `*.jpeg`, `*.bmp`, `*.ico`, `*.gif`, `fgoa_config.json` 등 제외 규칙 완비.
+   (2) 테스트 스위트 표준 출력 정리 및 `-b` 옵션 표준화:
+       - `tests/test_scenarios_3cases.py`, `tests/test_image_coordinate_10cases.py`, `tests/test_recognition_conditions.py` 내의 모든 개발용 `print()` 구문 완전 제거.
+       - 전체 테스트 실행 시 `python -m unittest discover -b -s tests` 옵션을 명문화하여 표준 출력이 에이전트 컨텍스트에 들어오는 것을 원천 차단.
+   (3) `AGENTS.md` 규칙 보강:
+       - 대형 파일(`ui/main_window.py`, `ui/inspector_widget.py`) 조회 시 검색 명령어로 위치를 먼저 특정한 뒤 30~60줄 이내의 최소 블록만 조회하도록 명시.
+       - 대형 기능 구현 완료 후 새로운 독립 요청 시 새 대화 세션(New Chat) 전환 권장 지침 명시.
+   (4) 로컬 덤프 파일 정리:
+       - 278KB 크래시 로그(`fgoa_crash.log`) 및 101KB 디버그 로그(`fgoa_debug.log`) 초기화 완료.
+
+3. 검증 결과:
+   - 1,138개 테스트 스위트 실행 시 불필요한 표준 출력 없이 100% 통과 (exit code 0).
+   - `core/version.py` 버전 `260925.1918`로 갱신.
+
+================================================================================
+[영향 파일 목록 / Affected Files]
+- .geminiignore
+- AGENTS.md
+- tests/test_scenarios_3cases.py
+- tests/test_image_coordinate_10cases.py
+- tests/test_recognition_conditions.py
+- fgoa_crash.log (비우기)
+- fgoa_debug.log (비우기)
+- core/version.py
+- history/2026-09-25_191828_토큰_소비_최적화_원인분석_및_보강.txt (신규 생성)
+================================================================================
