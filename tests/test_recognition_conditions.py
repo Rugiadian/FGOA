@@ -213,12 +213,21 @@ class TestRecognitionConditionScenarios(unittest.TestCase):
                 ColorPoint(x=99999, y=99999, r=0, g=0, b=0)
             ]
         )
-        # get_client_pixel_color가 None을 반환하더라도 크래시 없이 False 처리
         with patch("core.screen_capture.ScreenCapture.get_client_pixel_color", return_value=None):
             matched, details = ConditionEvaluator.evaluate(cond_extreme, hwnd=123)
             self.assertFalse(matched)
             self.assertEqual(len(details), 2)
             self.assertFalse(details[0]["passed"])
+
+            # 7. format_mismatch_log 줄바꿈(line break) 포맷 검증
+            mismatch_str = ConditionEvaluator.format_mismatch_log(details)
+            self.assertIn("\n", mismatch_str)
+            self.assertIn("(-9999, -9999)", mismatch_str)
+
+        # 8. WindowInfo is_minimized 속성 검증
+        from core.window_manager import WindowInfo
+        win_info = WindowInfo(hwnd=0, title="Test", client_width=100, client_height=100, screen_x=0, screen_y=0)
+        self.assertFalse(win_info.is_minimized)
 
     # =========================================================================
     # 인식조건 시나리오 3: 인스펙터 인식 조건 연동 & 고유화/중복 감지(Uniqueness)

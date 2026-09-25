@@ -146,9 +146,9 @@ class WorkflowRunner(QThread):
                             current_index = (end_idx + 1) if end_idx is not None else (current_index + 1)
                             continue
                         elif scen.loop_mode == "while_match" and not matched:
-                            end_idx = self.project.find_matching_loop_end(current_index)
                             mismatch_info = ConditionEvaluator.format_mismatch_log(point_results)
-                            mismatch_tail = f" [{mismatch_info}]" if mismatch_info else ""
+                            fail_count = sum(1 for p in point_results if not p.get("passed", False))
+                            mismatch_tail = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
                             self.sig_log.emit("INFO", f"🔁 [루프 s{scen.scenario_number}] '{scen.name}': 지속 조건 불일치{mismatch_tail}. 루프 종료.")
                             if scen.id in loop_counters:
                                 del loop_counters[scen.id]
@@ -203,7 +203,8 @@ class WorkflowRunner(QThread):
                     attempt += 1
                     if attempt < max_attempts and self._is_running:
                         mismatch_info = ConditionEvaluator.format_mismatch_log(point_results)
-                        mismatch_str = f"\n     └ 불일치: {mismatch_info}" if mismatch_info else ""
+                        fail_count = sum(1 for p in point_results if not p.get("passed", False))
+                        mismatch_str = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
                         self.sig_log.emit("INFO", f"⏳ [#{scen.step_number}] '{scen.name}' 조건 불일치{mismatch_str} - 재시도 대기 ({attempt}/{scen.retry_max_count}회, {scen.retry_interval_sec:.1f}초 후 재검사)...")
                         time.sleep(scen.retry_interval_sec)
 
@@ -246,7 +247,8 @@ class WorkflowRunner(QThread):
                 else:
                     self.sig_scenario_completed.emit(scen.id, "mismatch")
                     mismatch_info = ConditionEvaluator.format_mismatch_log(point_results)
-                    mismatch_str = f" [불일치: {mismatch_info}]" if mismatch_info else ""
+                    fail_count = sum(1 for p in point_results if not p.get("passed", False))
+                    mismatch_str = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
                     if scen.on_mismatch == "retry":
                         fail_action = getattr(scen, "retry_fail_action", "stop")
                         self.sig_log.emit("WARN", f"[#{scen.step_number}] '{scen.name}' 조건 재시도({scen.retry_max_count}회) 모두 소진!{mismatch_str} (실패 처리: {fail_action})")

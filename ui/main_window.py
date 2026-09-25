@@ -11,12 +11,13 @@ import os
 import sys
 import json
 import copy
+import re
 from typing import Optional, Dict, List, Tuple, Any
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QToolBar,
-    QFileDialog, QMessageBox, QSplitter, QTextEdit, QStatusBar,
+    QFileDialog, QMessageBox, QSplitter, QTextEdit, QTextBrowser, QStatusBar,
     QFrame, QAbstractItemView, QShortcut, QDockWidget, QMenu,
     QAction, QInputDialog, QSizePolicy, QApplication, QTabWidget, QStyle
 )
@@ -713,13 +714,15 @@ class MainWindow(QMainWindow):
 
         btn_clear_log = QPushButton("비우기")
         btn_clear_log.setFixedHeight(22)
-        btn_clear_log.clicked.connect(lambda: self.txt_log.clear())
+        btn_clear_log.clicked.connect(self._clear_logs)
         log_header.addWidget(btn_clear_log)
         r_layout.addLayout(log_header)
 
-        # Text Edit Log (Takes full height)
-        self.txt_log = QTextEdit()
+        # Text Browser Log (Takes full height, supports interactive collapsible anchors)
+        self.txt_log = QTextBrowser()
         self.txt_log.setReadOnly(True)
+        self.txt_log.setOpenLinks(False)
+        self.txt_log.anchorClicked.connect(self._on_log_anchor_clicked)
         r_layout.addWidget(self.txt_log, 1)
 
         # Dock 3: Right Pane (Log)
@@ -1006,6 +1009,7 @@ class MainWindow(QMainWindow):
         self.current_theme = "dark" if self.current_theme == "light" else "light"
         self._apply_theme()
         self._refresh_scenario_table()
+        self._rerender_all_logs()
         self._save_app_config()
 
     def _update_theme_toggle_btn(self):
@@ -1047,16 +1051,82 @@ class MainWindow(QMainWindow):
             # If current inspector has unsaved changes for a different scenario, ask user
             if (self.inspector.is_dirty and self.inspector.original_scenario and
                     self.inspector.original_scenario.id != target_scen.id):
-                res = QMessageBox.question(
-                    self, "저장되지 않은 변경사항",
+                msg_box = QMessageBox(self)
+                msg_box.setWindowTitle("저장되지 않은 변경사항")
+                msg_box.setText(
                     f"시나리오 s{self.inspector.original_scenario.scenario_number} [{self.inspector.original_scenario.name}]의 "
-                    f"인스펙터 변경사항이 저장되지 않았습니다.\n변경사항을 저장하시겠습니까?",
-                    QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
-                    QMessageBox.Save
+                    f"인스펙터 변경사항이 저장되지 않았습니다.\n변경사항을 저장하시겠습니까?"
                 )
-                if res == QMessageBox.Save:
+                msg_box.setIcon(QMessageBox.Question)
+
+                btn_save = msg_box.addButton("저장 (&S)", QMessageBox.AcceptRole)
+                btn_discard = msg_box.addButton("저장 안함 (&D)", QMessageBox.DestructiveRole)
+                btn_cancel = msg_box.addButton("취소 (&C)", QMessageBox.RejectRole)
+
+                # 선택되어 있는 저장 버튼에 뚜렷한 시각적 강조(Primary 버튼 스타일) 적용 및 포커스 유지
+                btn_save.setStyleSheet("""
+                    QPushButton {
+                        background-color: #2563eb;
+                        color: #ffffff;
+                        font-weight: bold;
+                        border: 2px solid #60a5fa;
+                        border-radius: 5px;
+                        padding: 6px 18px;
+                        font-size: 9.5pt;
+                    }
+                    QPushButton:hover {
+                        background-color: #1d4ed8;
+                        border-color: #93c5fd;
+                    }
+                    QPushButton:focus {
+                        border: 2px solid #ffffff;
+                        outline: none;
+                    }
+                """)
+                btn_discard.setStyleSheet("""
+                    QPushButton {
+                        background-color: #374151;
+                        color: #f3f4f6;
+                        border: 1px solid #4b5563;
+                        border-radius: 5px;
+                        padding: 6px 14px;
+                        font-size: 9pt;
+                    }
+                    QPushButton:hover {
+                        background-color: #4b5563;
+                    }
+                    QPushButton:focus {
+                        border: 2px solid #9ca3af;
+                        outline: none;
+                    }
+                """)
+                btn_cancel.setStyleSheet("""
+                    QPushButton {
+                        background-color: #1f2937;
+                        color: #d1d5db;
+                        border: 1px solid #374151;
+                        border-radius: 5px;
+                        padding: 6px 14px;
+                        font-size: 9pt;
+                    }
+                    QPushButton:hover {
+                        background-color: #374151;
+                    }
+                    QPushButton:focus {
+                        border: 2px solid #9ca3af;
+                        outline: none;
+                    }
+                """)
+
+                msg_box.setDefaultButton(btn_save)
+                btn_save.setFocus()
+
+                msg_box.exec_()
+                clicked_btn = msg_box.clickedButton()
+
+                if clicked_btn == btn_save:
                     self.inspector._on_save_inspector()
-                elif res == QMessageBox.Cancel:
+                elif clicked_btn == btn_cancel:
                     # Restore previous selection
                     for r, s in enumerate(self.project.scenarios):
                         if s.id == self.inspector.original_scenario.id:
@@ -2271,9 +2341,14 @@ class MainWindow(QMainWindow):
             self.tbl_scenarios.set_highlight_row(idx)
 
     def _on_action_executing_visual(self, action, index, total):
+        # 1. Action overlay for click/drag coordinates on target screen (completely click-through)
         if hasattr(self, "action_overlay") and self.action_overlay and hasattr(self, "chk_action_overlay") and self.chk_action_overlay.isChecked():
             self.action_overlay.set_target_hwnd(self.target_hwnd)
             self.action_overlay.show_action(action, index, total)
+
+        # 2. Real-time sequence action progress output on play bar
+        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+            self.popup_play_bar.set_action_status(action, index, total)
 
     def _on_action_finished_visual(self, action):
         if hasattr(self, "action_overlay") and self.action_overlay:
@@ -2359,7 +2434,15 @@ class MainWindow(QMainWindow):
                 self.tbl_scenarios.selectRow(row)
                 break
 
+    def _clear_logs(self):
+        self.txt_log.clear()
+        if hasattr(self, "_log_records"):
+            self._log_records.clear()
+
     def _append_log(self, level: str, msg: str):
+        if not hasattr(self, "_log_records"):
+            self._log_records = []
+
         pal = get_theme_colors(self.current_theme)
         color_map = {
             "INFO": pal["log_info"],
@@ -2370,18 +2453,136 @@ class MainWindow(QMainWindow):
             "USER": pal["log_user"]
         }
         color = color_map.get(level, pal["text_primary"])
-        if level == "USER":
-            # Distinctive user log styling with fuchsia/pink accent and bold text
-            prefix_html = f"<span style='color: {color}; font-weight: bold;'>[사용자 로그]</span>"
-            msg_html = f"<span style='color: {color}; font-weight: bold;'>{msg}</span>"
-            html = f"{prefix_html} {msg_html}"
-        else:
-            prefix_color = "#64748b" if pal["is_light"] else "#8da4c4"
-            html = f"<span style='color: {prefix_color};'>[{level}]</span> <span style='color: {color};'>{msg}</span>"
+        prefix_color = "#64748b" if pal["is_light"] else "#8da4c4"
+
+        log_id = len(self._log_records)
+        record = {
+            "id": log_id,
+            "level": level,
+            "raw_msg": msg,
+            "expanded": False,
+            "has_mismatch": False
+        }
+
+        # Check for explicit [MISMATCH:count]detail[/MISMATCH] tags
+        m_tag = re.search(r'\[MISMATCH(?::(\d+))?\](.*?)\[/MISMATCH\]', msg, re.DOTALL)
+        if m_tag:
+            count = m_tag.group(1) or ""
+            detail = m_tag.group(2).strip()
+            record["has_mismatch"] = True
+            record["prefix_text"] = msg[:m_tag.start()].strip()
+            record["suffix_text"] = msg[m_tag.end():].strip()
+            record["mismatch_detail"] = detail
+            record["fail_count"] = count
+        elif "\n     └ 불일치: " in msg or "\n  └ 불일치: " in msg:
+            sep = "\n     └ 불일치: " if "\n     └ 불일치: " in msg else "\n  └ 불일치: "
+            parts = msg.split(sep, 1)
+            record["has_mismatch"] = True
+            record["prefix_text"] = parts[0].strip()
+            record["suffix_text"] = ""
+            record["mismatch_detail"] = parts[1].strip()
+            record["fail_count"] = ""
+
+        self._log_records.append(record)
+
+        # Append newly formatted HTML
+        html = self._format_log_record_html(record, pal, color, prefix_color)
         self.txt_log.append(html)
+
         if self.chk_autoscroll.isChecked():
             sb = self.txt_log.verticalScrollBar()
             sb.setValue(sb.maximum())
+
+    def _format_log_record_html(self, record: dict, pal: dict, color: str, prefix_color: str) -> str:
+        log_id = record["id"]
+        level = record["level"]
+
+        if record.get("has_mismatch"):
+            prefix_t = record.get("prefix_text", "")
+            suffix_t = record.get("suffix_text", "")
+            suffix_part = f" {suffix_t}" if suffix_t else ""
+            detail_t = record.get("mismatch_detail", "")
+            cnt_str = f"불일치 {record['fail_count']}건" if record.get("fail_count") else "불일치"
+
+            if not record.get("expanded", False):
+                # Collapsed: Show clickable badge link to expand
+                btn_link = f"<a href='toggle_mismatch:{log_id}' style='color: #38bdf8; text-decoration: none; font-weight: bold;'>[▶ {cnt_str} 세부내역 열기]</a>"
+                return f"<div id='mismatch_{log_id}' style='margin: 1px 0;'><span style='color: {prefix_color};'>[{level}]</span> <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span></div>"
+            else:
+                # Expanded: Show clickable badge link to collapse, and formatted details indented per-point
+                btn_link = f"<a href='toggle_mismatch:{log_id}' style='color: #f87171; text-decoration: none; font-weight: bold;'>[▼ {cnt_str} 세부내역 닫기]</a>"
+                header_line = f"<span style='color: {prefix_color};'>[{level}]</span> <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span>"
+
+                # Format per-point detail lines
+                detail_lines = [l.strip() for l in detail_t.split("\n") if l.strip()]
+                formatted_items = []
+                for line in detail_lines:
+                    clean_l = line.lstrip("•").strip()
+                    formatted_items.append(f"<div style='margin: 2px 0;'>&bull; {clean_l}</div>")
+                inner_details = "".join(formatted_items)
+
+                box_bg = "rgba(239, 68, 68, 0.12)" if not pal["is_light"] else "#fee2e2"
+                box_border = "#ef4444"
+                text_detail_color = "#fca5a5" if not pal["is_light"] else "#991b1b"
+
+                detail_box = (
+                    f"<div style='margin-left: 18px; margin-top: 3px; margin-bottom: 4px; padding: 6px 10px; "
+                    f"background-color: {box_bg}; border-left: 3px solid {box_border}; border-radius: 4px; "
+                    f"font-family: Consolas, monospace; font-size: 8.5pt; color: {text_detail_color}; line-height: 1.45;'>"
+                    f"<div style='font-weight: bold; margin-bottom: 3px; color: {box_border};'>🔍 불일치 세부 포인트 목록:</div>"
+                    f"{inner_details}"
+                    f"</div>"
+                )
+                return f"<div id='mismatch_{log_id}' style='margin: 1px 0;'>{header_line}{detail_box}</div>"
+
+        elif level == "USER":
+            prefix_html = f"<span style='color: {color}; font-weight: bold;'>[사용자 로그]</span>"
+            msg_html = f"<span style='color: {color}; font-weight: bold;'>{record['raw_msg']}</span>"
+            return f"{prefix_html} {msg_html}"
+        else:
+            return f"<span style='color: {prefix_color};'>[{level}]</span> <span style='color: {color};'>{record['raw_msg']}</span>"
+
+    def _on_log_anchor_clicked(self, url):
+        url_str = url.toString() if hasattr(url, "toString") else str(url)
+        if url_str.startswith("toggle_mismatch:"):
+            try:
+                log_id = int(url_str.split(":")[1])
+                if hasattr(self, "_log_records") and 0 <= log_id < len(self._log_records):
+                    self._log_records[log_id]["expanded"] = not self._log_records[log_id].get("expanded", False)
+                    self._rerender_all_logs()
+            except Exception:
+                pass
+
+    def _rerender_all_logs(self):
+        if not hasattr(self, "_log_records") or not self._log_records:
+            return
+
+        sb = self.txt_log.verticalScrollBar()
+        val = sb.value()
+        was_at_bottom = (val >= sb.maximum() - 20)
+
+        pal = get_theme_colors(self.current_theme)
+        color_map = {
+            "INFO": pal["log_info"],
+            "ACTION": pal["log_action"],
+            "SUCCESS": pal["log_success"],
+            "WARN": pal["log_warn"],
+            "ERROR": pal["log_error"],
+            "USER": pal["log_user"]
+        }
+        prefix_color = "#64748b" if pal["is_light"] else "#8da4c4"
+
+        html_blocks = []
+        for rec in self._log_records:
+            color = color_map.get(rec["level"], pal["text_primary"])
+            html_blocks.append(self._format_log_record_html(rec, pal, color, prefix_color))
+
+        self.txt_log.setHtml("<br>".join(html_blocks))
+
+        if was_at_bottom and self.chk_autoscroll.isChecked():
+            sb.setValue(sb.maximum())
+        else:
+            sb.setValue(val)
 
     def _on_loop_count_changed(self, val: int):
         self.project.loop_count = val

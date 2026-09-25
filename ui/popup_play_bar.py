@@ -327,7 +327,11 @@ class PopupPlayBar(QWidget):
         self.adjustSize()
 
     def _on_play_clicked(self):
-        self.sig_start_requested.emit(None)
+        if self._runner_state == "paused":
+            scen_id = self.combo_presets.currentData()
+            self.sig_start_requested.emit(scen_id)
+        else:
+            self.sig_start_requested.emit(None)
 
     def _on_pause_clicked(self):
         self.sig_pause_requested.emit()
@@ -352,20 +356,26 @@ class PopupPlayBar(QWidget):
         'running', 'paused', 'stopped', 'stepping'
         """
         self._runner_state = state
+        self.lbl_status_detail.setStyleSheet("color: #9399b2; font-size: 8pt; padding: 1px 2px;")
+
         if state == "running":
             self.btn_play.setEnabled(False)
             self.btn_play.setText("▶ 실행 중")
+            self.btn_play.setToolTip("오토가 실행 중입니다.")
             self.btn_pause.setEnabled(True)
             self.btn_pause.setText("⏸ 일시정지")
+            self.btn_pause.setToolTip("오토 실행을 일시정지합니다.")
             self.btn_stop.setEnabled(True)
             self.btn_step.setEnabled(True)
             self.lbl_state_badge.setText("🟢 실행 중")
             self.lbl_state_badge.setStyleSheet("color: #a6e3a1; font-size: 8pt; background: #143521; padding: 2px 6px; border-radius: 4px; font-weight: bold;")
         elif state == "paused":
             self.btn_play.setEnabled(True)
-            self.btn_play.setText("▶ 재개")
+            self.btn_play.setText("▶ 선택 노드 재개")
+            self.btn_play.setToolTip("선택한 시나리오 노드부터 이어서 재개합니다.")
             self.btn_pause.setEnabled(True)
-            self.btn_pause.setText("▶ 재개")
+            self.btn_pause.setText("▶ 전역 재개")
+            self.btn_pause.setToolTip("현재 멈춘 위치에서 전체 시나리오를 이어서 재개합니다.")
             self.btn_stop.setEnabled(True)
             self.btn_step.setEnabled(True)
             self.lbl_state_badge.setText("🟡 일시정지")
@@ -373,6 +383,7 @@ class PopupPlayBar(QWidget):
         elif state == "stepping":
             self.btn_play.setEnabled(True)
             self.btn_play.setText("▶ 계속")
+            self.btn_play.setToolTip("전체 연속 실행으로 전환합니다.")
             self.btn_pause.setEnabled(False)
             self.btn_stop.setEnabled(True)
             self.btn_step.setEnabled(True)
@@ -381,15 +392,39 @@ class PopupPlayBar(QWidget):
         else:  # "stopped"
             self.btn_play.setEnabled(True)
             self.btn_play.setText("▶ 시작 (F5)")
+            self.btn_play.setToolTip("처음부터 순차적으로 실행합니다. (F5)")
             self.btn_pause.setEnabled(False)
             self.btn_pause.setText("⏸ 일시정지")
+            self.btn_pause.setToolTip("실행 중일 때 일시정지합니다.")
             self.btn_stop.setEnabled(False)
             self.btn_step.setEnabled(True)
             self.lbl_state_badge.setText("⚪ 대기 중")
             self.lbl_state_badge.setStyleSheet("color: #a6adc8; font-size: 8pt; background: #313244; padding: 2px 6px; border-radius: 4px;")
 
         if detail_text:
+            self._current_scenario_text = detail_text
             self.lbl_status_detail.setText(detail_text)
+
+    def set_action_status(self, action, index: int, total: int, scenario_info: str = ""):
+        """Displays real-time action sequence execution progress in playbar status label."""
+        prefix = f"{scenario_info} ▶ " if scenario_info else (f"{self._current_scenario_text} ▶ " if getattr(self, "_current_scenario_text", "") else "")
+        act_type = getattr(action, "action_type", "")
+        if act_type == "mouse_click":
+            desc = f"#{index}/{total} 🖱️ 클릭 ({action.x}, {action.y})"
+        elif act_type == "mouse_drag":
+            desc = f"#{index}/{total} ↔️ 드래그 ({action.x}, {action.y})➔({action.end_x}, {action.end_y})"
+        elif act_type == "delay":
+            desc = f"#{index}/{total} ⏱️ {action.delay_seconds:.1f}초 대기 진행 중..."
+        elif act_type == "key_press":
+            desc = f"#{index}/{total} ⌨️ 키 입력 [{action.key_name}]"
+        elif act_type == "text_type":
+            desc = f"#{index}/{total} ✍️ 텍스트 입력 '{action.text_content}'"
+        else:
+            summary = action.get_summary() if hasattr(action, "get_summary") else ""
+            desc = f"#{index}/{total} {summary}"
+
+        self.lbl_status_detail.setText(f"{prefix}{desc}")
+        self.lbl_status_detail.setStyleSheet("color: #74c7ec; font-size: 8.5pt; font-weight: bold; padding: 1px 2px;")
 
     def refresh_scenarios(self, scenarios: List[Scenario]):
         """Populates scenario preset buttons and dropdown."""

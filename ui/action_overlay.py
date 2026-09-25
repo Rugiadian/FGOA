@@ -10,6 +10,8 @@ from PyQt5.QtWidgets import QWidget
 from PyQt5.QtGui import QPainter, QColor, QPen, QBrush, QFont, QPolygonF
 from PyQt5.QtCore import Qt, QRect, QPointF, QTimer
 
+import win32gui
+import win32con
 from core.models import Action
 from core.window_manager import WindowManager
 
@@ -18,6 +20,7 @@ class ActionOverlayWindow(QWidget):
     """
     Transparent, click-through overlay window positioned over the target game/app window.
     Draws dotted boxes and paths where actions are operating on screen.
+    Guaranteed zero click interception via native Windows WS_EX_TRANSPARENT and HTTRANSPARENT.
     """
 
     def __init__(self, target_hwnd: int = 0, parent=None):
@@ -37,6 +40,37 @@ class ActionOverlayWindow(QWidget):
         self._clear_timer = QTimer(self)
         self._clear_timer.setSingleShot(True)
         self._clear_timer.timeout.connect(self.clear_action)
+
+    def _apply_native_click_through(self):
+        """Enforces OS-level click-through so SendInput/mouse_event bypasses this window completely."""
+        try:
+            hwnd = int(self.winId())
+            if hwnd:
+                style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+                # WS_EX_TRANSPARENT (0x20): pass-through mouse input to underlying windows
+                # WS_EX_LAYERED (0x80000): required for transparency and per-pixel alpha
+                # WS_EX_NOACTIVATE (0x08000000): prevent taking focus when displayed
+                style |= (win32con.WS_EX_TRANSPARENT | win32con.WS_EX_LAYERED | win32con.WS_EX_NOACTIVATE)
+                win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style)
+        except Exception:
+            pass
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_native_click_through()
+
+    def nativeEvent(self, eventType, message):
+        """Intercepts WM_NCHITTEST (0x0084) to return HTTRANSPARENT (-1) for 100% click pass-through."""
+        try:
+            if eventType == "windows_generic_MSG":
+                import ctypes
+                from ctypes import wintypes
+                msg = wintypes.MSG.from_address(int(message))
+                if msg.message == 0x0084:  # WM_NCHITTEST
+                    return True, -1  # HTTRANSPARENT: let clicks fall through to underlying window
+        except Exception:
+            pass
+        return super().nativeEvent(eventType, message)
 
     def set_target_hwnd(self, hwnd: int):
         self.target_hwnd = hwnd
@@ -60,6 +94,11 @@ class ActionOverlayWindow(QWidget):
         if not self.is_overlay_enabled:
             return
 
+        # Top banner actions (delay, key_press, text_type) are rendered on PopupPlayBar instead of target screen
+        if action.action_type not in ("mouse_click", "mouse_drag"):
+            self.clear_action()
+            return
+
         self._clear_timer.stop()
         self.current_action = action
         self.action_index = index
@@ -69,6 +108,7 @@ class ActionOverlayWindow(QWidget):
         self.update_geometry()
         if not self.isVisible():
             self.show()
+        self._apply_native_click_through()
         self.update()
 
     def hide_action_delayed(self, delay_ms: int = 600):
@@ -99,8 +139,8 @@ class ActionOverlayWindow(QWidget):
                 painter, act.x, act.y, act.end_x, act.end_y,
                 act.drag_duration_ms, idx, tot
             )
-        elif act.action_type in ("key_press", "text_type", "delay"):
-            self._draw_banner_visualization(painter, act, idx, tot)
+        # Note: Non-coordinate actions (delay, key, text) are shown in PopupPlayBar, not on target screen
+
 
     def _draw_click_visualization(self, painter: QPainter, x: int, y: int, idx: int, tot: int, summary: str):
         # 1. Outer animated-style dotted bounding box (Cyan)

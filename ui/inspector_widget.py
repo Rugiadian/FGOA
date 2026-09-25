@@ -2292,9 +2292,8 @@ class InspectorWidget(QWidget):
             else:
                 fail_count = sum(1 for d in details if not d.get("passed", False))
                 self.lbl_cond_test_result.setText(f"❌ [불일치] 총 {len(cond.points)}개 중 {fail_count}개 포인트 불일치")
-                self.lbl_cond_test_result.setStyleSheet("color: #dc2626; font-weight: bold;")
                 mismatch_info = ConditionEvaluator.format_mismatch_log(details, max_items=5)
-                mismatch_str = f"\n  └ 불일치: {mismatch_info}" if mismatch_info else ""
+                mismatch_str = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
                 self.sig_log.emit("WARN", f"[{self.current_scenario.name}] 실시간 판정 테스트: 불일치 ({fail_count}개 포인트 오차 초과){mismatch_str}")
         except Exception as e:
             self.lbl_cond_test_result.setVisible(True)

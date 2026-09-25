@@ -69,7 +69,8 @@ class ScreenCapture:
             return None
 
         # 1. Primary: Direct display capture via mss (ensures 100% pixel color parity with GDI GetPixel)
-        if prefer_display and not win_info.is_minimized:
+        is_min = getattr(win_info, "is_minimized", False) if win_info else False
+        if prefer_display and not is_min:
             try:
                 sct = cls.get_sct()
                 monitor = {

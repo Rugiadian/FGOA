@@ -114,15 +114,30 @@ class TestActionSequenceAndPlayBar(unittest.TestCase):
         bar.set_runner_state("paused", "일시정지됨")
         self.assertEqual(bar.lbl_state_badge.text(), "🟡 일시정지")
         self.assertTrue(bar.btn_play.isEnabled())
+        self.assertEqual(bar.btn_play.text(), "▶ 선택 노드 재개")
+        self.assertEqual(bar.btn_pause.text(), "▶ 전역 재개")
+
+        # Test real-time action status formatting
+        act_click = Action(action_type="mouse_click", x=250, y=350)
+        bar.set_action_status(act_click, 1, 3, scenario_info="s1 [전투]")
+        self.assertIn("s1 [전투] ▶ #1/3 🖱️ 클릭 (250, 350)", bar.lbl_status_detail.text())
+
+        act_delay = Action(action_type="delay", delay_seconds=2.0)
+        bar.set_action_status(act_delay, 2, 3)
+        self.assertIn("#2/3 ⏱️ 2.0초 대기 진행 중...", bar.lbl_status_detail.text())
 
         bar.set_runner_state("stopped", "완료됨")
         self.assertEqual(bar.lbl_state_badge.text(), "⚪ 대기 중")
+        self.assertEqual(bar.btn_play.text(), "▶ 시작 (F5)")
+        self.assertEqual(bar.btn_pause.text(), "⏸ 일시정지")
 
-        # Test play signal emission
+        # Test play signal emission in paused state (emits current selected combo scenario)
+        bar.set_runner_state("paused")
         play_emitted = []
         bar.sig_start_requested.connect(lambda sid: play_emitted.append(sid))
         bar.btn_play.click()
         self.assertEqual(len(play_emitted), 1)
+        self.assertEqual(play_emitted[0], "scen_1")
 
         # Test collapse toggle
         self.assertFalse(bar.preset_section.isHidden())

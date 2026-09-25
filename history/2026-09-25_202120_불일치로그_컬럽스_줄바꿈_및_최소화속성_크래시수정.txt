@@ -1,0 +1,44 @@
+======================================================================
+[FGOA 작업 이력 로그]
+======================================================================
+
+1. 일시 (Timestamp)
+   - 요청 시각: 2026-09-25 20:15:22
+   - 완료 시각: 2026-09-25 20:21:20
+
+2. 사용자 요청 내용 (User Request)
+   - "컬러값 불일치 로그는 컬럽스 해서 로그를 직접 클릭해서 열었을 때 표기되게 ."
+   - "컬러값 불일치 로그는 포인트 별로 줄바꿈 할 것. 지금 보기 너무 어려움."
+   - 크래시 오류 해결 요청:
+     * AttributeError: 'WindowInfo' object has no attribute 'is_minimized'
+     * File "core/screen_capture.py", line 72, in capture_client_area
+
+3. 작업 결과 요약 (Summary of Results)
+   - 1. 크래시 오류 수정 ('WindowInfo' has no attribute 'is_minimized'):
+     * `core/window_manager.py`의 `WindowInfo` 데이터클래스에 `is_minimized` 프로퍼티(`win32gui.IsIconic(self.hwnd)`)를 정식 추가.
+     * `core/screen_capture.py`에서 `getattr(win_info, "is_minimized", False)`로 방어 코드를 적용하여 레퍼런스 갤러리 캡처 등 창 캡처 시 충돌 완전 해결.
+   - 2. 컬러값 불일치 로그 포인트별 줄바꿈 (가독성 개선):
+     * `core/evaluator.py`의 `format_mismatch_log`에서 기존 한 줄로 길게 이어붙이던 구분자(` | `)를 포인트별 줄바꿈(`\n`) 및 불릿(`• #1 ...`) 형식으로 개편.
+     * 각 검사 포인트마다 (x, y) 좌표, 감지 RGB, 기준 RGB, 허용 오차 및 불일치 검사 여부가 한눈에 보이도록 정리.
+   - 3. 컬러값 불일치 로그 컬럽스(접기/펼치기) 기능 구현:
+     * `ui/main_window.py`의 로그 위젯을 `QTextBrowser`로 고도화하고 인터랙티브 앵커 클릭(`anchorClicked`) 연동.
+     * `core/runner.py` 및 `ui/inspector_widget.py`에서 불일치 로그 생성 시 `[MISMATCH:건수]상세내용[/MISMATCH]` 구조화 태그 적용.
+     * 기본 상태에서는 로그가 장문으로 도배되지 않도록 `[▶ 불일치 N건 세부내역 열기]` 링크로 깔끔하게 컬럽스(접힘) 처리.
+     * 사용자가 해당 링크를 클릭하면 `[▼ 불일치 N건 세부내역 닫기]`로 토글되며, 하단에 음영 박스로 포인트별 줄바꿈된 상세 불일치 리포트가 펼쳐져 표시되도록 구현.
+     * 다크/라이트 테마 전환 시에도 로그 서식이 유지되도록 재렌더링 기능 연계.
+   - 4. 버전 갱신 및 검증:
+     * `core/version.py`: `__version__ = "260925.2020"`으로 갱신.
+     * 전체 1,141개 단위 테스트 100% 정상 통과 검증 완료.
+
+4. 영향 파일 목록 (Affected Files)
+   - core/version.py (수정)
+   - core/window_manager.py (수정)
+   - core/screen_capture.py (수정)
+   - core/evaluator.py (수정)
+   - core/runner.py (수정)
+   - ui/inspector_widget.py (수정)
+   - ui/main_window.py (수정)
+   - tests/test_recognition_conditions.py (수정)
+   - history/2026-09-25_202120_불일치로그_컬럽스_줄바꿈_및_최소화속성_크래시수정.txt (신규 생성)
+
+======================================================================

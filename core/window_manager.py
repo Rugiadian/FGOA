@@ -34,6 +34,14 @@ class WindowInfo:
     pid: int = 0
     process_name: str = ""
 
+    @property
+    def is_minimized(self) -> bool:
+        """Returns True if the window is currently minimized (iconic)."""
+        try:
+            return bool(win32gui.IsIconic(self.hwnd))
+        except Exception:
+            return False
+
     def __str__(self) -> str:
         return f"{self.title} (HWND: {self.hwnd}, 크기: {self.client_width}x{self.client_height})"
 

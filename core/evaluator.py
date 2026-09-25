@@ -121,7 +121,7 @@ class ConditionEvaluator:
         if not failed_pts:
             return ""
 
-        parts = []
+        lines = []
         for idx, p in enumerate(failed_pts[:max_items], 1):
             x, y = p.get("x", 0), p.get("y", 0)
             target = p.get("target_rgb", (0, 0, 0))
@@ -132,16 +132,16 @@ class ConditionEvaluator:
             diff_b = abs(actual[2] - target[2])
             mode = p.get("match_mode", "match")
             mode_tag = " [불일치검사]" if mode == "not_match" else ""
-            parts.append(
-                f"({x}, {y}) 감지 RGB({actual[0]},{actual[1]},{actual[2]}) ≠ "
+            lines.append(
+                f"• #{idx} ({x}, {y}) 감지 RGB({actual[0]},{actual[1]},{actual[2]}) ≠ "
                 f"기준 RGB({target[0]},{target[1]},{target[2]}) "
                 f"[오차: R{diff_r}, G{diff_g}, B{diff_b} / 허용: ±{tol}]{mode_tag}"
             )
 
         if len(failed_pts) > max_items:
-            parts.append(f"...외 {len(failed_pts) - max_items}개 불일치")
+            lines.append(f"• ...외 {len(failed_pts) - max_items}개 불일치")
 
-        return " | ".join(parts)
+        return "\n".join(lines)
 
     @staticmethod
     def are_conditions_duplicate(cond1: Condition, cond2: Condition, coord_thresh: int = 2, color_thresh: int = 5) -> bool:
