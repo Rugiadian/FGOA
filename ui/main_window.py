@@ -44,12 +44,47 @@ CONFIG_FILE = "fgoa_config.json"
 TEMP_RELOAD_FILE = "_temp_reload_project.json"
 
 
+class ScenarioVerticalHeader(QHeaderView):
+    """Custom vertical header that highlights the currently executing scenario row with distinct cell color."""
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Vertical, parent)
+        self.highlight_row: int = -1
+
+    def set_highlight_row(self, row: int):
+        if self.highlight_row != row:
+            self.highlight_row = row
+            self.viewport().update()
+
+    def paintSection(self, painter, rect, logicalIndex):
+        if logicalIndex == self.highlight_row:
+            painter.save()
+            # Vivid emerald green background for currently running scenario node
+            painter.fillRect(rect, QColor("#16a34a"))
+            painter.setPen(QColor("#15803d"))
+            painter.drawRect(rect.adjusted(0, 0, -1, -1))
+            # Bold white text
+            painter.setPen(QColor("#ffffff"))
+            font = painter.font()
+            font.setBold(True)
+            painter.setFont(font)
+            text = self.model().headerData(logicalIndex, Qt.Vertical, Qt.DisplayRole) if self.model() else ""
+            if not text:
+                text = str(logicalIndex + 1)
+            painter.drawText(rect, Qt.AlignCenter, str(text))
+            painter.restore()
+        else:
+            super().paintSection(painter, rect, logicalIndex)
+
+
 class DraggableScenarioTableWidget(QTableWidget):
     """QTableWidget supporting safe mouse drag-and-drop scenario row reordering without item loss."""
     sig_row_reordered = pyqtSignal(int, int)  # (from_row, to_row)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._custom_v_header = ScenarioVerticalHeader(self)
+        self.setVerticalHeader(self._custom_v_header)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.viewport().setAcceptDrops(True)
@@ -59,6 +94,10 @@ class DraggableScenarioTableWidget(QTableWidget):
         self.horizontalHeader().setMinimumSectionSize(20)
         self._drag_start_pos = None
         self._drag_start_row = -1
+
+    def set_highlight_row(self, row: int):
+        """Highlights the specified row in the vertical header."""
+        self._custom_v_header.set_highlight_row(row)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -172,6 +211,7 @@ class MainWindow(QMainWindow):
         self.scenario_undo_stack: List[Tuple[str, List[Dict[str, Any]]]] = []
         self.scenario_redo_stack: List[Tuple[str, List[Dict[str, Any]]]] = []
         self._is_undoing_redoing_scenario: bool = False
+        self._current_running_row: Optional[int] = None
 
         # Load user settings
         self._load_app_config()
@@ -666,10 +706,17 @@ class MainWindow(QMainWindow):
         lbl_playback_title.setStyleSheet("font-weight: bold; font-size: 9.5pt;")
         c_layout.addWidget(lbl_playback_title)
 
-        self.btn_run = QPushButton("▶ 시작 (F5)")
+        self.btn_run = QPushButton("▶ 전체 시작 (F5)")
         self.btn_run.setObjectName("btn_run")
-        self.btn_run.clicked.connect(self._on_start_execution)
+        self.btn_run.setToolTip("첫 번째 시나리오 노드부터 전체를 순차적으로 실행합니다. (단축키: F5)")
+        self.btn_run.clicked.connect(self._on_start_all_execution)
         c_layout.addWidget(self.btn_run)
+
+        self.btn_run_selected = QPushButton("▶ 선택부터 시작 (Shift+F5)")
+        self.btn_run_selected.setObjectName("btn_run_selected")
+        self.btn_run_selected.setToolTip("현재 목록에서 선택된 시나리오 노드부터 이어서 실행합니다. (단축키: Shift+F5)")
+        self.btn_run_selected.clicked.connect(self._on_start_selected_execution)
+        c_layout.addWidget(self.btn_run_selected)
 
         self.btn_pause = QPushButton("⏸ 일시정지")
         self.btn_pause.setObjectName("btn_pause")
@@ -681,8 +728,10 @@ class MainWindow(QMainWindow):
         self.btn_stop.setObjectName("btn_stop")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._on_stop_execution)
+        c_layout.addWidget(self.btn_stop)
+
         self.btn_step = QPushButton("⏭ 단일 스텝 (F7)")
-        self.btn_step.setToolTip("선택한 시나리오 노드부터 1단계를 실행하고 일시정지합니다. (단축키: F7 / F10)")
+        self.btn_step.setToolTip("선택한 시나리오 노드부터 1단계를 실행하고 다음 노드로 포인터를 이동한 뒤 일시정지합니다. (단축키: F7)")
         self.btn_step.clicked.connect(self._on_step_execution)
         c_layout.addWidget(self.btn_step)
 
@@ -1058,6 +1107,7 @@ class MainWindow(QMainWindow):
     def _refresh_scenario_table(self):
         self.project.renumber_steps()
         depths = self.project.compute_hierarchy_depths()
+        loop_analysis = self.project.analyze_loops() if hasattr(self.project, "analyze_loops") else {}
 
         if hasattr(self, "lbl_scen_count"):
             self.lbl_scen_count.setText(f"총 {len(self.project.scenarios)}개")
@@ -1072,9 +1122,20 @@ class MainWindow(QMainWindow):
 
         for row, scen in enumerate(self.project.scenarios):
             depth = depths[row] if row < len(depths) else 0
-            self._update_table_row(row, scen, depth)
+            loop_info = loop_analysis.get(row)
+            self._update_table_row(row, scen, depth, loop_info)
+
+            # Ensure vertical header item exists
+            v_item = self.tbl_scenarios.verticalHeaderItem(row)
+            if not v_item:
+                v_item = QTableWidgetItem(str(row + 1))
+                self.tbl_scenarios.setVerticalHeaderItem(row, v_item)
 
         self.tbl_scenarios.blockSignals(False)
+
+        # Restore running header highlight if actively executing
+        if hasattr(self, "_current_running_row") and self._current_running_row is not None:
+            self._highlight_running_row_header(self._current_running_row)
 
         # Restore selection
         if 0 <= selected_row < len(self.project.scenarios):
@@ -1086,7 +1147,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             self.popup_play_bar.refresh_scenarios(self.project.scenarios)
 
-    def _update_table_row(self, row: int, scen: Scenario, depth: int = 0):
+    def _update_table_row(self, row: int, scen: Scenario, depth: int = 0, loop_info: Optional[Dict[str, Any]] = None):
 
         # 0. Snapshot (레퍼런스 이미지 스냅샷 - 인식조건 이미지 기본값, 없으면 빈칸)
         eff_ref = scen.get_effective_reference_image(self.project)
@@ -1136,19 +1197,37 @@ class MainWindow(QMainWindow):
         chk_layout.addWidget(chk)
         self.tbl_scenarios.setCellWidget(row, 2, chk_widget)
 
-        # 3. Name with Loop Hierarchy UI
+        # 3. Name with Loop Hierarchy UI, distinct pair colors, and orphaned warnings
         if scen.node_type == "loop_start":
-            loop_desc = scen.get_loop_summary()
-            it_name = QTableWidgetItem(f"{loop_desc} [{scen.name}]")
-            it_name.setForeground(QColor("#2563eb" if self.current_theme == "light" else "#60a5fa"))
+            if loop_info and not loop_info.get("has_pair", True):
+                # 짝 소실 경고!
+                loop_desc = scen.get_loop_summary()
+                it_name = QTableWidgetItem(f"⚠️ [루프 짝 없음: 종료 노드 소실!] {loop_desc} [{scen.name}]")
+                it_name.setForeground(QColor("#ef4444"))
+                it_name.setToolTip("⚠️ 대응되는 루프 종료 노드가 없습니다! 루프 블록을 확인해주세요.")
+            else:
+                p_num = loop_info.get("pair_number", 1) if loop_info else 1
+                color_hex = (loop_info.get("color_light") if self.current_theme == "light" else loop_info.get("color_dark")) if loop_info else ("#2563eb" if self.current_theme == "light" else "#60a5fa")
+                it_name = QTableWidgetItem(f"🔁 [루프 #{p_num} 시작: {scen.loop_count}회] [{scen.name}]")
+                it_name.setForeground(QColor(color_hex))
+                it_name.setToolTip(f"루프 #{p_num} 시작 노드")
             f = it_name.font()
             f.setBold(True)
             it_name.setFont(f)
         elif scen.node_type == "loop_end":
-            start_idx = self.project.find_matching_loop_start(row)
-            start_num_str = f"s{self.project.scenarios[start_idx].scenario_number}" if start_idx is not None else ""
-            it_name = QTableWidgetItem(f"🔁 [루프 종료] → 루프 {start_num_str} 복귀")
-            it_name.setForeground(QColor("#7c3aed" if self.current_theme == "light" else "#c084fc"))
+            if loop_info and not loop_info.get("has_pair", True):
+                # 짝 소실 경고!
+                it_name = QTableWidgetItem(f"⚠️ [루프 짝 없음: 시작 노드 소실!] 🔁 루프 종료 (시작 노드 없음)")
+                it_name.setForeground(QColor("#ef4444"))
+                it_name.setToolTip("⚠️ 대응되는 루프 시작 노드가 없습니다! 루프 블록을 확인해주세요.")
+            else:
+                p_num = loop_info.get("pair_number", 1) if loop_info else 1
+                color_hex = (loop_info.get("color_light") if self.current_theme == "light" else loop_info.get("color_dark")) if loop_info else ("#7c3aed" if self.current_theme == "light" else "#c084fc")
+                partner_idx = loop_info.get("partner_index") if loop_info else None
+                start_num_str = f"s{self.project.scenarios[partner_idx].scenario_number}" if partner_idx is not None and partner_idx < len(self.project.scenarios) else ""
+                it_name = QTableWidgetItem(f"🔁 [루프 #{p_num} 종료] → 루프 {start_num_str} 복귀")
+                it_name.setForeground(QColor(color_hex))
+                it_name.setToolTip(f"루프 #{p_num} 종료 노드 (루프 #{p_num} 시작점으로 복귀)")
             f = it_name.font()
             f.setBold(True)
             it_name.setFont(f)
@@ -1949,6 +2028,20 @@ class MainWindow(QMainWindow):
     # ==========================================
     # Execution Engine Control
     # ==========================================
+    def _on_start_all_execution(self):
+        """첫 번째 시나리오 노드부터 전체를 순차적으로 실행"""
+        self._on_start_execution(start_scenario_id=None)
+
+    def _on_start_selected_execution(self):
+        """현재 목록에서 선택된 시나리오 노드부터 실행"""
+        selected_indexes = self.tbl_scenarios.selectedIndexes()
+        selected_scen_id = None
+        if selected_indexes:
+            row = selected_indexes[0].row()
+            if 0 <= row < len(self.project.scenarios):
+                selected_scen_id = self.project.scenarios[row].id
+        self._on_start_execution(start_scenario_id=selected_scen_id)
+
     def _on_start_execution(self, start_scenario_id: Optional[str] = None):
         if not self.target_hwnd:
             QMessageBox.warning(self, "타겟 창 필요", "먼저 상단에서 오토 입력을 수행할 타겟 게임 창을 선택해주세요.")
@@ -1971,9 +2064,12 @@ class MainWindow(QMainWindow):
         self.runner.sig_scenario_completed.connect(self._on_scenario_completed)
         self.runner.sig_action_executing.connect(self._on_action_executing_visual)
         self.runner.sig_action_finished.connect(self._on_action_finished_visual)
+        self.runner.sig_step_completed.connect(self._on_step_completed)
         self.runner.sig_finished.connect(self._on_runner_finished)
 
         self.btn_run.setEnabled(False)
+        if hasattr(self, "btn_run_selected"):
+            self.btn_run_selected.setEnabled(False)
         self.btn_pause.setEnabled(True)
         self.btn_stop.setEnabled(True)
         self.lbl_run_status.setText("실행 중 (F5/F6)")
@@ -2005,6 +2101,7 @@ class MainWindow(QMainWindow):
             self.runner.stop()
             self.lbl_run_status.setText("정지 요청 중...")
             self.lbl_run_status.setStyleSheet("color: #dc2626; font-weight: bold;")
+        self._highlight_running_row_header(None)
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             self.popup_play_bar.set_runner_state("stopped", "정지됨")
         if hasattr(self, "action_overlay") and self.action_overlay:
@@ -2038,6 +2135,24 @@ class MainWindow(QMainWindow):
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             self.popup_play_bar.set_runner_state("stepping", "단일 스텝 실행 중...")
 
+    def _on_step_completed(self, next_index: int):
+        """단일 스텝 실행 완료 시 다음 노드로 포인터(선택 행) 이동 및 하이라이트 갱신"""
+        if 0 <= next_index < len(self.project.scenarios):
+            self.tbl_scenarios.selectRow(next_index)
+            self._highlight_running_row_header(next_index)
+            next_scen = self.project.scenarios[next_index]
+            if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+                self.popup_play_bar.set_runner_state("paused", f"대기: s{next_scen.scenario_number} [{next_scen.name}]")
+        else:
+            self._highlight_running_row_header(None)
+
+    def _highlight_running_row_header(self, row: Optional[int]):
+        """시나리오 목록 표의 행 넘버링(세로 헤더) 셀 컬러로 현재 진행 중인 노드 강조 표기"""
+        self._current_running_row = row
+        idx = row if row is not None else -1
+        if hasattr(self.tbl_scenarios, "set_highlight_row"):
+            self.tbl_scenarios.set_highlight_row(idx)
+
     def _on_action_executing_visual(self, action, index, total):
         if hasattr(self, "action_overlay") and self.action_overlay and hasattr(self, "chk_action_overlay") and self.chk_action_overlay.isChecked():
             self.action_overlay.set_target_hwnd(self.target_hwnd)
@@ -2057,6 +2172,7 @@ class MainWindow(QMainWindow):
         for row, s in enumerate(self.project.scenarios):
             if s.id == scenario_id:
                 self.tbl_scenarios.selectRow(row)
+                self._highlight_running_row_header(row)
                 if hasattr(self, "popup_play_bar") and self.popup_play_bar:
                     self.popup_play_bar.set_runner_state("running", f"s{s.scenario_number} [{s.name}] 실행 중...")
                 break
@@ -2066,11 +2182,14 @@ class MainWindow(QMainWindow):
 
     def _on_runner_finished(self, reason: str):
         self.btn_run.setEnabled(True)
+        if hasattr(self, "btn_run_selected"):
+            self.btn_run_selected.setEnabled(True)
         self.btn_pause.setEnabled(False)
         self.btn_stop.setEnabled(False)
         self.btn_pause.setText("⏸ 일시정지")
         self.lbl_run_status.setText(f"완료 ({reason})")
         self.lbl_run_status.setStyleSheet("font-weight: bold;")
+        self._highlight_running_row_header(None)
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             self.popup_play_bar.set_runner_state("stopped", f"완료 ({reason})")
         if hasattr(self, "action_overlay") and self.action_overlay:
@@ -2222,10 +2341,16 @@ class MainWindow(QMainWindow):
     # ==========================================
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_F5:
-            if not self.runner or not self.runner.isRunning():
-                self._on_start_execution()
+            if event.modifiers() & Qt.ShiftModifier:
+                if not self.runner or not self.runner.isRunning():
+                    self._on_start_selected_execution()
+                else:
+                    self._on_pause_execution()
             else:
-                self._on_pause_execution()
+                if not self.runner or not self.runner.isRunning():
+                    self._on_start_all_execution()
+                else:
+                    self._on_pause_execution()
             event.accept()
         elif event.key() == Qt.Key_F6:
             self._on_stop_execution()

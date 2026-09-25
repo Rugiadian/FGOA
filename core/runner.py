@@ -22,6 +22,7 @@ class WorkflowRunner(QThread):
     sig_action_executing = pyqtSignal(object, int, int)  # (action, action_index, total_actions)
     sig_action_finished = pyqtSignal(object)  # action
     sig_loop_progress = pyqtSignal(int, int)  # (current_loop, total_loops)
+    sig_step_completed = pyqtSignal(int)  # next_scenario_index
     sig_finished = pyqtSignal(str)  # reason
 
     def __init__(self, project: Project, hwnd: int, start_scenario_id: Optional[str] = None, parent=None):
@@ -285,11 +286,12 @@ class WorkflowRunner(QThread):
                         self._is_running = False
                         break
 
-                # If step mode was active, pause now
+                # If step mode was active, pause now and notify UI of next scenario pointer
                 if self._step_mode:
                     self._step_mode = False
                     self._is_paused = True
                     self.sig_log.emit("INFO", "단일 스텝 완료 (일시정지됨)")
+                    self.sig_step_completed.emit(current_index)
 
             # Check loop completion
             if not self._is_running:

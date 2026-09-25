@@ -308,8 +308,19 @@ class ReferenceGalleryDialog(QDialog):
 
         return usages
 
-    def refresh_gallery(self):
+    def refresh_gallery(self, select_path: Optional[str] = None):
         self.image_entries = self.get_all_gallery_entries(self.project)
+
+        # If a specific image was captured or imported, reset filters to show it
+        if select_path and isinstance(select_path, str):
+            if hasattr(self, "combo_filter"):
+                self.combo_filter.blockSignals(True)
+                self.combo_filter.setCurrentIndex(0)  # "all"
+                self.combo_filter.blockSignals(False)
+            if hasattr(self, "combo_resolution"):
+                self.combo_resolution.blockSignals(True)
+                self.combo_resolution.setCurrentIndex(0)  # "all"
+                self.combo_resolution.blockSignals(False)
 
         # Update resolution classification options
         if hasattr(self, "combo_resolution"):
@@ -344,9 +355,9 @@ class ReferenceGalleryDialog(QDialog):
                 self.combo_resolution.setCurrentIndex(0)
             self.combo_resolution.blockSignals(False)
 
-        self._apply_filter()
+        self._apply_filter(select_path=select_path)
 
-    def _apply_filter(self):
+    def _apply_filter(self, select_path: Optional[str] = None):
         filter_mode = self.combo_filter.currentData() if hasattr(self, "combo_filter") and hasattr(self.combo_filter, "currentData") else "all"
         if not filter_mode:
             filter_mode = "all"
@@ -414,8 +425,20 @@ class ReferenceGalleryDialog(QDialog):
 
             self.list_widget.addItem(item)
 
+        target_row = 0
+        if select_path and isinstance(select_path, str):
+            norm_target = os.path.normpath(os.path.abspath(select_path))
+            for r in range(self.list_widget.count()):
+                ent = self.list_widget.item(r).data(Qt.UserRole)
+                if ent and os.path.normpath(os.path.abspath(ent["path"])) == norm_target:
+                    target_row = r
+                    break
+
         if self.list_widget.count() > 0:
-            self.list_widget.setCurrentRow(0)
+            self.list_widget.setCurrentRow(target_row)
+            item_to_scroll = self.list_widget.item(target_row)
+            if item_to_scroll:
+                self.list_widget.scrollToItem(item_to_scroll)
         else:
             self._clear_detail_view()
 
@@ -488,7 +511,7 @@ class ReferenceGalleryDialog(QDialog):
             fname = f"capture_{now_str}_{idx}.png"
             save_path = os.path.join(REFS_DIR, fname)
         img.save(save_path, "PNG")
-        self.refresh_gallery()
+        self.refresh_gallery(select_path=save_path)
         QMessageBox.information(self, "캡처 완료", f"현재 게임창이 갤러리에 추가되었습니다:\n{fname}")
 
     def _on_import_image(self):
@@ -501,7 +524,7 @@ class ReferenceGalleryDialog(QDialog):
             dest = os.path.join(REFS_DIR, fname)
             try:
                 shutil.copyfile(path, dest)
-                self.refresh_gallery()
+                self.refresh_gallery(select_path=dest)
                 QMessageBox.information(self, "가져오기 완료", f"이미지가 갤러리에 추가되었습니다:\n{fname}")
             except Exception as ex:
                 QMessageBox.critical(self, "가져오기 오류", f"파일 복사 중 오류: {ex}")

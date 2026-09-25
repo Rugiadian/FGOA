@@ -635,6 +635,83 @@ class Project:
                     return i
         return None
 
+    def analyze_loops(self) -> Dict[int, Dict[str, Any]]:
+        """
+        Analyzes all loop_start and loop_end nodes in scenarios.
+        Pairs matching starts and ends, allocates distinct color palette for each pair,
+        and flags orphaned loop nodes whose counterpart has been lost.
+        Returns mapping from scenario index to loop info dict.
+        """
+        palette_list = [
+            {"light": "#2563eb", "dark": "#60a5fa", "name": "블루"},
+            {"light": "#7c3aed", "dark": "#c084fc", "name": "퍼플"},
+            {"light": "#0d9488", "dark": "#2dd4bf", "name": "틸"},
+            {"light": "#ea580c", "dark": "#fb923c", "name": "오렌지"},
+            {"light": "#16a34a", "dark": "#4ade80", "name": "그린"},
+            {"light": "#db2777", "dark": "#f472b6", "name": "핑크"},
+            {"light": "#ca8a04", "dark": "#facc15", "name": "옐로우"},
+        ]
+        info_map = {}
+        stack = []  # List of (index, scenario, pair_counter)
+        pair_counter = 0
+
+        for idx, scen in enumerate(self.scenarios):
+            if scen.node_type == "loop_start":
+                pair_counter += 1
+                stack.append((idx, scen, pair_counter))
+            elif scen.node_type == "loop_end":
+                if stack:
+                    start_idx, start_scen, p_num = stack.pop()
+                    pal = palette_list[(p_num - 1) % len(palette_list)]
+                    info_map[start_idx] = {
+                        "is_loop": True,
+                        "node_type": "loop_start",
+                        "has_pair": True,
+                        "pair_number": p_num,
+                        "partner_index": idx,
+                        "color_light": pal["light"],
+                        "color_dark": pal["dark"],
+                        "warning": None
+                    }
+                    info_map[idx] = {
+                        "is_loop": True,
+                        "node_type": "loop_end",
+                        "has_pair": True,
+                        "pair_number": p_num,
+                        "partner_index": start_idx,
+                        "color_light": pal["light"],
+                        "color_dark": pal["dark"],
+                        "warning": None
+                    }
+                else:
+                    # Orphaned loop_end (missing matching loop_start)
+                    info_map[idx] = {
+                        "is_loop": True,
+                        "node_type": "loop_end",
+                        "has_pair": False,
+                        "pair_number": 0,
+                        "partner_index": None,
+                        "color_light": "#ef4444",
+                        "color_dark": "#f87171",
+                        "warning": "⚠️ [루프 짝 소실: 시작 노드 없음]"
+                    }
+
+        # Any remaining loop_starts in stack are orphaned (missing loop_end)
+        while stack:
+            start_idx, start_scen, p_num = stack.pop()
+            info_map[start_idx] = {
+                "is_loop": True,
+                "node_type": "loop_start",
+                "has_pair": False,
+                "pair_number": p_num,
+                "partner_index": None,
+                "color_light": "#ef4444",
+                "color_dark": "#f87171",
+                "warning": "⚠️ [루프 짝 소실: 종료 노드 없음]"
+            }
+
+        return info_map
+
     def find_scenario_by_id(self, scen_id: str) -> Optional[Scenario]:
         for s in self.scenarios:
             if s.id == scen_id:

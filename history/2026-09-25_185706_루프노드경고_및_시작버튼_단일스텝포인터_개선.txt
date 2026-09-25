@@ -1,0 +1,46 @@
+[일시 / Timestamp]
+- 요청 시각: 2026-09-25 18:38:00
+- 완료 시각: 2026-09-25 18:57:06
+
+[요청 내용 / User Request]
+1. 레퍼런스 갤러리에서 '현재 게임창 캡쳐 추가' 누르면 선택 포커싱이 방금 추가한 이미지가 되게 할 것.
+2. 루프 노드는:
+   - 시작과 끝 한 짝이 소실되면 남겨진 노드 쪽에 경고 표시.
+   - 루프 노드가 여러 개 들어갈 수 있고 각 루프 짝 노드마다 색이 다르게 해서 구분하기 쉽게.
+3. 단일 스텝은 선택된 노드 실행 후 다음 노드로 포인터 이동.
+4. 시작 버튼은 시나리오 전체 시작, 선택한 노드부터 시작 두 가지 제공.
+5. 시나리오 목록 표에 행 넘버링의 셀 컬러로 현재 진행 중인 노드 표기.
+
+[결과 요약 / Summary of Results]
+1. 레퍼런스 갤러리 신규 캡처/가져오기 포커싱 개선:
+   - `ReferenceGalleryDialog.refresh_gallery` 및 `_apply_filter`에 `select_path` 매개변수 연동 및 타입 가드(`isinstance(select_path, str)`) 적용.
+   - 윈도우 캡처 완료(`_on_capture_current_window`) 및 로컬 이미지 임포트(`_on_import_image`) 시 새로 추가된 이미지로 자동 스크롤 및 행 선택 포커싱 완료.
+2. 루프 노드 짝 검사 및 고유 팔레트 색상 분기:
+   - `Project.analyze_loops()`를 통해 중첩 루프 스택 기반으로 Start-End 짝 매칭 알고리즘 구현.
+   - 각 루프 짝(Start-End)마다 고유 색상(블루, 퍼플, 틸, 오렌지, 그린, 핑크, 옐로우) 배정 및 라이트/다크 테마 동시 지원.
+   - 짝이 소실된 Start 노드에 `⚠️ [루프 짝 없음: 종료 노드 소실!]`, 짝이 소실된 End 노드에 `⚠️ [루프 짝 없음: 시작 노드 소실!]` 붉은색 경고 표시 및 툴팁 안내.
+3. 단일 스텝 포인터(선택 행) 자동 이동:
+   - `WorkflowRunner`에 `sig_step_completed = pyqtSignal(int)` 시그널 연결.
+   - 단일 스텝 실행 완료 시 UI의 시나리오 목록 선택 행(`setCurrentRow`) 및 세로 헤더 하이라이트를 다음 단계 인덱스로 즉각 이동.
+4. 시작 버튼 2종 제공 (전체 시작 & 선택부터 시작):
+   - 하단 시나리오 재생 바에 `▶ 전체 시작 (F5)`와 `▶ 선택부터 시작 (Shift+F5)` 버튼 배치.
+   - 단축키 `F5`는 전체 시작, `Shift+F5`는 현재 선택된 노드부터 시작으로 매핑.
+   - 테마 QSS에 `QPushButton#btn_run_selected` 전용 틸/에메랄드 색상 스타일 추가.
+5. 시나리오 목록 표 세로 헤더(행 넘버링) 실행 중 노드 셀 컬러 점등:
+   - `ScenarioVerticalHeader(QHeaderView)` 커스텀 헤더 구현 (`paintSection` 오버라이드).
+   - QSS 스타일시트 간섭 없이도 실행 중인 노드의 행 번호 셀을 선명한 에메랄드 그린(`#16a34a`) 배경, `#15803d` 경계선, 흰색 볼드 텍스트로 하이라이트 표시 및 정지/종료 시 자동 복원.
+6. 단위 테스트 추가 및 전체 테스트 검증:
+   - `tests/test_loop_warning_playback_and_pointer.py` 신규 6개 테스트 추가.
+   - 전체 1,133개 테스트 100% 통과 확인.
+7. 버전 갱신:
+   - `core/version.py`의 `__version__`을 `260925.1857`로 갱신.
+
+[영향 파일 목록 / Affected Files]
+- core/models.py
+- core/runner.py
+- core/version.py
+- ui/main_window.py
+- ui/reference_gallery_dialog.py
+- ui/theme.py
+- tests/test_loop_warning_playback_and_pointer.py
+- history/2026-09-25_185706_루프노드경고_및_시작버튼_단일스텝포인터_개선.txt

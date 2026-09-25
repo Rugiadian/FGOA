@@ -98,6 +98,7 @@ QPushButton:pressed {{
 
 QPushButton:disabled,
 QPushButton#btn_run:disabled,
+QPushButton#btn_run_selected:disabled,
 QPushButton#btn_stop:disabled,
 QPushButton#btn_pause:disabled,
 QPushButton#btn_primary:disabled {{
@@ -115,6 +116,17 @@ QPushButton#btn_run {{
 }}
 QPushButton#btn_run:hover {{
     background-color: #15803d;
+}}
+
+QPushButton#btn_run_selected {{
+    background-color: #0d9488;
+    color: #ffffff;
+    border: 1px solid #0f766e;
+    font-size: 9.5pt;
+    font-weight: bold;
+}}
+QPushButton#btn_run_selected:hover {{
+    background-color: #0f766e;
 }}
 
 QPushButton#btn_stop {{
@@ -499,6 +511,7 @@ QPushButton:pressed {{
 
 QPushButton:disabled,
 QPushButton#btn_run:disabled,
+QPushButton#btn_run_selected:disabled,
 QPushButton#btn_stop:disabled,
 QPushButton#btn_pause:disabled,
 QPushButton#btn_primary:disabled {{
@@ -516,6 +529,17 @@ QPushButton#btn_run {{
 }}
 QPushButton#btn_run:hover {{
     background-color: #2e7d32;
+}}
+
+QPushButton#btn_run_selected {{
+    background-color: #00695c;
+    color: #ffffff;
+    border: 1px solid #00897b;
+    font-size: 9.5pt;
+    font-weight: bold;
+}}
+QPushButton#btn_run_selected:hover {{
+    background-color: #00897b;
 }}
 
 QPushButton#btn_stop {{
