@@ -89,6 +89,11 @@ class ActionSequenceManagerDialog(QDialog):
         self.btn_delete.setEnabled(False)
         btn_layout.addWidget(self.btn_delete)
 
+        self.btn_clean_unused = QPushButton("🧹 안쓰이는 노드 제거")
+        self.btn_clean_unused.setToolTip("시나리오 및 조건에서 전혀 사용되지 않는 미사용 액션 시퀀스를 일괄 삭제합니다.")
+        self.btn_clean_unused.clicked.connect(self._on_clean_unused_sequences)
+        btn_layout.addWidget(self.btn_clean_unused)
+
         btn_layout.addStretch()
 
         self.btn_select = QPushButton("🔗 이 시퀀스 선택")
@@ -207,3 +212,26 @@ class ActionSequenceManagerDialog(QDialog):
         if seq:
             self.selected_sequence_id = seq.id
             self.accept()
+
+    def _on_clean_unused_sequences(self):
+        """시나리오 및 조건에서 전혀 사용되지 않는 미사용 액션 시퀀스를 일괄 삭제합니다."""
+        seqs = getattr(self.project, "action_sequences", [])
+        used_in_scens = {s.sequence_id for s in self.project.scenarios if s.sequence_id}
+        used_in_conds = {c.action_sequence_id for c in getattr(self.project, "conditions", []) if c.action_sequence_id}
+        all_used_ids = used_in_scens | used_in_conds
+
+        unused = [seq for seq in seqs if seq.id not in all_used_ids]
+        if not unused:
+            QMessageBox.information(self, "안쓰이는 노드 제거", "현재 미사용 중인 액션 노드가 없습니다.")
+            return
+
+        names_preview = "\n".join([f"• [A{seq.sequence_number}] {seq.name}" for seq in unused[:8]])
+        if len(unused) > 8:
+            names_preview += f"\n... 외 {len(unused) - 8}개"
+
+        msg = f"시나리오 및 조건에서 전혀 사용되지 않는 액션 시퀀스 노드 {len(unused)}개를 모두 삭제하시겠습니까?\n\n{names_preview}"
+        res = QMessageBox.question(self, "안쓰이는 액션 노드 제거", msg, QMessageBox.Yes | QMessageBox.No)
+        if res == QMessageBox.Yes:
+            for seq in unused:
+                self.project.delete_action_sequence(seq.id)
+            self._refresh_table()

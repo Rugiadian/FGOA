@@ -9,6 +9,7 @@ Supports independent condition/action combining and compact high-density layout.
 import os
 from typing import Optional, List, Dict, Any
 import copy
+import uuid
 import time
 import random
 from PyQt5.QtWidgets import (
@@ -168,12 +169,11 @@ class InspectorWidget(QWidget):
         upper_layout.setSpacing(6)
 
         self.condition_card = self._create_condition_card()
-        upper_layout.addWidget(self.condition_card)
+        upper_layout.addWidget(self.condition_card, 1)
 
         self.branch_card = self._create_branch_card()
-        upper_layout.addWidget(self.branch_card)
+        upper_layout.addWidget(self.branch_card, 0)
 
-        upper_layout.addStretch()
         upper_scroll.setWidget(upper_container)
         cc_layout.addWidget(upper_scroll, 1)
 
@@ -243,9 +243,8 @@ class InspectorWidget(QWidget):
         lower_layout.setSpacing(6)
 
         self.action_card = self._create_action_card()
-        lower_layout.addWidget(self.action_card)
+        lower_layout.addWidget(self.action_card, 1)
 
-        lower_layout.addStretch()
         lower_scroll.setWidget(lower_container)
         ac_layout.addWidget(lower_scroll, 1)
 
@@ -551,9 +550,9 @@ class InspectorWidget(QWidget):
         hdr_pts.resizeSection(5, 38)
         self.tbl_points.verticalHeader().setDefaultSectionSize(24)
         self.tbl_points.setSelectionBehavior(QTableWidget.SelectRows)
-        self.tbl_points.setMinimumHeight(80)
-        self.tbl_points.setMaximumHeight(150)
-        layout.addWidget(self.tbl_points)
+        self.tbl_points.setMinimumHeight(100)
+        self.tbl_points.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout.addWidget(self.tbl_points, 1)
 
         # Points Action Buttons Row
         btn_row = QHBoxLayout()
@@ -825,8 +824,8 @@ class InspectorWidget(QWidget):
         self.tbl_actions.verticalHeader().setDefaultSectionSize(26)
         self.tbl_actions.verticalHeader().setMinimumSectionSize(24)
         self.tbl_actions.setSelectionBehavior(QTableWidget.SelectRows)
-        self.tbl_actions.setMinimumHeight(95)
-        self.tbl_actions.setMaximumHeight(200)
+        self.tbl_actions.setMinimumHeight(110)
+        self.tbl_actions.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         # 델리게이트 연결: 오프셋, 대기, 로그 열에 대해 평상시 깔끔한 텍스트 출력 및 클릭 시 즉시 인라인 편집 지원
         self.action_column_delegate = ActionColumnDelegate(self, self.tbl_actions)
@@ -838,7 +837,7 @@ class InspectorWidget(QWidget):
         )
         self.tbl_actions.cellClicked.connect(self._on_action_cell_clicked)
         self.tbl_actions.cellDoubleClicked.connect(self._on_action_cell_double_clicked)
-        layout.addWidget(self.tbl_actions)
+        layout.addWidget(self.tbl_actions, 1)
 
         # Actions Control Buttons - Row 1: Item Manipulation (Edit, Pick Coord, Delete, Up, Down)
         act_ctrl_row1 = QHBoxLayout()
@@ -846,6 +845,11 @@ class InspectorWidget(QWidget):
         btn_edit_act = QPushButton("✏️ 편집")
         btn_edit_act.clicked.connect(self._on_edit_action)
         act_ctrl_row1.addWidget(btn_edit_act)
+
+        btn_dup_act = QPushButton("📋 복제")
+        btn_dup_act.setToolTip("선택한 액션을 복제하여 바로 아래에 추가합니다.")
+        btn_dup_act.clicked.connect(self._on_duplicate_action)
+        act_ctrl_row1.addWidget(btn_dup_act)
 
         btn_pick_coord_act = QPushButton("🎯 액션 시퀀스 이미지로 좌표 지정...")
         btn_pick_coord_act.setToolTip("액션 시퀀스 이미지로 좌표 지정 작업창을 열어 레퍼런스 이미지 상에서 좌표를 직접 지정 및 편집합니다.")
@@ -2297,6 +2301,27 @@ class InspectorWidget(QWidget):
         self._refresh_actions_table()
         self._mark_dirty()
         self._on_field_changed()
+
+    def _on_duplicate_action(self):
+        if not self.current_scenario:
+            return
+        rows = self.tbl_actions.selectionModel().selectedRows()
+        if not rows:
+            return
+        row = rows[0].row()
+        acts = self._get_active_actions_list()
+        if not (0 <= row < len(acts)):
+            return
+        self._record_undo_state()
+        orig = acts[row]
+        cloned = Action.from_dict(copy.deepcopy(orig.to_dict()))
+        cloned.id = str(uuid.uuid4())[:8]
+        acts.insert(row + 1, cloned)
+        self._refresh_actions_table()
+        self.tbl_actions.selectRow(row + 1)
+        self._mark_dirty()
+        self._on_field_changed()
+        self.sig_log.emit("INFO", f"📋 액션 #{row + 1} ({cloned.get_summary()})이 복제되었습니다.")
 
     def _on_move_action_up(self):
         if not self.current_scenario:

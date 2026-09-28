@@ -20,7 +20,8 @@ from PyQt5.QtWidgets import (
     QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QToolBar,
     QFileDialog, QMessageBox, QSplitter, QTextEdit, QTextBrowser, QStatusBar,
     QFrame, QAbstractItemView, QShortcut, QDockWidget, QMenu,
-    QAction, QInputDialog, QSizePolicy, QApplication, QTabWidget, QStyle
+    QAction, QInputDialog, QSizePolicy, QApplication, QTabWidget, QStyle,
+    QDialog
 )
 from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QDrag, QCursor, QPixmap
 from PyQt5.QtCore import Qt, QTimer, QFileSystemWatcher, QProcess, QByteArray, pyqtSignal, QMimeData
@@ -39,6 +40,8 @@ from ui.widgets.color_badge import WarningBadge
 from ui.widgets.flow_layout import FlowLayout
 from ui.preset_dialog import SavePresetDialog, PresetManagerDialog
 from ui.action_overlay import ActionOverlayWindow
+from ui.anti_ban_dialog import AntiBanDialog
+from ui.virtual_canvas_window import VirtualCanvasWindow
 from core.global_hotkey import GlobalHotkeyListener
 from ui.floating_stop_widget import GlobalFloatingStopWidget
 from core.path_utils import to_absolute_path, to_relative_path
@@ -64,6 +67,8 @@ class MainWindow(QMainWindow):
         self.target_hwnd: int = 0
         self.runner: Optional[WorkflowRunner] = None
         self.current_project_path: Optional[str] = None
+        self.last_project_path: Optional[str] = None
+        self.virtual_canvas_window: Optional[VirtualCanvasWindow] = None
         self.current_theme: str = "light"  # Default to light mode
 
         self._update_window_title()
@@ -83,8 +88,17 @@ class MainWindow(QMainWindow):
         # Load user settings
         self._load_app_config()
 
-        # Check for reload state
-        self._check_reload_state()
+        # Check for reload state or auto-restore last used project
+        reloaded = self._check_reload_state()
+        if not reloaded and self.last_project_path and os.path.isfile(self.last_project_path):
+            try:
+                with open(self.last_project_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self.project = Project.from_dict(data)
+                self.current_project_path = self.last_project_path
+                self._update_window_title()
+            except Exception:
+                self.current_project_path = None
 
         # Sample initial scenario if empty
         self._init_sample_project()
@@ -96,6 +110,9 @@ class MainWindow(QMainWindow):
         self._update_target_label(None)
         self._start_target_monitor_timer()
         self._init_code_watcher()
+
+        if self.current_project_path:
+            self.status_bar.showMessage(f"📂 마지막 사용 프로젝트 자동 복원 완료: {os.path.basename(self.current_project_path)}", 4000)
 
         # Check if previous crash log exists
         from core.logger import CRASH_LOG_PATH
@@ -141,7 +158,7 @@ class MainWindow(QMainWindow):
             title = f"{title} [{proj_name}]"
         self.setWindowTitle(title)
 
-    def _check_reload_state(self):
+    def _check_reload_state(self) -> bool:
         """Restore project state if reloading after code modification."""
         if os.path.exists(TEMP_RELOAD_FILE):
             try:
@@ -149,8 +166,10 @@ class MainWindow(QMainWindow):
                     data = json.load(f)
                     self.project = Project.from_dict(data)
                 os.remove(TEMP_RELOAD_FILE)
+                return True
             except Exception:
                 pass
+        return False
 
     def _load_app_config(self):
         cfg_file = get_config_filepath()
@@ -162,6 +181,7 @@ class MainWindow(QMainWindow):
                     self.current_layout_name = cfg.get("layout_name", "기본 3열 (Default)")
                     self.custom_layouts = cfg.get("custom_layouts", {})
                     self._saved_dock_state = cfg.get("dock_layout_state", None)
+                    self.last_project_path = cfg.get("last_project_path", None)
                     if hasattr(self.project, "target_client_width"):
                         self.project.target_client_width = cfg.get("last_target_width", 1600)
                         self.project.target_client_height = cfg.get("last_target_height", 900)
@@ -188,6 +208,7 @@ class MainWindow(QMainWindow):
                 "last_target_height": getattr(self.project, "target_client_height", 900),
                 "layout_name": getattr(self, "current_layout_name", "기본 3열 (Default)"),
                 "custom_layouts": getattr(self, "custom_layouts", {}),
+                "last_project_path": self.current_project_path,
             })
             if hasattr(self, "saveState"):
                 try:
@@ -222,6 +243,11 @@ class MainWindow(QMainWindow):
         if hasattr(self, "action_overlay") and self.action_overlay:
             try:
                 self.action_overlay.close()
+            except Exception:
+                pass
+        if hasattr(self, "virtual_canvas_window") and self.virtual_canvas_window:
+            try:
+                self.virtual_canvas_window.close()
             except Exception:
                 pass
         self._save_app_config()
@@ -296,6 +322,9 @@ class MainWindow(QMainWindow):
     def _init_ui(self):
         # 0. Setup Window Docking Features (Unity style)
         self.setDockNestingEnabled(True)
+        self.setDockOptions(
+            QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks | QMainWindow.AnimatedDocks | QMainWindow.GroupedDragging
+        )
         self.setCorner(Qt.TopLeftCorner, Qt.LeftDockWidgetArea)
         self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)
         self.setCorner(Qt.TopRightCorner, Qt.RightDockWidgetArea)
@@ -325,6 +354,11 @@ class MainWindow(QMainWindow):
         btn_focus_win = QPushButton("창 활성화")
         btn_focus_win.clicked.connect(self._on_focus_target_window)
         t_layout.addWidget(btn_focus_win)
+
+        btn_virtual_canvas = QPushButton("🎨 가상 캔버스")
+        btn_virtual_canvas.setToolTip("타깃 게임 창 없이 테스트/시뮬레이션을 수행할 수 있는 가상 캔버스 창을 띄웁니다.")
+        btn_virtual_canvas.clicked.connect(self._on_open_virtual_canvas)
+        t_layout.addWidget(btn_virtual_canvas)
 
         btn_gallery = QPushButton("🖼️ 레퍼런스 갤러리")
         btn_gallery.setToolTip("참조 이미지 보관함 및 어느 조건/액션에서 사용 중인지 확인합니다.")
@@ -480,8 +514,14 @@ class MainWindow(QMainWindow):
         tb_layout.addWidget(self.btn_preset)
 
         btn_save_proj = QPushButton("💾 저장")
+        btn_save_proj.setToolTip("불러들인 파일에 바로 저장 (Ctrl+S)")
         btn_save_proj.clicked.connect(self._on_save_project)
         tb_layout.addWidget(btn_save_proj)
+
+        btn_save_as_proj = QPushButton("💾 다른이름 저장")
+        btn_save_as_proj.setToolTip("새로운 파일로 다른 이름 저장")
+        btn_save_as_proj.clicked.connect(self._on_save_project_as)
+        tb_layout.addWidget(btn_save_as_proj)
 
         btn_open_proj = QPushButton("📂 열기")
         btn_open_proj.clicked.connect(self._on_open_project)
@@ -695,58 +735,13 @@ class MainWindow(QMainWindow):
         self.spin_loop_delay.valueChanged.connect(self._on_loop_delay_changed)
         c_layout.addWidget(self.spin_loop_delay)
 
-        c_layout.addSpacing(15)
+        c_layout.addSpacing(10)
 
-        self.chk_anti_ban = QCheckBox("🛡️ 타임 안티밴")
-        self.chk_anti_ban.setChecked(self.project.anti_ban_enabled)
-        self.chk_anti_ban.setToolTip(
-            "시나리오 재생 타임 안티밴 모드 (시나리오 전역 일괄 적용):\n"
-            "- 시나리오 재생 시 액션 지연 시간에 +n초 가변 지연시간 무작위 추가 (단축 없이 +0~+n초)\n"
-            "- 좌표 오프셋은 각 액션별(해제/약/강)로 지정됩니다."
-        )
-        self.chk_anti_ban.toggled.connect(self._on_anti_ban_toggled)
-        c_layout.addWidget(self.chk_anti_ban)
-
-        self.lbl_anti_ban_offset = QLabel("오프셋:")
-        self.lbl_anti_ban_offset.setStyleSheet("font-size: 8.5pt;")
-        c_layout.addWidget(self.lbl_anti_ban_offset)
-        self.spin_anti_ban_offset = QDoubleSpinBox()
-        self.spin_anti_ban_offset.setRange(0.0, 30.0)
-        self.spin_anti_ban_offset.setSingleStep(0.1)
-        self.spin_anti_ban_offset.setPrefix("+")
-        self.spin_anti_ban_offset.setSuffix(" 초")
-        init_offset = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0)))
-        self.spin_anti_ban_offset.setValue(init_offset)
-        self.spin_anti_ban_offset.setToolTip("타임 안티밴 적용 시 무작위로 추가될 최대 지연시간 (+0.0 ~ +n초)")
-        self.spin_anti_ban_offset.setEnabled(self.project.anti_ban_enabled)
-        self.spin_anti_ban_offset.valueChanged.connect(self._on_anti_ban_offset_changed)
-        c_layout.addWidget(self.spin_anti_ban_offset)
-
-        c_layout.addSpacing(15)
-
-        # Coordinate Anti-ban Global Strength (강약 조절)
-        c_layout.addWidget(QLabel("🎯 좌표 오프셋:"))
-        lbl_w = QLabel("약: ±")
-        lbl_w.setStyleSheet("font-size: 8.5pt;")
-        c_layout.addWidget(lbl_w)
-        self.spin_coord_weak = QSpinBox()
-        self.spin_coord_weak.setRange(1, 100)
-        self.spin_coord_weak.setValue(getattr(self.project, "anti_ban_coord_weak", 5))
-        self.spin_coord_weak.setSuffix(" px")
-        self.spin_coord_weak.setToolTip("액션의 좌표 안티밴이 '약'일 때 적용할 무작위 픽셀 오차 (±N px)")
-        self.spin_coord_weak.valueChanged.connect(self._on_coord_weak_changed)
-        c_layout.addWidget(self.spin_coord_weak)
-
-        lbl_s = QLabel("강: ±")
-        lbl_s.setStyleSheet("font-size: 8.5pt;")
-        c_layout.addWidget(lbl_s)
-        self.spin_coord_strong = QSpinBox()
-        self.spin_coord_strong.setRange(1, 200)
-        self.spin_coord_strong.setValue(getattr(self.project, "anti_ban_coord_strong", 15))
-        self.spin_coord_strong.setSuffix(" px")
-        self.spin_coord_strong.setToolTip("액션의 좌표 안티밴이 '강'일 때 적용할 무작위 픽셀 오차 (±N px)")
-        self.spin_coord_strong.valueChanged.connect(self._on_coord_strong_changed)
-        c_layout.addWidget(self.spin_coord_strong)
+        self.btn_anti_ban = QPushButton("🛡️ 안티밴 설정...")
+        self.btn_anti_ban.setObjectName("btn_anti_ban")
+        self.btn_anti_ban.setToolTip("타임 지연 및 좌표 오프셋 안티밴 설정을 엽니다.")
+        self.btn_anti_ban.clicked.connect(self._on_open_anti_ban_dialog)
+        c_layout.addWidget(self.btn_anti_ban)
 
         c_layout.addStretch()
 
@@ -803,6 +798,9 @@ class MainWindow(QMainWindow):
 
         self.sc_preset_save = QShortcut(QKeySequence("Ctrl+Shift+S"), self)
         self.sc_preset_save.activated.connect(self._on_save_preset)
+
+        self.sc_proj_save = QShortcut(QKeySequence("Ctrl+S"), self)
+        self.sc_proj_save.activated.connect(self._on_save_project)
 
         # Global Undo / Redo Shortcuts
         self.sc_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
@@ -904,6 +902,9 @@ class MainWindow(QMainWindow):
     def _on_table_selection_changed(self):
         rows = self.tbl_scenarios.selectionModel().selectedRows()
         if not rows:
+            # 러너 실행 중에는 녹색 헤더 하이라이트만 유지하고 표 항목 선택을 강제 복원하지 않음
+            if self.runner and self.runner.isRunning():
+                return
             # 빈 공간 클릭 등으로 선택이 해제되어도 기존 인스펙터 창 내용을 비우지 않고 유지
             if self.inspector.current_scenario:
                 for r, s in enumerate(self.project.scenarios):
@@ -1439,14 +1440,13 @@ class MainWindow(QMainWindow):
         if layout_name == "기본 3열 (Default)":
             self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
             self.splitDockWidget(self.dock_scenarios, self.dock_inspector, Qt.Horizontal)
+            self.splitDockWidget(self.dock_inspector, self.dock_log, Qt.Horizontal)
             if hasattr(self, "dock_actions"):
                 self.splitDockWidget(self.dock_inspector, self.dock_actions, Qt.Vertical)
-                self.splitDockWidget(self.dock_inspector, self.dock_log, Qt.Horizontal)
-                self.resizeDocks([self.dock_scenarios, self.dock_inspector, self.dock_log], [460, 580, 280], Qt.Horizontal)
+                self.resizeDocks([self.dock_scenarios, self.dock_inspector, self.dock_log], [420, 580, 280], Qt.Horizontal)
                 self.resizeDocks([self.dock_inspector, self.dock_actions], [330, 290], Qt.Vertical)
             else:
-                self.splitDockWidget(self.dock_inspector, self.dock_log, Qt.Horizontal)
-                self.resizeDocks([self.dock_scenarios, self.dock_inspector, self.dock_log], [480, 560, 280], Qt.Horizontal)
+                self.resizeDocks([self.dock_scenarios, self.dock_inspector, self.dock_log], [440, 580, 280], Qt.Horizontal)
 
         elif layout_name == "인식 조건 / 액션 나란히 (Side-by-Side)":
             self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
@@ -2022,11 +2022,47 @@ class MainWindow(QMainWindow):
     def _on_focus_target_window(self):
         if self.target_hwnd:
             WindowManager.bring_to_foreground(self.target_hwnd)
+        elif self.virtual_canvas_window and self.virtual_canvas_window.isVisible():
+            self.virtual_canvas_window.raise_()
+            self.virtual_canvas_window.activateWindow()
         else:
             QMessageBox.information(
                 self, "창 활성화 안내",
                 "현재 실행 중인 특정 윈도우 창이 선택되지 않았습니다.\n(직접 지정 해상도 모드에서는 활성화할 윈도우가 없습니다.)"
             )
+
+    def _on_open_virtual_canvas(self):
+        """Opens or focuses the virtual canvas window and sets it as the active target."""
+        w = getattr(self.project, "target_client_width", 1600)
+        h = getattr(self.project, "target_client_height", 900)
+        if not self.virtual_canvas_window:
+            self.virtual_canvas_window = VirtualCanvasWindow(w, h)
+            self.virtual_canvas_window.sig_closed.connect(self._on_virtual_canvas_closed)
+        else:
+            self.virtual_canvas_window.set_target_resolution(w, h)
+
+        self.virtual_canvas_window.show()
+        self.virtual_canvas_window.raise_()
+        self.virtual_canvas_window.activateWindow()
+
+        self.target_hwnd = int(self.virtual_canvas_window.winId())
+        self.inspector.set_target_hwnd(self.target_hwnd)
+        if hasattr(self, "modules_widget") and self.modules_widget:
+            self.modules_widget.target_hwnd = self.target_hwnd
+        if hasattr(self, "action_overlay") and self.action_overlay:
+            self.action_overlay.set_target_hwnd(self.target_hwnd)
+
+        win_info = WindowManager.get_window_info(self.target_hwnd)
+        self._update_target_label(win_info)
+        self._append_log("INFO", f"🎨 [가상 타겟] 가상 캔버스 창을 열고 타깃으로 연결했습니다. ({w}×{h})")
+        self.status_bar.showMessage(f"가상 캔버스 타깃 연결: {w}×{h}", 3000)
+
+    def _on_virtual_canvas_closed(self):
+        """Handler invoked when the virtual canvas target window is closed."""
+        if self.virtual_canvas_window and self.target_hwnd == int(self.virtual_canvas_window.winId()):
+            self.target_hwnd = 0
+            self._update_target_label(None)
+            self._append_log("INFO", "🎨 [가상 타겟] 가상 캔버스 창이 닫혀 타깃 연결이 해제되었습니다.")
 
     def _update_target_label(self, win: Optional[WindowInfo]):
         pal = get_theme_colors(self.current_theme)
@@ -2085,9 +2121,10 @@ class MainWindow(QMainWindow):
         self._on_start_execution(start_scenario_id=selected_scen_id)
 
     def _on_start_execution(self, start_scenario_id: Optional[str] = None):
-        if not self.target_hwnd:
-            QMessageBox.warning(self, "타겟 창 필요", "먼저 상단에서 오토 입력을 수행할 타겟 게임 창을 선택해주세요.")
-            return
+        if not self.target_hwnd or not WindowManager.get_window_info(self.target_hwnd):
+            # Target window not selected or closed: Auto-launch virtual canvas window
+            self._on_open_virtual_canvas()
+            self._append_log("INFO", "🚀 타깃 앱이 설정되어 있지 않아 가상 캔버스를 띄우고 실행을 시작합니다.")
 
         if self.runner and self.runner.isRunning():
             if self.runner._is_paused:
@@ -2106,6 +2143,8 @@ class MainWindow(QMainWindow):
         self.runner.sig_scenario_completed.connect(self._on_scenario_completed)
         self.runner.sig_action_executing.connect(self._on_action_executing_visual)
         self.runner.sig_action_finished.connect(self._on_action_finished_visual)
+        self.runner.sig_action_sequence_started.connect(self._on_action_sequence_started_visual)
+        self.runner.sig_action_sequence_finished.connect(self._on_action_sequence_finished_visual)
         self.runner.sig_step_completed.connect(self._on_step_completed)
         self.runner.sig_finished.connect(self._on_runner_finished)
 
@@ -2191,9 +2230,15 @@ class MainWindow(QMainWindow):
             self.popup_play_bar.set_runner_state("stepping", "단일 스텝 실행 중...")
 
     def _on_step_completed(self, next_index: int):
-        """단일 스텝 실행 완료 시 다음 노드로 포인터(선택 행) 이동 및 하이라이트 갱신"""
+        """단일 스텝 실행 완료 시 다음 노드로 포인터(헤더 번호) 이동 및 하이라이트 갱신"""
         if 0 <= next_index < len(self.project.scenarios):
-            self.tbl_scenarios.selectRow(next_index)
+            self.tbl_scenarios.blockSignals(True)
+            self.tbl_scenarios.setCurrentCell(next_index, 0)
+            self.tbl_scenarios.clearSelection()
+            self.tbl_scenarios.blockSignals(False)
+            it = self.tbl_scenarios.item(next_index, 0)
+            if it:
+                self.tbl_scenarios.scrollToItem(it)
             self._highlight_running_row_header(next_index)
             next_scen = self.project.scenarios[next_index]
             if hasattr(self, "popup_play_bar") and self.popup_play_bar:
@@ -2208,19 +2253,36 @@ class MainWindow(QMainWindow):
         if hasattr(self.tbl_scenarios, "set_highlight_row"):
             self.tbl_scenarios.set_highlight_row(idx)
 
+    def _on_action_sequence_started_visual(self, actions: list, scenario_name: str):
+        """전체 액션 시퀀스의 모든 포인트들을 오버레이 화면상에 동시 시각화"""
+        if hasattr(self, "action_overlay") and self.action_overlay and hasattr(self, "chk_action_overlay") and self.chk_action_overlay.isChecked():
+            self.action_overlay.set_target_hwnd(self.target_hwnd)
+            self.action_overlay.show_sequence(actions, 1, scenario_name)
+
+    def _on_action_sequence_finished_visual(self):
+        """액션 시퀀스 완료 시 오버레이 화면 서서히 정리"""
+        if hasattr(self, "action_overlay") and self.action_overlay:
+            self.action_overlay.hide_action_delayed(500)
+
     def _on_action_executing_visual(self, action, index, total):
         # 1. Action overlay for click/drag coordinates on target screen (completely click-through)
         if hasattr(self, "action_overlay") and self.action_overlay and hasattr(self, "chk_action_overlay") and self.chk_action_overlay.isChecked():
             self.action_overlay.set_target_hwnd(self.target_hwnd)
-            self.action_overlay.show_action(action, index, total)
+            self.action_overlay.set_current_action_index(index, action)
 
         # 2. Real-time sequence action progress output on play bar
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             self.popup_play_bar.set_action_status(action, index, total)
 
+        # 3. Virtual canvas target visual click effect
+        if hasattr(self, "virtual_canvas_window") and self.virtual_canvas_window and self.virtual_canvas_window.isVisible():
+            if hasattr(action, "action_type") and action.action_type in ("mouse_click", "mouse_drag"):
+                cx = getattr(action, "x", getattr(action, "start_x", 0))
+                cy = getattr(action, "y", getattr(action, "start_y", 0))
+                self.virtual_canvas_window.trigger_click_effect(cx, cy)
+
     def _on_action_finished_visual(self, action):
-        if hasattr(self, "action_overlay") and self.action_overlay:
-            self.action_overlay.hide_action_delayed(500)
+        pass
 
     def _on_toggle_action_overlay(self, checked: bool):
         if hasattr(self, "action_overlay") and self.action_overlay:
@@ -2231,7 +2293,14 @@ class MainWindow(QMainWindow):
     def _on_scenario_started(self, scenario_id: str):
         for row, s in enumerate(self.project.scenarios):
             if s.id == scenario_id:
-                self.tbl_scenarios.selectRow(row)
+                # 행 선택(드래그 모양)을 유발하지 않고 스크롤 이동 및 헤더 녹색 하이라이트만 적용
+                self.tbl_scenarios.blockSignals(True)
+                self.tbl_scenarios.setCurrentCell(row, 0)
+                self.tbl_scenarios.clearSelection()
+                self.tbl_scenarios.blockSignals(False)
+                it = self.tbl_scenarios.item(row, 0)
+                if it:
+                    self.tbl_scenarios.scrollToItem(it)
                 self._highlight_running_row_header(row)
                 if hasattr(self, "popup_play_bar") and self.popup_play_bar:
                     self.popup_play_bar.set_runner_state("running", f"s{s.scenario_number} [{s.name}] 실행 중...")
@@ -2412,6 +2481,18 @@ class MainWindow(QMainWindow):
                 )
                 return f"<div id='mismatch_{log_id}' style='margin: 1px 0;'>{header_line}{detail_box}</div>"
 
+        elif "루프 시작" in record['raw_msg']:
+            badge = "<span style='background: #2563eb; color: #ffffff; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 8.5pt;'>🔄 루프 시작</span>"
+            border_c = "#3b82f6"
+            bg_c = "rgba(59, 130, 246, 0.12)" if not pal["is_light"] else "#eff6ff"
+            return f"<div style='margin: 3px 0; padding: 3px 6px; background-color: {bg_c}; border-left: 3px solid {border_c}; border-radius: 4px;'>{tag_prefix} {badge} <span style='color: {color}; font-weight: bold;'>{html.escape(record['raw_msg'])}</span></div>"
+
+        elif "루프 탈출" in record['raw_msg'] or "루프 종료" in record['raw_msg']:
+            badge = "<span style='background: #d97706; color: #ffffff; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 8.5pt;'>⚡ 루프 탈출</span>"
+            border_c = "#f59e0b"
+            bg_c = "rgba(245, 158, 11, 0.12)" if not pal["is_light"] else "#fffbeb"
+            return f"<div style='margin: 3px 0; padding: 3px 6px; background-color: {bg_c}; border-left: 3px solid {border_c}; border-radius: 4px;'>{tag_prefix} {badge} <span style='color: {color}; font-weight: bold;'>{html.escape(record['raw_msg'])}</span></div>"
+
         elif level == "USER":
             prefix_html = f"<span style='color: {color}; font-weight: bold;'>[사용자 로그]</span>"
             msg_html = f"<span style='color: {color}; font-weight: bold;'>{html.escape(record['raw_msg'])}</span>"
@@ -2496,8 +2577,23 @@ class MainWindow(QMainWindow):
     # Save & Open Project
     # ==========================================
     def _on_save_project(self):
+        """불러들인 파일에 바로 저장하고, 경로가 없으면 다른 이름으로 저장 수행"""
+        if self.current_project_path:
+            try:
+                with open(self.current_project_path, "w", encoding="utf-8") as f:
+                    json.dump(self.project.to_dict(), f, indent=2, ensure_ascii=False)
+                self._update_window_title()
+                self._save_app_config()
+                self.status_bar.showMessage(f"💾 프로젝트 저장 완료: {self.current_project_path}", 4000)
+            except Exception as e:
+                QMessageBox.critical(self, "저장 오류", f"프로젝트를 저장할 수 없습니다:\n{e}")
+        else:
+            self._on_save_project_as()
+
+    def _on_save_project_as(self):
+        """새로운 파일 경로를 선택하여 프로젝트 다른 이름으로 저장"""
         path, _ = QFileDialog.getSaveFileName(
-            self, "프로젝트 저장", self.current_project_path or "fgoa_project.json", "FGOA Project (*.json)"
+            self, "프로젝트 다른 이름으로 저장", self.current_project_path or "fgoa_project.json", "FGOA Project (*.json)"
         )
         if path:
             try:
@@ -2505,42 +2601,67 @@ class MainWindow(QMainWindow):
                     json.dump(self.project.to_dict(), f, indent=2, ensure_ascii=False)
                 self.current_project_path = path
                 self._update_window_title()
-                self.status_bar.showMessage(f"프로젝트 저장 완료: {path}", 4000)
+                self._save_app_config()
+                self.status_bar.showMessage(f"💾 프로젝트 다른 이름으로 저장 완료: {path}", 4000)
             except Exception as e:
                 QMessageBox.critical(self, "저장 오류", f"프로젝트를 저장할 수 없습니다:\n{e}")
+
+    def _on_open_anti_ban_dialog(self):
+        dlg = AntiBanDialog(self.project, parent=self)
+        if dlg.exec_() == QDialog.Accepted:
+            state_str = "활성화" if self.project.anti_ban_enabled else "비활성화"
+            cur_off = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0)))
+            w_px = getattr(self.project, "anti_ban_coord_weak", 5)
+            s_px = getattr(self.project, "anti_ban_coord_strong", 15)
+            self._append_log("INFO", f"🛡️ 안티밴 설정 변경: 타임 {state_str}(+{cur_off}초), 좌표 약 ±{w_px}px / 강 ±{s_px}px")
+            self.status_bar.showMessage("안티밴 설정이 적용되었습니다.", 3000)
+
+    def _load_project_file(self, path: str, silent: bool = False) -> bool:
+        """Loads a project from JSON file path, updates UI components and saves config."""
+        if not path or not os.path.isfile(path):
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.project = Project.from_dict(data)
+            self.current_project_path = path
+            self._update_window_title()
+            if hasattr(self, "spin_loops"):
+                self.spin_loops.setValue(self.project.loop_count)
+            if hasattr(self, "spin_loop_delay"):
+                self.spin_loop_delay.setValue(self.project.loop_delay_seconds)
+            if hasattr(self, "chk_anti_ban"):
+                self.chk_anti_ban.setChecked(self.project.anti_ban_enabled)
+            cur_off = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0)))
+            if hasattr(self, "spin_anti_ban_offset"):
+                self.spin_anti_ban_offset.setValue(cur_off)
+                self.spin_anti_ban_offset.setEnabled(self.project.anti_ban_enabled)
+            if hasattr(self, "spin_coord_weak"):
+                self.spin_coord_weak.setValue(getattr(self.project, "anti_ban_coord_weak", 5))
+            if hasattr(self, "spin_coord_strong"):
+                self.spin_coord_strong.setValue(getattr(self.project, "anti_ban_coord_strong", 15))
+            self._refresh_scenario_table()
+            if hasattr(self, "modules_widget") and self.modules_widget:
+                self.modules_widget.set_project(self.project, self.target_hwnd)
+            if hasattr(self, "inspector") and self.inspector:
+                self.inspector.set_project(self.project)
+            if self.project.scenarios and hasattr(self, "tbl_scenarios"):
+                self.tbl_scenarios.selectRow(0)
+            if hasattr(self, "status_bar"):
+                self.status_bar.showMessage(f"프로젝트 불러오기 완료: {path}", 4000)
+            self._save_app_config()
+            return True
+        except Exception as e:
+            if not silent:
+                QMessageBox.critical(self, "열기 오류", f"프로젝트를 불러올 수 없습니다:\n{e}")
+            return False
 
     def _on_open_project(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "프로젝트 열기", "", "FGOA Project (*.json)"
         )
         if path:
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                self.project = Project.from_dict(data)
-                self.current_project_path = path
-                self._update_window_title()
-                self.spin_loops.setValue(self.project.loop_count)
-                self.spin_loop_delay.setValue(self.project.loop_delay_seconds)
-                self.chk_anti_ban.setChecked(self.project.anti_ban_enabled)
-                cur_off = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0)))
-                if hasattr(self, "spin_anti_ban_offset"):
-                    self.spin_anti_ban_offset.setValue(cur_off)
-                    self.spin_anti_ban_offset.setEnabled(self.project.anti_ban_enabled)
-                if hasattr(self, "spin_coord_weak"):
-                    self.spin_coord_weak.setValue(getattr(self.project, "anti_ban_coord_weak", 5))
-                if hasattr(self, "spin_coord_strong"):
-                    self.spin_coord_strong.setValue(getattr(self.project, "anti_ban_coord_strong", 15))
-                self._refresh_scenario_table()
-                if hasattr(self, "modules_widget"):
-                    self.modules_widget.set_project(self.project, self.target_hwnd)
-                if hasattr(self, "inspector"):
-                    self.inspector.set_project(self.project)
-                if self.project.scenarios:
-                    self.tbl_scenarios.selectRow(0)
-                self.status_bar.showMessage(f"프로젝트 불러오기 완료: {path}", 4000)
-            except Exception as e:
-                QMessageBox.critical(self, "열기 오류", f"프로젝트를 불러올 수 없습니다:\n{e}")
+            self._load_project_file(path, silent=False)
 
     # ==========================================
     # Hotkeys

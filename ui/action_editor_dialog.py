@@ -3,6 +3,7 @@ Action Sequence Editor Dialog for FGOA.
 Allows editing mouse clicks, drags, delays, keystrokes, and text inputs for a scenario.
 """
 import copy
+import uuid
 import time
 from typing import List, Optional, Any
 from PyQt5.QtWidgets import (
@@ -447,6 +448,11 @@ class ActionEditorDialog(QDialog):
         btn_del.clicked.connect(self._on_delete_action)
         btn_bar1.addWidget(btn_del)
 
+        btn_dup = QPushButton("📋 복제")
+        btn_dup.setToolTip("선택한 액션을 복제하여 바로 아래에 추가합니다.")
+        btn_dup.clicked.connect(self._on_duplicate_action)
+        btn_bar1.addWidget(btn_dup)
+
         btn_bar1.addSpacing(10)
 
         btn_up = QPushButton("⬆️ 위로")
@@ -551,6 +557,20 @@ class ActionEditorDialog(QDialog):
         idx = rows[0].row()
         del self.actions[idx]
         self._refresh_table()
+
+    def _on_duplicate_action(self):
+        rows = self.tbl_actions.selectionModel().selectedRows()
+        if not rows:
+            return
+        idx = rows[0].row()
+        if not (0 <= idx < len(self.actions)):
+            return
+        orig = self.actions[idx]
+        cloned = Action.from_dict(copy.deepcopy(orig.to_dict()))
+        cloned.id = str(uuid.uuid4())[:8]
+        self.actions.insert(idx + 1, cloned)
+        self._refresh_table()
+        self.tbl_actions.selectRow(idx + 1)
 
     def _on_move_up(self):
         rows = self.tbl_actions.selectionModel().selectedRows()

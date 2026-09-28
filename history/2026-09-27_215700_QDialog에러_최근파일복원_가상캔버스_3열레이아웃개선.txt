@@ -1,0 +1,46 @@
+======================================================================
+[FGOA 작업 내역 보고서]
+======================================================================
+
+1. [일시 / Timestamp]
+- 작업 일시: 2026-09-27 21:57:00
+
+2. [요청 내용 / User Request]
+- 버그 리포트: NameError: name 'QDialog' is not defined (ui/main_window.py line 2533 _on_open_anti_ban_dialog)
+- 앱을 닫았다 열 때 마지막에 사용 중이던 파일 자동으로 열기
+- 타겟 앱이 설정되어 있지 않았을 때는 가상 캔버스를 만들어 띄우고 실행
+- 기본 3열 레이아웃에서 시나리오 흐름 레이아웃 너비를 조정하려고 하면 액션 시퀀스 쪽이 늘어나는 현상 및 비정상 반응 수정
+
+3. [결과 요약 / Summary of Results]
+(1) QDialog NameError 버그 해결:
+  - `ui/main_window.py`의 `PyQt5.QtWidgets` import 목록에 `QDialog` 추가. (안티밴 설정 및 프리셋 저장 다이얼로그 정상 작동 보장)
+(2) 마지막 사용 파일 자동 복원 기능 구현:
+  - `_save_app_config()` 및 `_load_app_config()`에 `last_project_path` 저장/불러오기 추가.
+  - 프로젝트 저장(`_on_save_project`, `_on_save_project_as`) 및 열기 시 최신 파일 경로가 즉시 저장되도록 반영.
+  - 앱 기동 시(`__init__`) 이전에 열려 있던 프로젝트 파일이 존재할 경우 자동으로 복원 및 UI 갱신.
+  - 재사용 가능한 `_load_project_file(path, silent)` 헬퍼로 통합.
+(3) 타겟 미선택 시 가상 캔버스 자동 생성 및 시뮬레이션 실행:
+  - `ui/virtual_canvas_window.py` 신규 모듈 구현 (`VirtualCanvasWindow`):
+    * 프로젝트 해상도 기반 가상 캔버스 화면 배경(`dummy_canvas`) 렌더링.
+    * 마우스 클릭 시 시각적 동심원 파문(Ripple effect) 애니메이션 피드백 제공.
+    * 윈도우 닫기 시그널 및 독립 HWND 제공.
+  - `_on_start_execution()` 호출 시 타깃 게임 창이 없으면 자동으로 가상 캔버스를 띄우고 해당 HWND를 타깃으로 바인딩하여 즉시 실행.
+  - 상단 툴바에 [🎨 가상 캔버스] 버튼을 추가하여 수동으로도 가상 캔버스를 즉시 호출 가능하도록 편의 제공.
+  - 오토 액션 실행 시 가상 캔버스 화면상에 클릭 이펙트 연동.
+(4) 기본 3열 레이아웃 분할 순서 및 스플리터 드래그 반응 정상화:
+  - QMainWindow에 `AllowNestedDocks` 등 필수 도킹 옵션 활성화 (`setDockOptions`).
+  - `apply_layout("기본 3열 (Default)")`의 도킹 분할 순서 개선:
+    * 1열(시나리오 흐름), 2열(인스펙터), 3열(로그)을 먼저 완벽한 수평(Horizontal) 3열로 분할.
+    * 그 후 2열 중앙 열 내부에서만 인스펙터(위)와 액션 시퀀스(아래)를 수직(Vertical) 분할하도록 재설계.
+    * 결과: 시나리오 흐름 열의 너비를 조정할 때 수직 경계선이 전체 세로로 통합되어, 액션 시퀀스만 왜곡되어 늘어나는 현상 원천 해결.
+(5) 단위 테스트 및 버전 갱신:
+  - `tests/test_virtual_canvas_and_recent_file.py` 신규 작성 및 전체 1,163개 단위 테스트 전원 통과 확인.
+  - `core/version.py`의 `__version__`을 260927.2157로 갱신.
+
+4. [영향 파일 목록 / Affected Files]
+- `core/version.py` (수정)
+- `ui/virtual_canvas_window.py` (신규 생성)
+- `ui/main_window.py` (수정)
+- `tests/test_virtual_canvas_and_recent_file.py` (신규 생성)
+- `history/2026-09-27_215700_QDialog에러_최근파일복원_가상캔버스_3열레이아웃개선.txt` (신규 생성)
+======================================================================

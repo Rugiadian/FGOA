@@ -77,6 +77,11 @@ class ModulesManagerWidget(QWidget):
         btn_del_cond.clicked.connect(self._on_delete_condition)
         cond_header.addWidget(btn_del_cond)
 
+        btn_clean_unused_cond = QPushButton("🧹 안쓰이는 노드 제거")
+        btn_clean_unused_cond.setToolTip("시나리오에서 전혀 사용되지 않는 미사용 인식 조건 노드를 일괄 삭제합니다.")
+        btn_clean_unused_cond.clicked.connect(self._on_clean_unused_conditions)
+        cond_header.addWidget(btn_clean_unused_cond)
+
         cf_layout.addLayout(cond_header)
 
         self.tbl_conditions = QTableWidget()
@@ -95,6 +100,8 @@ class ModulesManagerWidget(QWidget):
         self.tbl_conditions.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl_conditions.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tbl_conditions.itemDoubleClicked.connect(self._on_edit_condition)
+        self.tbl_conditions.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tbl_conditions.customContextMenuRequested.connect(self._on_condition_context_menu)
         cf_layout.addWidget(self.tbl_conditions)
 
         splitter.addWidget(cond_frame)
@@ -131,6 +138,11 @@ class ModulesManagerWidget(QWidget):
         btn_del_seq.clicked.connect(self._on_delete_sequence)
         seq_header.addWidget(btn_del_seq)
 
+        btn_clean_unused_seq = QPushButton("🧹 안쓰이는 노드 제거")
+        btn_clean_unused_seq.setToolTip("시나리오 및 조건에서 전혀 사용되지 않는 미사용 액션 시퀀스 노드를 일괄 삭제합니다.")
+        btn_clean_unused_seq.clicked.connect(self._on_clean_unused_sequences)
+        seq_header.addWidget(btn_clean_unused_seq)
+
         sf_layout.addLayout(seq_header)
 
         self.tbl_sequences = QTableWidget()
@@ -148,6 +160,8 @@ class ModulesManagerWidget(QWidget):
         self.tbl_sequences.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl_sequences.setSelectionMode(QAbstractItemView.SingleSelection)
         self.tbl_sequences.itemDoubleClicked.connect(self._on_edit_sequence)
+        self.tbl_sequences.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tbl_sequences.customContextMenuRequested.connect(self._on_sequence_context_menu)
         sf_layout.addWidget(self.tbl_sequences)
 
         self.table_conditions = self.tbl_conditions
@@ -322,6 +336,30 @@ class ModulesManagerWidget(QWidget):
             self.sig_module_changed.emit()
             self.sig_log.emit("WARN", f"🗑️ 인식조건 모듈 [C{cond.condition_number}] '{cond.name}' 삭제 완료")
 
+    def _on_clean_unused_conditions(self):
+        """시나리오에서 전혀 사용되지 않는 미사용 인식 조건 노드를 일괄 삭제합니다."""
+        conds = getattr(self.project, "conditions", [])
+        used_ids = {s.condition_id for s in self.project.scenarios if s.condition_id}
+        unused = [c for c in conds if c.id not in used_ids]
+        if not unused:
+            QMessageBox.information(self, "안쓰이는 노드 제거", "현재 미사용 중인 인식 조건 노드가 없습니다.")
+            return
+
+        names_preview = "\n".join([f"• [C{c.condition_number}] {c.name}" for c in unused[:8]])
+        if len(unused) > 8:
+            names_preview += f"\n... 외 {len(unused) - 8}개"
+
+        msg = f"시나리오에서 전혀 사용되지 않는 인식 조건 노드 {len(unused)}개를 모두 삭제하시겠습니까?\n\n{names_preview}"
+        res = QMessageBox.question(self, "안쓰이는 조건 노드 제거", msg, QMessageBox.Yes | QMessageBox.No)
+        if res == QMessageBox.Yes:
+            removed_count = 0
+            for c in unused:
+                self.project.delete_condition(c.id)
+                removed_count += 1
+            self.refresh_modules()
+            self.sig_module_changed.emit()
+            self.sig_log.emit("WARN", f"🧹 미사용 인식조건 노드 {removed_count}개 삭제 완료")
+
     # -------------------------------------------------------------
     # Action Sequence Operations
     # -------------------------------------------------------------
@@ -392,3 +430,68 @@ class ModulesManagerWidget(QWidget):
             self.refresh_modules()
             self.sig_module_changed.emit()
             self.sig_log.emit("WARN", f"🗑️ 액션시퀀스 모듈 [A{seq.sequence_number}] '{seq.name}' 삭제 완료")
+
+    def _on_clean_unused_sequences(self):
+        """시나리오 및 조건에서 전혀 사용되지 않는 미사용 액션 시퀀스 노드를 일괄 삭제합니다."""
+        seqs = getattr(self.project, "action_sequences", [])
+        used_in_scens = {s.sequence_id for s in self.project.scenarios if s.sequence_id}
+        used_in_conds = {c.action_sequence_id for c in getattr(self.project, "conditions", []) if c.action_sequence_id}
+        all_used_ids = used_in_scens | used_in_conds
+
+        unused = [seq for seq in seqs if seq.id not in all_used_ids]
+        if not unused:
+            QMessageBox.information(self, "안쓰이는 노드 제거", "현재 미사용 중인 액션 노드가 없습니다.")
+            return
+
+        names_preview = "\n".join([f"• [A{seq.sequence_number}] {seq.name}" for seq in unused[:8]])
+        if len(unused) > 8:
+            names_preview += f"\n... 외 {len(unused) - 8}개"
+
+        msg = f"시나리오 및 조건에서 전혀 사용되지 않는 액션 시퀀스 노드 {len(unused)}개를 모두 삭제하시겠습니까?\n\n{names_preview}"
+        res = QMessageBox.question(self, "안쓰이는 액션 노드 제거", msg, QMessageBox.Yes | QMessageBox.No)
+        if res == QMessageBox.Yes:
+            removed_count = 0
+            for seq in unused:
+                self.project.delete_action_sequence(seq.id)
+                removed_count += 1
+            self.refresh_modules()
+            self.sig_module_changed.emit()
+            self.sig_log.emit("WARN", f"🧹 미사용 액션시퀀스 노드 {removed_count}개 삭제 완료")
+
+    def _on_condition_context_menu(self, pos):
+        menu = QMenu(self)
+        act_add = menu.addAction("➕ 새 조건 추가")
+        act_add.triggered.connect(self._on_add_condition)
+
+        row = self.tbl_conditions.rowAt(pos.y())
+        if row >= 0:
+            act_dup = menu.addAction("📋 복제")
+            act_dup.triggered.connect(self._on_duplicate_condition)
+            act_edit = menu.addAction("🎯 편집")
+            act_edit.triggered.connect(self._on_edit_condition)
+            act_del = menu.addAction("🗑️ 삭제")
+            act_del.triggered.connect(self._on_delete_condition)
+
+        menu.addSeparator()
+        act_clean = menu.addAction("🧹 안쓰이는 조건 노드 제거")
+        act_clean.triggered.connect(self._on_clean_unused_conditions)
+        menu.exec_(self.tbl_conditions.viewport().mapToGlobal(pos))
+
+    def _on_sequence_context_menu(self, pos):
+        menu = QMenu(self)
+        act_add = menu.addAction("➕ 새 시퀀스 추가")
+        act_add.triggered.connect(self._on_add_sequence)
+
+        row = self.tbl_sequences.rowAt(pos.y())
+        if row >= 0:
+            act_dup = menu.addAction("📋 복제")
+            act_dup.triggered.connect(self._on_duplicate_sequence)
+            act_edit = menu.addAction("🎯 편집")
+            act_edit.triggered.connect(self._on_edit_sequence)
+            act_del = menu.addAction("🗑️ 삭제")
+            act_del.triggered.connect(self._on_delete_sequence)
+
+        menu.addSeparator()
+        act_clean = menu.addAction("🧹 안쓰이는 액션 노드 제거")
+        act_clean.triggered.connect(self._on_clean_unused_sequences)
+        menu.exec_(self.tbl_sequences.viewport().mapToGlobal(pos))

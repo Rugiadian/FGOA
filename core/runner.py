@@ -21,6 +21,8 @@ class WorkflowRunner(QThread):
     sig_scenario_completed = pyqtSignal(str, str)  # (scenario_id, result: "matched" / "mismatch" / "skipped")
     sig_action_executing = pyqtSignal(object, int, int)  # (action, action_index, total_actions)
     sig_action_finished = pyqtSignal(object)  # action
+    sig_action_sequence_started = pyqtSignal(list, str)  # (actions, scenario_name)
+    sig_action_sequence_finished = pyqtSignal()
     sig_loop_progress = pyqtSignal(int, int)  # (current_loop, total_loops)
     sig_step_completed = pyqtSignal(int)  # next_scenario_index
     sig_finished = pyqtSignal(str)  # reason
@@ -128,7 +130,7 @@ class WorkflowRunner(QThread):
                     # 1. Check max iterations for count mode
                     if scen.loop_mode == "count" and current_iter >= max_iter:
                         end_idx = self.project.find_matching_loop_end(current_index)
-                        self.sig_log.emit("INFO", f"🔁 [루프 s{scen.scenario_number}] '{scen.name}': 지정 횟수({max_iter}회) 완료. 루프 종료.")
+                        self.sig_log.emit("INFO", f"🚪 [루프 탈출 s{scen.scenario_number}] '{scen.name}': 지정 횟수({max_iter}회) 완료로 루프 탈출")
                         if scen.id in loop_counters:
                             del loop_counters[scen.id]
                         current_index = (end_idx + 1) if end_idx is not None else (current_index + 1)
@@ -140,7 +142,7 @@ class WorkflowRunner(QThread):
                         matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
                         if scen.loop_mode == "until_match" and matched:
                             end_idx = self.project.find_matching_loop_end(current_index)
-                            self.sig_log.emit("SUCCESS", f"🔁 [루프 s{scen.scenario_number}] '{scen.name}': 탈출 인식 조건 충족! 루프 종료.")
+                            self.sig_log.emit("SUCCESS", f"⚡ [루프 탈출 s{scen.scenario_number}] '{scen.name}': 탈출 인식 조건 충족! 루프 즉시 탈출")
                             if scen.id in loop_counters:
                                 del loop_counters[scen.id]
                             current_index = (end_idx + 1) if end_idx is not None else (current_index + 1)
@@ -149,14 +151,17 @@ class WorkflowRunner(QThread):
                             mismatch_info = ConditionEvaluator.format_mismatch_log(point_results)
                             fail_count = sum(1 for p in point_results if not p.get("passed", False))
                             mismatch_tail = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
-                            self.sig_log.emit("INFO", f"🔁 [루프 s{scen.scenario_number}] '{scen.name}': 지속 조건 불일치{mismatch_tail}. 루프 종료.")
+                            self.sig_log.emit("INFO", f"⚡ [루프 탈출 s{scen.scenario_number}] '{scen.name}': 지속 조건 불일치{mismatch_tail}. 루프 탈출")
                             if scen.id in loop_counters:
                                 del loop_counters[scen.id]
                             current_index = (end_idx + 1) if end_idx is not None else (current_index + 1)
                             continue
 
                     limit_str = f"{max_iter}회" if scen.loop_mode != "infinite" else "무한"
-                    self.sig_log.emit("INFO", f"🔁 [루프 s{scen.scenario_number}] '{scen.name}': {current_iter + 1}/{limit_str} 회차 진입")
+                    if current_iter == 0:
+                        self.sig_log.emit("INFO", f"🔄 [루프 시작 s{scen.scenario_number}] '{scen.name}': 루프 진입 (최대 {limit_str})")
+                    else:
+                        self.sig_log.emit("INFO", f"🔁 [루프 반복 s{scen.scenario_number}] '{scen.name}': {current_iter + 1}/{limit_str} 회차 진행")
                     eff_actions = scen.get_effective_actions(self.project) if hasattr(scen, "get_effective_actions") else scen.actions
                     if eff_actions:
                         self._execute_actions(scen)
@@ -171,7 +176,7 @@ class WorkflowRunner(QThread):
                     if start_idx is not None:
                         start_scen = scenarios[start_idx]
                         loop_counters[start_scen.id] = loop_counters.get(start_scen.id, 0) + 1
-                        self.sig_log.emit("INFO", f"🔁 [루프 종료 s{scen.scenario_number}] → 루프 시작 s{start_scen.scenario_number}로 복귀 (누적 {loop_counters[start_scen.id]}회)")
+                        self.sig_log.emit("INFO", f"🔁 [루프 회귀 s{scen.scenario_number}] → 루프 시작 s{start_scen.scenario_number}로 복귀 (누적 {loop_counters[start_scen.id]}회 완료)")
                         current_index = start_idx
                     else:
                         current_index += 1
@@ -236,7 +241,7 @@ class WorkflowRunner(QThread):
                             if scenarios[k].node_type == "loop_end":
                                 end_idx = k
                                 break
-                        self.sig_log.emit("INFO", f"[#{scen.step_number}] 🛑 조건 일치로 현재 루프 즉시 탈출")
+                        self.sig_log.emit("INFO", f"[#{scen.step_number}] ⚡ [루프 탈출] 조건 일치로 현재 루프 즉시 탈출")
                         current_index = (end_idx + 1) if end_idx is not None else len(scenarios)
 
                     elif scen.on_match == "jump":
@@ -288,7 +293,7 @@ class WorkflowRunner(QThread):
                             if scenarios[k].node_type == "loop_end":
                                 end_idx = k
                                 break
-                        self.sig_log.emit("INFO", f"[#{scen.step_number}] 🛑 조건 불일치로 현재 루프 즉시 탈출")
+                        self.sig_log.emit("INFO", f"[#{scen.step_number}] ⚡ [루프 탈출] 조건 불일치로 현재 루프 즉시 탈출")
                         current_index = (end_idx + 1) if end_idx is not None else len(scenarios)
 
                     elif scen.on_mismatch == "jump":
@@ -331,6 +336,9 @@ class WorkflowRunner(QThread):
     def _execute_actions(self, scenario: Scenario):
         """Sequentially execute all actions defined in the scenario."""
         actions = scenario.get_effective_actions(self.project) if hasattr(scenario, "get_effective_actions") else scenario.actions
+        if actions:
+            self.sig_action_sequence_started.emit(actions, scenario.name)
+
         use_anti_ban = getattr(self.project, "anti_ban_enabled", False)
         offset_range = getattr(self.project, "anti_ban_offset", 10)
         offset_sec = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0)))
@@ -385,10 +393,6 @@ class WorkflowRunner(QThread):
             elif getattr(act, "custom_log", ""):
                 self.sig_log.emit("USER", f"  [사용자 로그] {act.custom_log}")
 
-            # Brief visual display delay (80ms) so overlay dotted indicator is visible before action
-            if act.action_type in ("mouse_click", "mouse_drag"):
-                time.sleep(0.08)
-
             InputController.execute_action(
                 action=act,
                 hwnd=self.hwnd,
@@ -403,6 +407,9 @@ class WorkflowRunner(QThread):
 
             # Small safety delay between actions
             time.sleep(0.05)
+
+        if actions:
+            self.sig_action_sequence_finished.emit()
 
     def _resolve_target_scenario(self, target_identifier: str) -> Optional[Scenario]:
         """Resolves target scenario by UUID, ID, or step number string."""
