@@ -1,0 +1,29 @@
+[일시 / Timestamp]: 2026-09-29 13:51:12 ~ 2026-09-29 14:01:10
+[요청 내용 / User Request]:
+- 액션 시퀀스 클리어 버튼, 새로 만들기 버튼 추가
+- 하단 시나리오 루프에 현재 진행중인 루프 횟수 표기
+- FGOA CRASH REPORT 수정: ui/inspector_widget.py NameError: name 'QCursor' is not defined
+
+[결과 요약 / Summary of Results]:
+1. QCursor 및 QDialog NameError 크래시 버그 해결:
+   - ui/inspector_widget.py 모듈 상단에 PyQt5.QtGui.QCursor 및 PyQt5.QtWidgets.QDialog 누락 임포트 추가하여 노드 스냅샷 클릭 시의 크래시 해결.
+2. 액션 시퀀스 새로 만들기 및 클리어 버튼 추가:
+   - 인스펙터 액션 시퀀스 카드 상단(seq_bar)에 '✨ 새로 만들기'(btn_new_seq) 및 '🧹 클리어'(btn_clear_seq) 버튼 추가.
+   - 액션 테이블 조작 버튼 행(act_ctrl_row1)에 '🧹 전체 클리어'(btn_clear_act) 버튼 추가.
+   - _on_new_sequence(): 새 액션 시퀀스 모듈 생성, 고유 sequence_number 부여 및 즉시 연결/UI 동기화 지원.
+   - _on_clear_actions(): 현재 활성 액션 전체 일괄 삭제(Undo/Redo 지원 및 확인 팝업 포함) 지원.
+3. 하단 시나리오 루프 진행 횟수 실시간 표기:
+   - 메인 윈도우 하단 컨트롤 툴바 반복 횟수(spin_loops) 우측에 실시간 루프 진행 표시 라벨(lbl_loop_progress) 추가.
+   - WorkflowRunner의 sig_loop_progress 신호와 연결하여 finite/infinite 루프 진행률("(1 / 5회 진행 중)", "(3회 진행 중)"), 정지("(N회차 정지)"), 완료("(총 N회 완료)") 상태 실시간 갱신.
+4. 단위 테스트 및 회귀 검증:
+   - tests/test_user_enhancements_20260929.py 신규 작성 (6개 테스트 추가, 100% 통과).
+   - 전체 테스트 스위트 1,269개 테스트 전건 정상 통과 검증 완료.
+5. 버전 갱신:
+   - core/version.py 버전 __version__ = "260929.1359" 갱신.
+
+[영향 파일 목록 / Affected Files]:
+- core/version.py
+- ui/inspector_widget.py
+- ui/main_window.py
+- tests/test_user_enhancements_20260929.py
+- history/2026-09-29_140110_액션시퀀스_신규생성_클리어_루프표기_QCursor_오류수정.txt

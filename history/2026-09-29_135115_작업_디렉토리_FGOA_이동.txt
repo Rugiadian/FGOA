@@ -1,0 +1,4 @@
+[일시 / Timestamp]: 2026-09-29 13:51:15
+[요청 내용 / User Request]: G:\Git\FGOA 로 이동
+[결과 요약 / Summary of Results]: 작업 대상을 G:\Git\FGOA 로 전환하였으며, 프로젝트 규칙(AGENTS.md) 및 버전(260927.2206) 확인 완료
+[영향 파일 목록 / Affected Files]: 없음

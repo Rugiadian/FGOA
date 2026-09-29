@@ -18,9 +18,9 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
     QScrollArea, QFrame, QMessageBox, QStackedWidget, QSplitter,
     QMenu, QApplication, QShortcut, QAbstractItemView,
-    QStyledItemDelegate, QAbstractSpinBox, QInputDialog, QSizePolicy
+    QStyledItemDelegate, QAbstractSpinBox, QInputDialog, QSizePolicy, QDialog
 )
-from PyQt5.QtGui import QColor, QFont, QPixmap, QKeySequence, QDrag
+from PyQt5.QtGui import QColor, QFont, QPixmap, QKeySequence, QDrag, QCursor
 from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QPoint
 
 from core.models import Scenario, Project, Condition, ColorPoint, Action, ActionSequence
@@ -725,6 +725,16 @@ class InspectorWidget(QWidget):
         self.combo_sequence.currentIndexChanged.connect(self._on_sequence_combo_changed)
         seq_bar.addWidget(self.combo_sequence, 1)
 
+        self.btn_new_seq = QPushButton("✨ 새로 만들기")
+        self.btn_new_seq.setToolTip("새로운 빈 액션 시퀀스 모듈을 생성하여 연결합니다.")
+        self.btn_new_seq.clicked.connect(self._on_new_sequence)
+        seq_bar.addWidget(self.btn_new_seq)
+
+        self.btn_clear_seq = QPushButton("🧹 클리어")
+        self.btn_clear_seq.setToolTip("현재 액션 시퀀스의 모든 액션을 삭제(클리어)합니다.")
+        self.btn_clear_seq.clicked.connect(self._on_clear_actions)
+        seq_bar.addWidget(self.btn_clear_seq)
+
         self.btn_save_as_seq = QPushButton("💾 시퀀스로 등록...")
         self.btn_save_as_seq.setToolTip("현재 시나리오의 액션 목록을 재사용 가능한 '액션 시퀀스 모듈'로 등록하고 연결합니다.")
         self.btn_save_as_seq.clicked.connect(self._on_save_as_new_sequence)
@@ -859,6 +869,11 @@ class InspectorWidget(QWidget):
         btn_del_act = QPushButton("🗑️ 삭제")
         btn_del_act.clicked.connect(self._on_delete_action)
         act_ctrl_row1.addWidget(btn_del_act)
+
+        self.btn_clear_act = QPushButton("🧹 전체 클리어")
+        self.btn_clear_act.setToolTip("현재 액션 시퀀스의 모든 액션을 일괄 삭제(클리어)합니다.")
+        self.btn_clear_act.clicked.connect(self._on_clear_actions)
+        act_ctrl_row1.addWidget(self.btn_clear_act)
 
         btn_up_act = QPushButton("⬆️ 위로")
         btn_up_act.clicked.connect(self._on_move_action_up)
@@ -1584,6 +1599,72 @@ class InspectorWidget(QWidget):
         self._refresh_actions_table()
         self._mark_dirty()
         self._on_field_changed()
+
+    def _on_new_sequence(self):
+        if not self.current_scenario:
+            return
+        if not self.project:
+            return
+        s_num = self.project.get_next_sequence_number()
+        default_name = f"시퀀스 {s_num}"
+        name, ok = QInputDialog.getText(self, "새 액션 시퀀스 생성", "액션 시퀀스 이름:", text=default_name)
+        if not ok or not name.strip():
+            return
+        self._record_undo_state()
+        new_seq = ActionSequence(
+            sequence_number=s_num,
+            name=name.strip(),
+            actions=[]
+        )
+        self.project.add_action_sequence(new_seq)
+        self.current_scenario.sequence_id = new_seq.id
+
+        eff_cond = self._get_active_condition()
+        if eff_cond:
+            eff_cond.action_sequence_id = new_seq.id
+
+        self._populate_sequence_combo()
+        self._update_condition_status_label()
+        self._refresh_actions_table()
+        self._mark_dirty()
+        self._on_field_changed()
+        self.sig_log.emit("INFO", f"✨ 새 액션 시퀀스 [A{new_seq.sequence_number}] '{new_seq.name}'이(가) 생성되어 연결되었습니다.")
+
+    def _on_clear_actions(self):
+        if not self.current_scenario:
+            return
+        acts = self._get_active_actions_list()
+        if not acts:
+            QMessageBox.information(self, "액션 시퀀스 클리어", "현재 액션 시퀀스에 등록된 액션이 없습니다.")
+            return
+
+        seq_id = getattr(self.current_scenario, "sequence_id", None)
+        seq_name = ""
+        if seq_id and self.project:
+            seq = self.project.find_action_sequence(seq_id)
+            if seq:
+                seq_name = f" [A{seq.sequence_number}] '{seq.name}'"
+        else:
+            seq_name = f" '{self.current_scenario.name}' 인스턴트 액션"
+
+        reply = QMessageBox.question(
+            self,
+            "액션 시퀀스 클리어",
+            f"현재 액션 시퀀스{seq_name}의 모든 액션({len(acts)}개)을 삭제하시겠습니까?\n(Ctrl+Z로 실행 취소할 수 있습니다.)",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self._record_undo_state()
+        acts.clear()
+        if seq_id is None:
+            self.current_scenario.actions = []
+        self._refresh_actions_table()
+        self._mark_dirty()
+        self._on_field_changed()
+        self.sig_log.emit("INFO", f"🧹 액션 시퀀스{seq_name}의 모든 액션이 클리어되었습니다.")
 
     def _on_save_as_new_sequence(self):
         if not self.current_scenario:

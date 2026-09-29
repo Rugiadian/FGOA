@@ -66,6 +66,7 @@ class MainWindow(QMainWindow):
         self.project = Project()
         self.target_hwnd: int = 0
         self.runner: Optional[WorkflowRunner] = None
+        self._current_run_loop: int = 0
         self.current_project_path: Optional[str] = None
         self.last_project_path: Optional[str] = None
         self.virtual_canvas_window: Optional[VirtualCanvasWindow] = None
@@ -726,6 +727,11 @@ class MainWindow(QMainWindow):
         self.spin_loops.setSpecialValueText("무한 반복 (∞)")
         self.spin_loops.valueChanged.connect(self._on_loop_count_changed)
         c_layout.addWidget(self.spin_loops)
+
+        self.lbl_loop_progress = QLabel("(대기)")
+        self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #64748b; font-size: 8.5pt;")
+        self.lbl_loop_progress.setToolTip("현재 진행 중인 시나리오 루프 횟수")
+        c_layout.addWidget(self.lbl_loop_progress)
 
         c_layout.addWidget(QLabel("루프 간격:"))
         self.spin_loop_delay = QDoubleSpinBox()
@@ -2145,8 +2151,14 @@ class MainWindow(QMainWindow):
         self.runner.sig_action_finished.connect(self._on_action_finished_visual)
         self.runner.sig_action_sequence_started.connect(self._on_action_sequence_started_visual)
         self.runner.sig_action_sequence_finished.connect(self._on_action_sequence_finished_visual)
+        self.runner.sig_loop_progress.connect(self._on_loop_progress)
         self.runner.sig_step_completed.connect(self._on_step_completed)
         self.runner.sig_finished.connect(self._on_runner_finished)
+
+        self._current_run_loop = 0
+        if hasattr(self, "lbl_loop_progress"):
+            self.lbl_loop_progress.setText("(준비 중...)")
+            self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #16a34a; font-size: 8.5pt;")
 
         self.btn_run.setEnabled(False)
         if hasattr(self, "btn_run_selected"):
@@ -2200,6 +2212,13 @@ class MainWindow(QMainWindow):
             self.popup_play_bar.set_runner_state("stopped", "정지됨")
         if hasattr(self, "action_overlay") and self.action_overlay:
             self.action_overlay.clear_action()
+        if hasattr(self, "lbl_loop_progress"):
+            if self._current_run_loop > 0:
+                self.lbl_loop_progress.setText(f"({self._current_run_loop}회차 정지)")
+                self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #dc2626; font-size: 8.5pt;")
+            else:
+                self.lbl_loop_progress.setText("(대기)")
+                self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #64748b; font-size: 8.5pt;")
 
     def _on_step_execution(self):
         if not self.target_hwnd:
@@ -2327,6 +2346,22 @@ class MainWindow(QMainWindow):
             self.popup_play_bar.set_runner_state("stopped", f"완료 ({reason})")
         if hasattr(self, "action_overlay") and self.action_overlay:
             self.action_overlay.clear_action()
+        if hasattr(self, "lbl_loop_progress"):
+            if self._current_run_loop > 0:
+                self.lbl_loop_progress.setText(f"(총 {self._current_run_loop}회 완료)")
+                self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #2563eb; font-size: 8.5pt;")
+            else:
+                self.lbl_loop_progress.setText("(대기)")
+                self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #64748b; font-size: 8.5pt;")
+
+    def _on_loop_progress(self, current_loop: int, total_loops: int):
+        self._current_run_loop = current_loop
+        if hasattr(self, "lbl_loop_progress"):
+            if total_loops > 0:
+                self.lbl_loop_progress.setText(f"({current_loop} / {total_loops}회 진행 중)")
+            else:
+                self.lbl_loop_progress.setText(f"({current_loop}회 진행 중)")
+            self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #16a34a; font-size: 8.5pt;")
 
     # ==========================================
     # Popup Play Bar Controls & Signal Handlers
