@@ -343,6 +343,17 @@ QCheckBox::indicator:checked {{
     image: url("{CHECK_ICON_PATH}");
 }}
 
+QCheckBox::indicator:disabled {{
+    border-color: #cbd5e1;
+    background-color: #f1f5f9;
+}}
+
+QCheckBox::indicator:checked:disabled {{
+    background-color: #94a3b8;
+    border-color: #94a3b8;
+    image: url("{CHECK_ICON_PATH}");
+}}
+
 QSplitter::handle:horizontal {{
     background-color: #e2e8f0;
     width: 6px;
@@ -752,6 +763,17 @@ QCheckBox::indicator {{
 QCheckBox::indicator:checked {{
     background-color: #2979ff;
     border-color: #2979ff;
+    image: url("{CHECK_ICON_PATH}");
+}}
+
+QCheckBox::indicator:disabled {{
+    border-color: #444456;
+    background-color: #252530;
+}}
+
+QCheckBox::indicator:checked:disabled {{
+    background-color: #64748b;
+    border-color: #64748b;
     image: url("{CHECK_ICON_PATH}");
 }}
 

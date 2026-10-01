@@ -32,7 +32,7 @@ from core.evaluator import ConditionEvaluator
 from core.runner import WorkflowRunner
 from core.preset_manager import PresetManager
 from core.version import __version__
-from ui.theme import get_stylesheet, get_theme_colors
+from ui.theme import get_stylesheet, get_theme_colors, CHECK_ICON_PATH
 from ui.window_picker_dialog import WindowPickerDialog
 from ui.inspector_widget import InspectorWidget
 from ui.modules_manager_widget import ModulesManagerWidget
@@ -113,6 +113,12 @@ class MainWindow(QMainWindow):
         self._current_running_row: Optional[int] = None
         self._paused_scenario_id: Optional[str] = None
         self._last_running_scenario_id: Optional[str] = None
+
+        # Debounced auto-save timer for window geometry & position/size changes
+        self._config_save_timer = QTimer(self)
+        self._config_save_timer.setSingleShot(True)
+        self._config_save_timer.setInterval(600)
+        self._config_save_timer.timeout.connect(self._save_app_config)
 
         # Load user settings
         self._load_app_config()
@@ -224,6 +230,32 @@ class MainWindow(QMainWindow):
                     if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
                         self.anti_burn_overlay.set_interval_minutes(cfg.get("anti_burn_interval_min", 5))
                         self.anti_burn_overlay.set_enabled(cfg.get("anti_burn_enabled", False))
+
+                    # Restore window geometry (exact position, size, maximized state, screen)
+                    geom_hex = cfg.get("window_geometry")
+                    restored = False
+                    if geom_hex:
+                        try:
+                            restored = self.restoreGeometry(QByteArray.fromHex(geom_hex.encode()))
+                        except Exception:
+                            restored = False
+                    if not restored:
+                        w = cfg.get("window_width")
+                        h = cfg.get("window_height")
+                        x = cfg.get("window_x")
+                        y = cfg.get("window_y")
+                        if w and h:
+                            self.resize(max(1020, int(w)), max(650, int(h)))
+                        if x is not None and y is not None:
+                            try:
+                                screens = QApplication.screens()
+                                on_screen = any(s.geometry().contains(QPoint(int(x), int(y))) for s in screens)
+                                if on_screen:
+                                    self.move(int(x), int(y))
+                            except Exception:
+                                self.move(int(x), int(y))
+                        if cfg.get("window_is_maximized", False):
+                            self.showMaximized()
             except Exception:
                 pass
 
@@ -237,10 +269,28 @@ class MainWindow(QMainWindow):
                         cfg = json.load(f)
                 except Exception:
                     pass
+
+            is_maximized = self.isMaximized()
+            if is_maximized:
+                norm_geo = self.normalGeometry()
+                win_x = norm_geo.x()
+                win_y = norm_geo.y()
+                win_w = norm_geo.width()
+                win_h = norm_geo.height()
+            else:
+                win_x = self.x()
+                win_y = self.y()
+                win_w = self.width()
+                win_h = self.height()
+
             cfg.update({
                 "theme": self.current_theme,
-                "window_width": self.width(),
-                "window_height": self.height(),
+                "window_x": win_x,
+                "window_y": win_y,
+                "window_width": win_w,
+                "window_height": win_h,
+                "window_is_maximized": is_maximized,
+                "window_geometry": self.saveGeometry().toHex().data().decode(),
                 "last_target_title": getattr(self.project, "target_window_title", "") or getattr(self, "_last_config_target_title", ""),
                 "last_target_width": getattr(self.project, "target_client_width", 1600),
                 "last_target_height": getattr(self.project, "target_client_height", 900),
@@ -265,6 +315,8 @@ class MainWindow(QMainWindow):
             pass
 
     def closeEvent(self, event):
+        if hasattr(self, "_config_save_timer") and self._config_save_timer:
+            self._config_save_timer.stop()
         if hasattr(self, "global_hotkey") and self.global_hotkey:
             try:
                 self.global_hotkey.stop_listening()
@@ -302,6 +354,13 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
             self.anti_burn_overlay.update_geometry()
+        if hasattr(self, "_config_save_timer") and self._config_save_timer:
+            self._config_save_timer.start()
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if hasattr(self, "_config_save_timer") and self._config_save_timer:
+            self._config_save_timer.start()
 
     def _on_toggle_anti_burn(self, checked: bool):
         if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
@@ -1104,6 +1163,8 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self):
         self.setStyleSheet(get_stylesheet(self.current_theme))
+        if hasattr(self, "tbl_scenarios"):
+            self.tbl_scenarios.current_theme = self.current_theme
         self._update_theme_toggle_btn()
         if hasattr(self, "lbl_authoring_res"):
             self._update_authoring_resolution_display()
@@ -1229,23 +1290,25 @@ class MainWindow(QMainWindow):
 
     def _on_inspector_scenario_saved(self, saved_scen: Scenario):
         """Called when user explicitly clicks Save in Inspector."""
+        if saved_scen and self.project:
+            for idx, s in enumerate(self.project.scenarios):
+                if s.id == saved_scen.id:
+                    if getattr(s, "is_folder_start", s.node_type in ("folder", "folder_start")):
+                        end_idx = self.project.find_matching_folder_end(idx)
+                        if end_idx is not None and end_idx < len(self.project.scenarios):
+                            self.project.scenarios[end_idx].enabled = s.enabled
+                    elif getattr(s, "is_folder_end", s.node_type == "folder_end"):
+                        start_idx = self.project.find_matching_folder_start(idx)
+                        if start_idx is not None and start_idx < len(self.project.scenarios):
+                            self.project.scenarios[start_idx].enabled = s.enabled
+                    break
         self._push_scenario_undo_state(f"시나리오 s{saved_scen.scenario_number} 속성 저장")
         self._refresh_scenario_table()
         self.status_bar.showMessage(f"💾 시나리오 s{saved_scen.scenario_number} [{saved_scen.name}] 저장 완료", 3000)
 
     def _on_inspector_scenario_changed(self, modified_scen: Scenario):
-        """Called when properties are edited inside the Inspector."""
-        if modified_scen and self.project:
-            for s in self.project.scenarios:
-                if s.id == modified_scen.id:
-                    s.reference_image_path = modified_scen.reference_image_path
-                    if modified_scen.condition and s.condition:
-                        s.condition.reference_image_path = modified_scen.condition.reference_image_path
-                    elif modified_scen.condition and not s.condition:
-                        s.condition = copy.deepcopy(modified_scen.condition)
-                    s.name = modified_scen.name
-                    break
-        self._refresh_scenario_table()
+        """Called when scenario is saved or updated."""
+        pass
 
     # ==========================================
     # Global & Scenario List Undo / Redo
@@ -1353,14 +1416,23 @@ class MainWindow(QMainWindow):
         self.tbl_scenarios.setRowCount(len(self.project.scenarios))
 
         collapsed_stack = []
+        folder_disabled_stack = []
         for row, scen in enumerate(self.project.scenarios):
+            is_start = getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start"))
+            is_end = getattr(scen, "is_folder_end", scen.node_type == "folder_end")
+
+            is_in_disabled_folder = any(folder_disabled_stack)
+
+            if is_start:
+                folder_disabled_stack.append((not scen.enabled) or is_in_disabled_folder)
+
             is_hidden = any(collapsed_stack)
             self.tbl_scenarios.setRowHidden(row, is_hidden)
 
             depth = depths[row] if row < len(depths) else 0
             loop_info = loop_analysis.get(row)
             folder_info = folder_analysis.get(row)
-            self._update_table_row(row, scen, depth, loop_info, folder_info)
+            self._update_table_row(row, scen, depth, loop_info, folder_info, is_in_disabled_folder=is_in_disabled_folder)
 
             # Ensure vertical header item exists
             v_item = self.tbl_scenarios.verticalHeaderItem(row)
@@ -1368,11 +1440,11 @@ class MainWindow(QMainWindow):
                 v_item = QTableWidgetItem(str(row + 1))
                 self.tbl_scenarios.setVerticalHeaderItem(row, v_item)
 
-            is_start = getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start"))
-            is_end = getattr(scen, "is_folder_end", scen.node_type == "folder_end")
             if is_start:
                 collapsed_stack.append(getattr(scen, "is_collapsed", False))
             elif is_end:
+                if folder_disabled_stack:
+                    folder_disabled_stack.pop()
                 if collapsed_stack:
                     collapsed_stack.pop()
 
@@ -1401,19 +1473,28 @@ class MainWindow(QMainWindow):
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             self.popup_play_bar.refresh_scenarios(self.project.scenarios)
 
-    def _update_table_row(self, row: int, scen: Scenario, depth: int = 0, loop_info: Optional[Dict[str, Any]] = None, folder_info: Optional[Dict[str, Any]] = None):
+    def _update_table_row(self, row: int, scen: Scenario, depth: int = 0, loop_info: Optional[Dict[str, Any]] = None, folder_info: Optional[Dict[str, Any]] = None, is_in_disabled_folder: bool = False):
         is_folder_start = getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start"))
         is_folder_end = getattr(scen, "is_folder_end", scen.node_type == "folder_end")
         is_folder = is_folder_start or is_folder_end
+        is_node_disabled = bool(is_in_disabled_folder or (not scen.enabled))
+        folder_is_disabled = is_folder and is_node_disabled
 
-        if folder_info and folder_info.get("has_pair", True):
-            folder_bg_str = folder_info.get("bg_light" if self.current_theme == "light" else "bg_dark", "#fef3c7")
-            folder_txt_str = folder_info.get("color_light" if self.current_theme == "light" else "color_dark", "#b45309")
-            folder_bg = QColor(folder_bg_str)
-            folder_txt = QColor(folder_txt_str)
-        else:
-            folder_bg = QColor("#fef3c7" if self.current_theme == "light" else "#451a03")
-            folder_txt = QColor("#b45309" if self.current_theme == "light" else "#fde68a")
+        child_disabled_color = QColor("#94a3b8" if self.current_theme == "light" else "#64748b")
+        child_disabled_bg = QColor("#f8fafc" if self.current_theme == "light" else "#0b0f19")
+
+        if is_folder:
+            if folder_is_disabled:
+                folder_bg = QColor("#f1f5f9" if self.current_theme == "light" else "#1e293b")
+                folder_txt = QColor("#64748b" if self.current_theme == "light" else "#94a3b8")
+            elif folder_info and folder_info.get("has_pair", True):
+                folder_bg_str = folder_info.get("bg_light" if self.current_theme == "light" else "bg_dark", "#fef3c7")
+                folder_txt_str = folder_info.get("color_light" if self.current_theme == "light" else "color_dark", "#b45309")
+                folder_bg = QColor(folder_bg_str)
+                folder_txt = QColor(folder_txt_str)
+            else:
+                folder_bg = QColor("#fef3c7" if self.current_theme == "light" else "#451a03")
+                folder_txt = QColor("#b45309" if self.current_theme == "light" else "#fde68a")
 
         # 0. Snapshot (레퍼런스 이미지 스냅샷 - 인식조건 이미지 기본값, 없으면 빈칸)
         if is_folder:
@@ -1454,21 +1535,30 @@ class MainWindow(QMainWindow):
 
         # 1. Scenario # (시나리오 고유 번호)
         if is_folder:
-            it_uid = QTableWidgetItem(f"📁s{scen.scenario_number}")
+            uid_str = f"📁s{scen.scenario_number}"
+            it_uid = QTableWidgetItem(uid_str)
             it_uid.setTextAlignment(Qt.AlignCenter)
             it_uid.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             it_uid.setToolTip(f"그룹 폴더: s{scen.scenario_number}")
-            it_uid.setForeground(folder_txt)
+            it_uid.setForeground(child_disabled_color if folder_is_disabled else folder_txt)
             it_uid.setBackground(folder_bg)
+            if folder_is_disabled:
+                it_uid.setData(Qt.UserRole + 99, True)
             f = it_uid.font()
             f.setBold(True)
             it_uid.setFont(f)
             self.tbl_scenarios.setItem(row, 1, it_uid)
         else:
-            it_uid = QTableWidgetItem(f"s{scen.scenario_number}")
+            uid_str = f"s{scen.scenario_number}"
+            it_uid = QTableWidgetItem(uid_str)
             it_uid.setTextAlignment(Qt.AlignCenter)
             it_uid.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            it_uid.setToolTip(f"시나리오 고유 ID: s{scen.scenario_number}")
+            if is_node_disabled:
+                it_uid.setForeground(child_disabled_color)
+                it_uid.setData(Qt.UserRole + 99, True)
+                it_uid.setToolTip(f"시나리오 고유 ID: s{scen.scenario_number} ({'상위 폴더 비활성화' if is_in_disabled_folder else '개별 비활성화됨'})")
+            else:
+                it_uid.setToolTip(f"시나리오 고유 ID: s{scen.scenario_number}")
             self.tbl_scenarios.setItem(row, 1, it_uid)
 
         # 2. Enabled Checkbox
@@ -1480,12 +1570,37 @@ class MainWindow(QMainWindow):
         chk_layout.setAlignment(Qt.AlignCenter)
         chk = QCheckBox()
         chk.setChecked(scen.enabled)
+        if is_folder:
+            chk.setToolTip("폴더 및 하위 항목 전체 활성화/비활성화 토글")
+        elif is_in_disabled_folder:
+            chk.setToolTip("상위 그룹 폴더가 비활성화되어 있어 이 노드는 실행 시 건너뜁니다.")
         chk.stateChanged.connect(lambda state, s=scen: self._on_scenario_toggle(s, state))
+
+        # 폴더 비활성화 시 내부 노드의 체크 버튼을 회색으로 표시
+        if is_in_disabled_folder:
+            chk_color = "#94a3b8" if self.current_theme == "light" else "#64748b"
+            chk_border = "#cbd5e1" if self.current_theme == "light" else "#475569"
+            chk_bg = "#f8fafc" if self.current_theme == "light" else "#1e293b"
+            chk.setStyleSheet(f"""
+                QCheckBox::indicator {{
+                    width: 16px;
+                    height: 16px;
+                    border: 1px solid {chk_border};
+                    border-radius: 3px;
+                    background-color: {chk_bg};
+                }}
+                QCheckBox::indicator:checked {{
+                    background-color: {chk_color};
+                    border-color: {chk_color};
+                    image: url("{CHECK_ICON_PATH}");
+                }}
+            """)
+
         chk_layout.addWidget(chk)
         self.tbl_scenarios.setCellWidget(row, 2, chk_widget)
 
         # 3. Name with Loop & Folder Hierarchy UI, distinct pair colors, and orphaned warnings
-        indent = ("    " * (depth - 1)) + "  │  ↳ " if depth > 0 else ""
+        indent = ("    " * (depth - 1)) + "  ↳ " if depth > 0 else ""
         if is_folder_start:
             p_num = folder_info.get("pair_number", 1) if folder_info else 1
             c_cnt = folder_info.get("child_count", 0) if folder_info else 0
@@ -1499,9 +1614,9 @@ class MainWindow(QMainWindow):
                     it_name = QTableWidgetItem(f"{indent}{collapse_icon}📁 [폴더 #{p_num}] {scen.name}  ({c_cnt}개 항목 접힘)")
                 else:
                     it_name = QTableWidgetItem(f"{indent}{collapse_icon}📂 [폴더 #{p_num} 시작] {scen.name}")
-                it_name.setForeground(folder_txt)
-                it_name.setBackground(folder_bg)
                 it_name.setToolTip(f"📁 그룹 폴더 #{p_num}: {scen.name} (더블 클릭하여 펼치기/접기)")
+                it_name.setForeground(child_disabled_color if folder_is_disabled else folder_txt)
+                it_name.setBackground(folder_bg)
             f = it_name.font()
             f.setBold(True)
             it_name.setFont(f)
@@ -1515,9 +1630,9 @@ class MainWindow(QMainWindow):
                 partner_idx = folder_info.get("partner_index") if folder_info else None
                 start_str = f"s{self.project.scenarios[partner_idx].scenario_number} " if partner_idx is not None and partner_idx < len(self.project.scenarios) else ""
                 it_name = QTableWidgetItem(f"{indent}📁 [폴더 #{p_num} 끝] → {start_str}{scen.name} 종료")
-                it_name.setForeground(folder_txt)
-                it_name.setBackground(folder_bg)
                 it_name.setToolTip(f"📁 그룹 폴더 #{p_num} 종료 지점")
+                it_name.setForeground(child_disabled_color if folder_is_disabled else folder_txt)
+                it_name.setBackground(folder_bg)
             f = it_name.font()
             f.setBold(True)
             it_name.setFont(f)
@@ -1531,7 +1646,7 @@ class MainWindow(QMainWindow):
                 p_num = loop_info.get("pair_number", 1) if loop_info else 1
                 color_hex = (loop_info.get("color_light") if self.current_theme == "light" else loop_info.get("color_dark")) if loop_info else ("#2563eb" if self.current_theme == "light" else "#60a5fa")
                 it_name = QTableWidgetItem(f"{indent}🔁 [루프 #{p_num} 시작: {scen.loop_count}회] [{scen.name}]")
-                it_name.setForeground(QColor(color_hex))
+                it_name.setForeground(child_disabled_color if is_node_disabled else QColor(color_hex))
                 it_name.setToolTip(f"루프 #{p_num} 시작 노드")
             f = it_name.font()
             f.setBold(True)
@@ -1547,16 +1662,23 @@ class MainWindow(QMainWindow):
                 partner_idx = loop_info.get("partner_index") if loop_info else None
                 start_num_str = f"s{self.project.scenarios[partner_idx].scenario_number}" if partner_idx is not None and partner_idx < len(self.project.scenarios) else ""
                 it_name = QTableWidgetItem(f"{indent}🔁 [루프 #{p_num} 종료] → 루프 {start_num_str} 복귀")
-                it_name.setForeground(QColor(color_hex))
+                it_name.setForeground(child_disabled_color if is_node_disabled else QColor(color_hex))
                 it_name.setToolTip(f"루프 #{p_num} 종료 노드 (루프 #{p_num} 시작점으로 복귀)")
             f = it_name.font()
             f.setBold(True)
             it_name.setFont(f)
         else:
-            if depth > 0:
-                it_name = QTableWidgetItem(f"{indent}{scen.name}")
+            it_name = QTableWidgetItem(f"{indent}{scen.name}")
+            if is_node_disabled:
+                it_name.setForeground(child_disabled_color)
+                if is_in_disabled_folder:
+                    it_name.setToolTip(f"상위 그룹 폴더가 비활성화되어 실행 시 건너뜁니다.\n{scen.name}")
+                else:
+                    it_name.setToolTip(f"🚫 [비활성] 이 노드는 비활성화되어 실행되지 않습니다.\n{scen.name}")
             else:
-                it_name = QTableWidgetItem(scen.name)
+                it_name.setToolTip(scen.name)
+        if folder_is_disabled if is_folder else is_node_disabled:
+            it_name.setData(Qt.UserRole + 99, True)
         it_name.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
         is_paused = (scen.id == getattr(self, "_paused_scenario_id", None))
         if is_paused:
@@ -1572,15 +1694,19 @@ class MainWindow(QMainWindow):
         self.tbl_scenarios.setCellWidget(row, 4, None)
         if is_folder_start:
             it_cond = QTableWidgetItem("(그룹 폴더 시작)")
-            it_cond.setForeground(folder_txt)
+            it_cond.setForeground(child_disabled_color if folder_is_disabled else folder_txt)
             it_cond.setBackground(folder_bg)
+            if folder_is_disabled:
+                it_cond.setData(Qt.UserRole + 99, True)
             it_cond.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             it_cond.setToolTip("하위 시나리오들을 시각적으로 묶어주는 그룹 폴더입니다. (실행 시 즉시 통과)")
             self.tbl_scenarios.setItem(row, 4, it_cond)
         elif is_folder_end:
             it_cond = QTableWidgetItem("(그룹 폴더 종료)")
-            it_cond.setForeground(folder_txt)
+            it_cond.setForeground(child_disabled_color if folder_is_disabled else folder_txt)
             it_cond.setBackground(folder_bg)
+            if folder_is_disabled:
+                it_cond.setData(Qt.UserRole + 99, True)
             it_cond.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             it_cond.setToolTip("그룹 폴더가 끝나는 지점입니다. (실행 시 즉시 통과)")
             self.tbl_scenarios.setItem(row, 4, it_cond)
@@ -1595,7 +1721,10 @@ class MainWindow(QMainWindow):
             else:
                 cond_text = "(조건 없음)"
             it_cond = QTableWidgetItem(cond_text)
-            if eff_cond and getattr(scen, "condition_id", None):
+            if is_node_disabled:
+                it_cond.setForeground(child_disabled_color)
+                it_cond.setData(Qt.UserRole + 99, True)
+            elif eff_cond and getattr(scen, "condition_id", None):
                 it_cond.setForeground(QColor("#2563eb" if self.current_theme == "light" else "#60a5fa"))
             elif scen.node_type != "normal":
                 it_cond.setForeground(QColor("#64748b"))
@@ -1607,16 +1736,21 @@ class MainWindow(QMainWindow):
         self.tbl_scenarios.setCellWidget(row, 5, None)
         if is_folder_start:
             c_cnt = folder_info.get("child_count", 0) if folder_info else 0
-            it_act = QTableWidgetItem(f"하위 {c_cnt}개 항목 포함" if c_cnt > 0 else "(비어 있음)")
-            it_act.setForeground(folder_txt)
+            act_str = f"하위 {c_cnt}개 항목 포함" if c_cnt > 0 else "(비어 있음)"
+            it_act = QTableWidgetItem(act_str)
+            it_act.setForeground(child_disabled_color if folder_is_disabled else folder_txt)
             it_act.setBackground(folder_bg)
+            if folder_is_disabled:
+                it_act.setData(Qt.UserRole + 99, True)
             it_act.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             it_act.setToolTip("폴더 내 하위 항목 수")
             self.tbl_scenarios.setItem(row, 5, it_act)
         elif is_folder_end:
             it_act = QTableWidgetItem("(통과)")
-            it_act.setForeground(folder_txt)
+            it_act.setForeground(child_disabled_color if folder_is_disabled else folder_txt)
             it_act.setBackground(folder_bg)
+            if folder_is_disabled:
+                it_act.setData(Qt.UserRole + 99, True)
             it_act.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.tbl_scenarios.setItem(row, 5, it_act)
         else:
@@ -1636,7 +1770,10 @@ class MainWindow(QMainWindow):
             else:
                 act_text = "(액션 없음)"
             it_act = QTableWidgetItem(act_text)
-            if getattr(scen, "sequence_id", None):
+            if is_node_disabled:
+                it_act.setForeground(child_disabled_color)
+                it_act.setData(Qt.UserRole + 99, True)
+            elif getattr(scen, "sequence_id", None):
                 it_act.setForeground(QColor("#16a34a" if self.current_theme == "light" else "#4ade80"))
             elif scen.node_type != "normal":
                 it_act.setForeground(QColor("#64748b"))
@@ -1647,17 +1784,29 @@ class MainWindow(QMainWindow):
         # 6. Branch Summary (On Match / On Mismatch / Loop)
         if is_folder:
             it_branch = QTableWidgetItem("-")
-            it_branch.setForeground(folder_txt)
+            it_branch.setForeground(child_disabled_color if folder_is_disabled else folder_txt)
             it_branch.setBackground(folder_bg)
+            if folder_is_disabled:
+                it_branch.setData(Qt.UserRole + 99, True)
             it_branch.setTextAlignment(Qt.AlignCenter)
             it_branch.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.tbl_scenarios.setItem(row, 6, it_branch)
         elif scen.node_type == "loop_start":
             it_branch = QTableWidgetItem("🔁 회차 반복 제어")
-            it_branch.setForeground(QColor("#2563eb" if self.current_theme == "light" else "#60a5fa"))
+            it_branch.setForeground(child_disabled_color if is_node_disabled else QColor("#2563eb" if self.current_theme == "light" else "#60a5fa"))
+            if is_node_disabled:
+                it_branch.setData(Qt.UserRole + 99, True)
+            it_branch.setTextAlignment(Qt.AlignCenter)
+            it_branch.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.tbl_scenarios.setItem(row, 6, it_branch)
         elif scen.node_type == "loop_end":
             it_branch = QTableWidgetItem("🔁 시작점 복귀")
-            it_branch.setForeground(QColor("#7c3aed" if self.current_theme == "light" else "#c084fc"))
+            it_branch.setForeground(child_disabled_color if is_node_disabled else QColor("#7c3aed" if self.current_theme == "light" else "#c084fc"))
+            if is_node_disabled:
+                it_branch.setData(Qt.UserRole + 99, True)
+            it_branch.setTextAlignment(Qt.AlignCenter)
+            it_branch.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.tbl_scenarios.setItem(row, 6, it_branch)
         else:
             m_str = "실행" if scen.on_match == "execute" else (
                 "점프" if scen.on_match == "jump" else (
@@ -1675,7 +1824,9 @@ class MainWindow(QMainWindow):
             else:
                 mm_str = "정지"
             it_branch = QTableWidgetItem(f"{m_str} / {mm_str}")
-
+            if is_node_disabled:
+                it_branch.setForeground(child_disabled_color)
+                it_branch.setData(Qt.UserRole + 99, True)
             it_branch.setTextAlignment(Qt.AlignCenter)
             it_branch.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.tbl_scenarios.setItem(row, 6, it_branch)
@@ -1694,12 +1845,36 @@ class MainWindow(QMainWindow):
         return target_id
 
     def _on_scenario_toggle(self, scenario: Scenario, state: int):
+        is_checked = (state == Qt.Checked)
         self._push_scenario_undo_state(f"시나리오 s{scenario.scenario_number} 활성화 토글")
-        scenario.enabled = (state == Qt.Checked)
+        scenario.enabled = is_checked
+
+        is_fld_start = getattr(scenario, "is_folder_start", scenario.node_type in ("folder", "folder_start"))
+        is_fld_end = getattr(scenario, "is_folder_end", scenario.node_type == "folder_end")
+
+        if is_fld_start:
+            idx = self.project.find_scenario_index(scenario.id)
+            if idx is not None and idx >= 0:
+                end_idx = self.project.find_matching_folder_end(idx)
+                if end_idx is not None and end_idx < len(self.project.scenarios):
+                    self.project.scenarios[end_idx].enabled = is_checked
+            action_desc = "활성화" if is_checked else "비활성화"
+            self._append_log("INFO", f"📁 [폴더 {action_desc}] '{scenario.name}' 그룹 폴더가 {action_desc}되었습니다.")
+        elif is_fld_end:
+            idx = self.project.find_scenario_index(scenario.id)
+            if idx is not None and idx >= 0:
+                start_idx = self.project.find_matching_folder_start(idx)
+                if start_idx is not None and start_idx < len(self.project.scenarios):
+                    self.project.scenarios[start_idx].enabled = is_checked
+            action_desc = "활성화" if is_checked else "비활성화"
+            self._append_log("INFO", f"📁 [폴더 {action_desc}] '{scenario.name}' 그룹 폴더가 {action_desc}되었습니다.")
+
         if self.inspector.current_scenario and self.inspector.current_scenario.id == scenario.id:
             self.inspector.chk_enabled.blockSignals(True)
             self.inspector.chk_enabled.setChecked(scenario.enabled)
             self.inspector.chk_enabled.blockSignals(False)
+
+        self._refresh_scenario_table()
 
     # ==========================================
     # Unity-Style Dynamic Layout Management
@@ -1996,6 +2171,14 @@ class MainWindow(QMainWindow):
                 toggle_txt = "📂 폴더 펼치기" if getattr(scen, "is_collapsed", False) else "📁 폴더 접기"
                 act_toggle = menu.addAction(toggle_txt)
                 act_toggle.triggered.connect(lambda checked, s=scen: self._toggle_folder_collapse(s))
+                en_txt = "👁️ 폴더 활성화" if not scen.enabled else "🚫 폴더 비활성화"
+                act_en = menu.addAction(en_txt)
+                act_en.triggered.connect(lambda checked, s=scen: self._toggle_folder_enabled(s))
+                act_en_all = menu.addAction("☑️ 하위 모든 시나리오 일괄 활성화")
+                act_en_all.triggered.connect(lambda checked, s=scen: self._set_folder_children_enabled(s, True))
+                act_dis_all = menu.addAction("⬜ 하위 모든 시나리오 일괄 비활성화")
+                act_dis_all.triggered.connect(lambda checked, s=scen: self._set_folder_children_enabled(s, False))
+                menu.addSeparator()
                 act_rename = menu.addAction("✏️ 폴더 이름 변경...")
                 act_rename.triggered.connect(lambda checked, s=scen: self._rename_folder(s))
                 act_move_up = menu.addAction("⬆️ 폴더 단위 위로 이동")
@@ -2004,6 +2187,14 @@ class MainWindow(QMainWindow):
                 act_move_dn.triggered.connect(self._on_move_down)
                 menu.addSeparator()
             elif is_fld_end:
+                en_txt = "👁️ 폴더 활성화" if not scen.enabled else "🚫 폴더 비활성화"
+                act_en = menu.addAction(en_txt)
+                act_en.triggered.connect(lambda checked, s=scen: self._toggle_folder_enabled(s))
+                act_en_all = menu.addAction("☑️ 하위 모든 시나리오 일괄 활성화")
+                act_en_all.triggered.connect(lambda checked, s=scen: self._set_folder_children_enabled(s, True))
+                act_dis_all = menu.addAction("⬜ 하위 모든 시나리오 일괄 비활성화")
+                act_dis_all.triggered.connect(lambda checked, s=scen: self._set_folder_children_enabled(s, False))
+                menu.addSeparator()
                 act_rename = menu.addAction("✏️ 폴더 이름 변경...")
                 act_rename.triggered.connect(lambda checked, s=scen: self._rename_folder(s))
                 act_move_up = menu.addAction("⬆️ 폴더 단위 위로 이동")
@@ -2039,6 +2230,49 @@ class MainWindow(QMainWindow):
         act_redo.triggered.connect(self._redo_scenario)
         act_redo.setEnabled(bool(self.scenario_redo_stack))
         menu.exec_(self.tbl_scenarios.viewport().mapToGlobal(pos))
+
+    def _toggle_folder_enabled(self, scen: Scenario):
+        """Toggles enabled state for the folder start and its corresponding folder end."""
+        new_state = not scen.enabled
+        self._push_scenario_undo_state(f"폴더 '{scen.name}' 활성화 토글")
+        scen.enabled = new_state
+        idx = self.project.find_scenario_index(scen.id)
+        if idx is not None and idx >= 0:
+            if getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start")):
+                end_idx = self.project.find_matching_folder_end(idx)
+                if end_idx is not None and end_idx < len(self.project.scenarios):
+                    self.project.scenarios[end_idx].enabled = new_state
+            elif getattr(scen, "is_folder_end", scen.node_type == "folder_end"):
+                start_idx = self.project.find_matching_folder_start(idx)
+                if start_idx is not None and start_idx < len(self.project.scenarios):
+                    self.project.scenarios[start_idx].enabled = new_state
+        desc = "활성화" if new_state else "비활성화"
+        self._append_log("INFO", f"📁 [폴더 {desc}] '{scen.name}' 그룹 폴더가 {desc}되었습니다.")
+        self._refresh_scenario_table()
+
+    def _set_folder_children_enabled(self, scen: Scenario, enabled: bool):
+        """Batch enables or disables all child scenarios inside a folder."""
+        idx = self.project.find_scenario_index(scen.id)
+        if idx is None or idx < 0:
+            return
+        if getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start")):
+            start_idx = idx
+            end_idx = self.project.find_matching_folder_end(idx)
+        else:
+            end_idx = idx
+            start_idx = self.project.find_matching_folder_start(idx)
+
+        if start_idx is None or end_idx is None:
+            return
+
+        desc = "활성화" if enabled else "비활성화"
+        self._push_scenario_undo_state(f"폴더 '{scen.name}' 하위 항목 {desc}")
+        count = 0
+        for i in range(start_idx + 1, end_idx):
+            self.project.scenarios[i].enabled = enabled
+            count += 1
+        self._append_log("INFO", f"📁 [폴더 하위 {desc}] '{scen.name}' 하위 {count}개 항목이 {desc}되었습니다.")
+        self._refresh_scenario_table()
 
     # ==========================================
     # Modular Composite Scenario Handlers
@@ -2272,15 +2506,26 @@ class MainWindow(QMainWindow):
     # ==========================================
     def _on_add_scenario(self):
         new_scen_num = self.project.get_next_scenario_number()
+        selected_rows = sorted([r.row() for r in self.tbl_scenarios.selectionModel().selectedRows()])
+        if not selected_rows and self.tbl_scenarios.selectionModel().hasSelection():
+            selected_rows = sorted(list(set(idx.row() for idx in self.tbl_scenarios.selectedIndexes())))
+
+        if selected_rows:
+            target_row = selected_rows[-1]
+            insert_idx = target_row + 1
+        else:
+            insert_idx = len(self.project.scenarios)
+
         self._push_scenario_undo_state(f"시나리오 #{new_scen_num} 추가")
         new_scen = self.project.create_composite_scenario(
             name=f"시나리오 {new_scen_num}",
-            node_type="normal"
+            node_type="normal",
+            insert_index=insert_idx
         )
         self._refresh_scenario_table()
         if hasattr(self, "modules_widget"):
             self.modules_widget.refresh_modules()
-        self.tbl_scenarios.selectRow(len(self.project.scenarios) - 1)
+        self.tbl_scenarios.selectRow(insert_idx)
 
     def _get_block_range(self, row: int) -> Tuple[int, int]:
         """

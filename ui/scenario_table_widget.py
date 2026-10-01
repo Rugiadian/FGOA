@@ -3,10 +3,11 @@ Scenario Table Widget and Custom Vertical Header for FGOA.
 (시나리오 목록 드래그 앤 드롭 테이블 및 실행 하이라이트 헤더)
 """
 from PyQt5.QtWidgets import (
-    QTableWidget, QHeaderView, QAbstractItemView, QApplication
+    QTableWidget, QHeaderView, QAbstractItemView, QApplication,
+    QStyledItemDelegate, QStyleOptionViewItem, QStyle
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QMimeData
-from PyQt5.QtGui import QColor, QDrag
+from PyQt5.QtGui import QColor, QDrag, QPainter
 
 
 class ScenarioVerticalHeader(QHeaderView):
@@ -64,14 +65,53 @@ class ScenarioVerticalHeader(QHeaderView):
             super().paintSection(painter, rect, logicalIndex)
 
 
+class ScenarioItemDelegate(QStyledItemDelegate):
+    """Custom item delegate to maintain visible disabled gray text even when a row is selected."""
+
+    def __init__(self, table):
+        super().__init__(table)
+        self.table = table
+
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        widget = opt.widget
+        style = widget.style() if widget else QApplication.style()
+
+        is_disabled = index.data(Qt.UserRole + 99)
+        if is_disabled and (opt.state & QStyle.State_Selected):
+            # 1. Draw base selection background without text
+            text = opt.text
+            opt.text = ''
+            style.drawControl(QStyle.CE_ItemViewItem, opt, painter, widget)
+            opt.text = text
+
+            # 2. Draw text with clear gray contrast over selection color:
+            # - Light theme selection (#dbeafe): #64748b (Slate-500: strong contrast, clearly gray)
+            # - Dark theme selection (#294066): #94a3b8 (Slate-400: clear visible muted gray)
+            theme = getattr(self.table, "current_theme", "light")
+            disabled_sel_color = QColor("#64748b" if theme == "light" else "#94a3b8")
+
+            painter.save()
+            painter.setFont(opt.font)
+            painter.setPen(disabled_sel_color)
+            rect = option.rect.adjusted(4, 0, -4, 0)
+            painter.drawText(rect, int(opt.displayAlignment | Qt.AlignVCenter), opt.text)
+            painter.restore()
+        else:
+            super().paint(painter, option, index)
+
+
 class DraggableScenarioTableWidget(QTableWidget):
     """QTableWidget supporting safe mouse drag-and-drop scenario row reordering without item loss."""
     sig_row_reordered = pyqtSignal(int, int)  # (from_row, to_row)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.current_theme = "light"
         self._custom_v_header = ScenarioVerticalHeader(self)
         self.setVerticalHeader(self._custom_v_header)
+        self.setItemDelegate(ScenarioItemDelegate(self))
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.viewport().setAcceptDrops(True)

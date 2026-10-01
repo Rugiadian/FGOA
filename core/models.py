@@ -590,7 +590,7 @@ class Project:
             if cond.action_sequence_id == seq_id:
                 cond.action_sequence_id = None
 
-    def create_composite_scenario(self, name: str = "새 시나리오", node_type: str = "normal", add_to_project: bool = True) -> Scenario:
+    def create_composite_scenario(self, name: str = "새 시나리오", node_type: str = "normal", add_to_project: bool = True, insert_index: Optional[int] = None) -> Scenario:
         """
         Creates a new modular composite scenario with newly paired Condition and ActionSequence modules.
         The condition automatically links to the bundled action sequence as default.
@@ -623,7 +623,10 @@ class Project:
             actions=seq.actions
         )
         if add_to_project:
-            self.scenarios.append(scen)
+            if insert_index is not None and 0 <= insert_index <= len(self.scenarios):
+                self.scenarios.insert(insert_index, scen)
+            else:
+                self.scenarios.append(scen)
             self.renumber_steps()
         return scen
 
@@ -888,6 +891,13 @@ class Project:
             if s.step_number == step_no:
                 return s
         return None
+
+    def find_scenario_index(self, scen_id: str) -> int:
+        """Returns index of scenario with matching ID, or -1 if not found."""
+        for i, s in enumerate(self.scenarios):
+            if s.id == scen_id:
+                return i
+        return -1
 
     def to_dict(self) -> Dict[str, Any]:
         return {

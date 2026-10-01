@@ -148,7 +148,8 @@ class WorkflowRunner(QThread):
                         end_idx = self.project.find_matching_folder_end(current_index)
                         if end_idx is not None:
                             self.sig_log.emit("INFO", f"📁 [폴더 비활성] '{scen.name}' 전체 ({current_index + 1} ~ {end_idx + 1}단계) 스킵")
-                            self.sig_scenario_completed.emit(scen.id, "skipped")
+                            for skipped_i in range(current_index, end_idx + 1):
+                                self.sig_scenario_completed.emit(scenarios[skipped_i].id, "skipped")
                             current_index = end_idx + 1
                             continue
                     self.sig_log.emit("INFO", f"📁 [폴더 시작] '{scen.name}' 통과 (시인성 그룹)")

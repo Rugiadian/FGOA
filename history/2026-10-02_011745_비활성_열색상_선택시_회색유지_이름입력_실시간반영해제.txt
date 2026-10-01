@@ -1,0 +1,32 @@
+[일시 / Timestamp]
+- 요청 시각: 2026-10-02 01:06:34 KST
+- 완료 시각: 2026-10-02 01:17:45 KST
+
+[요청 내용 / User Request]
+- 노드의 시나리오 이름에만 비활성- 회색 폰트로 변겨오디고 인식조건, 액셔 ㄴ시퀀스 열에는 적용 안되고 있음. 모두 적용. 
+- 선택중인 노드는 비활성화 되있는것도 검은색 폰트로 뜸. 회색이 되도록 할것. 선택 셀의 파란색 때문에 너무 안보이는 색이 되지 않게 골라. 
+- 새로 생성된 노드는 시나리오 이름 입력할 때 동시에  시나리오 목록 노드에도 반영되서 입력오류가 생김. 저장 누르면 반영되도록 실시간 반영 해제 .
+
+[결과 요약 / Summary of Results]
+1. 비활성 노드 전 열(고유 ID, 이름, 인식조건, 액션시퀀스, 분기) 회색 폰트 색상 일관 적용:
+   - `ui/main_window.py` 내 `_update_table_row`에서 인식조건 모듈(`it_cond`) 및 액션시퀀스 모듈(`it_act`)에 대해 비활성화 여부(`is_node_disabled`) 검사를 누락했던 문제를 해결하여 모든 열에 회색(`child_disabled_color`)이 적용되도록 통일함.
+2. 선택된 비활성 노드의 폰트 색상 회색 유지 (선택 셀 배경색 대비 최적화):
+   - QTableWidget에서 행이 선택되었을 때 QSS selection-color 및 스타일 엔진에 의해 짙은 남색/검은색으로 강제 덮어써지던 문제를 해결하기 위해 `ui/scenario_table_widget.py`에 커스텀 `ScenarioItemDelegate`를 구현.
+   - 선택 파란색 배경(#dbeafe / #294066) 위에서도 텍스트가 묻히지 않고 또렷하게 가독성을 유지하면서 비활성 상태임을 즉각 식별할 수 있는 차분한 Slate 톤의 회색(라이트 테마: `#64748b` [Slate-500], 다크 테마: `#94a3b8` [Slate-400])을 선별하여 렌더링하도록 적용함.
+3. 인스펙터 시나리오 이름 입력 시 실시간 반영 해제 및 저장 버튼 반영으로 일원화:
+   - `ui/inspector_widget.py`의 `_on_field_changed`에서 매 키 입력(textChanged)마다 `sig_scenario_changed`를 방출하여 테이블 전체를 다시 그리던 실시간 반영을 해제함.
+   - 이를 통해 한글 타이핑 중 IME 음절 조합이 끊기거나 입력 오류가 발생하던 문제를 원천 차단함.
+   - '저장' 버튼(Ctrl+S) 클릭 시 원본에 안전하게 반영되며, 편의성을 위해 시나리오 이름 필드에서 엔터(Enter/returnPressed) 입력 시에도 바로 저장이 수행되도록 연결함.
+4. 단위 테스트 추가 및 검증:
+   - `tests/test_folder_disabled_and_window_geometry.py`에 모든 열의 회색 태깅 및 인스펙터 이름 입력 시 실시간 미반영 & 저장 시 반영 검증 단언문 추가.
+   - 1,302개 전체 단위 테스트 통과 완료.
+5. 버전 갱신:
+   - `core/version.py` 버전을 `261002.0116`으로 갱신.
+
+[영향 파일 목록 / Affected Files]
+- ui/scenario_table_widget.py
+- ui/main_window.py
+- ui/inspector_widget.py
+- tests/test_folder_disabled_and_window_geometry.py
+- core/version.py
+- history/2026-10-02_011745_비활성_열색상_선택시_회색유지_이름입력_실시간반영해제.txt

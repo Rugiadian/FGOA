@@ -358,6 +358,7 @@ class TestPresetsAndLayouts(unittest.TestCase):
         self.assertFalse(win.btn_undo_scenario.isEnabled())
 
         # 1. Add scenario -> Undo -> Redo
+        win.tbl_scenarios.selectRow(1)
         win._on_add_scenario()
         self.assertEqual(len(win.project.scenarios), 3)
         self.assertTrue(win.btn_undo_scenario.isEnabled())

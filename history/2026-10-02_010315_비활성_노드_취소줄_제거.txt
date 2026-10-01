@@ -1,0 +1,22 @@
+[일시 / Timestamp]
+- 요청 시각: 2026-10-02 01:00:13 KST
+- 완료 시각: 2026-10-02 01:03:30 KST
+
+[요청 내용 / User Request]
+비활성 노드 표시에 취소줄은 없애줘. 회색 폰트로 변경으로 충분함.
+
+[결과 요약 / Summary of Results]
+1. 시나리오 목록 비활성 노드 취소줄(StrikeOut) 제거:
+   - `ui/main_window.py` 내 시나리오 테이블 렌더링 로직(`_refresh_scenario_table`)에서 개별 비활성 노드(`not scen.enabled`) 처리 시 폰트에 취소선(`f.setStrikeOut(True)`)을 적용하던 로직을 제거함.
+   - 기존 회색 폰트 색상(`child_disabled_color`) 적용 및 비활성 툴팁 안내는 유지하여 가독성을 개선하고 취소줄 없이 회색 텍스트로만 표시되도록 수정함.
+2. 단위 테스트 추가 및 검증:
+   - `tests/test_folder_disabled_and_window_geometry.py`에 개별 비활성 노드 설정 시 취소선(`strikeOut()`)이 적용되지 않음을 검증하는 단언문 추가.
+   - 1302개 전체 단위 테스트 통과 확인 완료.
+3. 버전 갱신:
+   - `core/version.py` 버전을 `261002.0102`로 갱신.
+
+[영향 파일 목록 / Affected Files]
+- ui/main_window.py
+- tests/test_folder_disabled_and_window_geometry.py
+- core/version.py
+- history/2026-10-02_010315_비활성_노드_취소줄_제거.txt

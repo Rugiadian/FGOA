@@ -380,6 +380,7 @@ class InspectorWidget(QWidget):
         self.txt_name = QLineEdit()
         self.txt_name.setPlaceholderText("시나리오 설명 또는 목적 입력...")
         self.txt_name.textChanged.connect(self._on_field_changed)
+        self.txt_name.returnPressed.connect(self._on_save_inspector)
         name_row.addWidget(self.txt_name, 1)
         info_layout.addLayout(name_row)
 
@@ -1986,7 +1987,6 @@ class InspectorWidget(QWidget):
 
         self._update_reference_thumbnails()
         self._mark_dirty()
-        self.sig_scenario_changed.emit(self.current_scenario)
 
     def _on_node_type_changed(self):
         if self._is_loading or not self.current_scenario:
@@ -2066,11 +2066,11 @@ class InspectorWidget(QWidget):
 
     def _on_point_tolerance_changed(self, point: ColorPoint, val: int):
         point.tolerance = val
-        self.sig_scenario_changed.emit(self.current_scenario)
+        self._mark_dirty()
 
     def _on_point_mode_changed(self, point: ColorPoint, idx: int):
         point.match_mode = "not_match" if idx == 1 else "match"
-        self.sig_scenario_changed.emit(self.current_scenario)
+        self._mark_dirty()
 
     # ==========================================
     # Condition Point Management & Combination

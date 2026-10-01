@@ -4,4 +4,4 @@ FGOA Version Definition
 형식은 yymmdd.hhmm (예: 260924.1256) 기준으로 지정합니다.
 """
 
-__version__ = "261001.1935"
+__version__ = "261002.0116"
