@@ -121,6 +121,14 @@ class WorkflowRunner(QThread):
                     continue
 
                 # ----------------------------------------------------
+                # Folder Node: Pure organizational grouping node (zero delay pass-through)
+                # ----------------------------------------------------
+                if scen.node_type == "folder":
+                    self.sig_log.emit("INFO", f"📁 [폴더] '{scen.name}' 통과 (시인성 그룹)")
+                    current_index += 1
+                    continue
+
+                # ----------------------------------------------------
                 # Loop Node: loop_start
                 # ----------------------------------------------------
                 if scen.node_type == "loop_start":

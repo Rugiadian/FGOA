@@ -240,6 +240,11 @@ class Scenario:
     custom_log: str = ""  # 액션 실행 시 출력할 사용자 지정 로그 문장
     last_action_image_path: Optional[str] = None  # 액션 좌표 지정에 마지막으로 사용한 이미지
     reference_image_path: Optional[str] = None  # 시나리오 노드 고유 레퍼런스 이미지 (None이면 인식조건 레퍼런스 이미지 자동 사용)
+    is_collapsed: bool = False  # 폴더 노드인 경우 하위 항목 접힘 여부
+
+    @property
+    def is_folder(self) -> bool:
+        return self.node_type == "folder"
 
     def get_effective_reference_image(self, project: Optional["Project"] = None) -> Optional[str]:
         """
@@ -296,6 +301,8 @@ class Scenario:
 
     def get_actions_summary(self, project: Optional["Project"] = None) -> str:
         """Returns summarized text of actions in this scenario."""
+        if self.node_type == "folder":
+            return "(하위 항목 정리용)"
         if self.sequence_id and project:
             seq = project.find_action_sequence(self.sequence_id)
             if seq:
@@ -310,6 +317,8 @@ class Scenario:
 
     def get_condition_summary(self, project: Optional["Project"] = None) -> str:
         """Returns summarized text of condition."""
+        if self.node_type == "folder":
+            return "(그룹 폴더)"
         if self.node_type == "loop_start":
             eff_cond = self.get_effective_condition(project)
             if self.loop_mode in ("until_match", "while_match") and eff_cond and eff_cond.points:
@@ -335,6 +344,7 @@ class Scenario:
             "name": self.name,
             "enabled": self.enabled,
             "node_type": self.node_type,
+            "is_collapsed": getattr(self, "is_collapsed", False),
             "loop_mode": self.loop_mode,
             "loop_count": self.loop_count,
             "loop_target_id": self.loop_target_id,
@@ -369,6 +379,7 @@ class Scenario:
             name=data.get("name", "시나리오"),
             enabled=data.get("enabled", True),
             node_type=data.get("node_type", "normal"),
+            is_collapsed=data.get("is_collapsed", False),
             loop_mode=data.get("loop_mode", "count"),
             loop_count=data.get("loop_count", 5),
             loop_target_id=data.get("loop_target_id", ""),

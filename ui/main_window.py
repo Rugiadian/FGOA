@@ -24,7 +24,7 @@ from PyQt5.QtWidgets import (
     QDialog
 )
 from PyQt5.QtGui import QColor, QFont, QIcon, QKeySequence, QDrag, QCursor, QPixmap
-from PyQt5.QtCore import Qt, QTimer, QFileSystemWatcher, QProcess, QByteArray, pyqtSignal, QMimeData
+from PyQt5.QtCore import Qt, QTimer, QFileSystemWatcher, QProcess, QByteArray, pyqtSignal, QMimeData, QSize, QPoint
 
 from core.models import Project, Scenario, Condition, Action, ColorPoint, ActionSequence
 from core.window_manager import WindowManager, WindowInfo
@@ -54,6 +54,28 @@ TEMP_RELOAD_FILE = "_temp_reload_project.json"
 
 # Modular components extracted for token optimization & clean architecture
 from ui.scenario_table_widget import ScenarioVerticalHeader, DraggableScenarioTableWidget
+
+
+class ResponsiveTabWidget(QTabWidget):
+    """
+    QTabWidget that reports its minimumSizeHint based on the current active tab
+    rather than the maximum of all tabs, allowing parent dock/splitter containers
+    to shrink when a compact tab is active.
+    """
+    def minimumSizeHint(self) -> QSize:
+        cur = self.currentWidget()
+        if cur:
+            sz = cur.minimumSizeHint()
+            tb = self.tabBar()
+            tb_h = tb.height() if tb else 28
+            return QSize(max(180, sz.width()), max(100, sz.height() + tb_h))
+        return super().minimumSizeHint()
+
+    def sizeHint(self) -> QSize:
+        cur = self.currentWidget()
+        if cur:
+            return cur.sizeHint()
+        return super().sizeHint()
 
 
 class MainWindow(QMainWindow):
@@ -422,14 +444,14 @@ class MainWindow(QMainWindow):
         self.lbl_authoring_res.customContextMenuRequested.connect(self._on_authoring_res_context_menu)
         row1_layout.addWidget(self.lbl_authoring_res)
 
-        # Register Authoring Reference Image Button
-        self.btn_register_ref_img = QPushButton("🖼️ 기준 이미지 등록...")
+        # Register Authoring Reference Image Button (Menu dropdown)
+        self.btn_register_ref_img = QPushButton("🖼️ 기준 이미지 등록 ▼")
         self.btn_register_ref_img.setToolTip(
             "시나리오 제작 기준 해상도를 추적/지정할 레퍼런스 이미지를 등록합니다.\n"
-            "이미지 크기에 맞추어 제작 기준 해상도가 자동 설정됩니다.\n"
-            "(우클릭: 수동 해상도 입력 또는 등록 해제)"
+            "- 레퍼런스 갤러리 또는 파일 탐색기에서 선택 가능\n"
+            "- 이미지 크기에 맞추어 제작 기준 해상도가 자동 설정됩니다."
         )
-        self.btn_register_ref_img.clicked.connect(self._on_register_authoring_image)
+        self.btn_register_ref_img.clicked.connect(self._on_show_authoring_menu)
         self.btn_register_ref_img.setContextMenuPolicy(Qt.CustomContextMenu)
         self.btn_register_ref_img.customContextMenuRequested.connect(self._on_authoring_res_context_menu)
         row1_layout.addWidget(self.btn_register_ref_img)
@@ -539,50 +561,39 @@ class MainWindow(QMainWindow):
         pane_hdr.addWidget(self.lbl_scen_count)
         l_layout.addLayout(pane_hdr)
 
-        # Toolbar with responsive FlowLayout (automatically wraps buttons when width is constrained)
-        tb_widget = QWidget()
-        tb_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
-        tb_layout = FlowLayout(tb_widget, margin=0, spacing=4)
+        # Toolbar with responsive FlowLayout + dedicated bottom row for reorder & undo/redo
+        tb_container = QWidget()
+        tb_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        tb_v_layout = QVBoxLayout(tb_container)
+        tb_v_layout.setContentsMargins(0, 0, 0, 0)
+        tb_v_layout.setSpacing(4)
+
+        # Row 1 (Upper tools wrapped with FlowLayout): CRUD, Folder, Loops, Presets, Save/Load
+        row1_flow_widget = QWidget()
+        row1_flow_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        row1_flow = FlowLayout(row1_flow_widget, margin=0, spacing=4)
 
         btn_add = QPushButton("➕ 추가")
         btn_add.clicked.connect(self._on_add_scenario)
-        tb_layout.addWidget(btn_add)
+        row1_flow.addWidget(btn_add)
+
+        btn_add_folder = QPushButton("📁 폴더 추가")
+        btn_add_folder.setToolTip("시인성 향상 및 시나리오 목록 정리를 위한 그룹 폴더를 추가합니다. (진행에 영향 없음)")
+        btn_add_folder.clicked.connect(self._on_add_folder)
+        row1_flow.addWidget(btn_add_folder)
 
         btn_add_loop = QPushButton("🔁 루프 추가")
         btn_add_loop.setToolTip("루프 시작과 종료 노드로 구성된 루프 블록을 추가합니다.")
         btn_add_loop.clicked.connect(self._on_add_loop_block)
-        tb_layout.addWidget(btn_add_loop)
+        row1_flow.addWidget(btn_add_loop)
 
         btn_dup = QPushButton("📋 복제")
         btn_dup.clicked.connect(self._on_duplicate_scenario)
-        tb_layout.addWidget(btn_dup)
+        row1_flow.addWidget(btn_dup)
 
         btn_del = QPushButton("🗑️ 삭제")
         btn_del.clicked.connect(self._on_delete_scenario)
-        tb_layout.addWidget(btn_del)
-
-        btn_up = QPushButton("⬆️")
-        btn_up.setToolTip("위로 이동")
-        btn_up.clicked.connect(self._on_move_up)
-        tb_layout.addWidget(btn_up)
-
-        btn_down = QPushButton("⬇️")
-        btn_down.setToolTip("아래로 이동")
-        btn_down.clicked.connect(self._on_move_down)
-        tb_layout.addWidget(btn_down)
-
-        # Undo / Redo for Scenario List
-        self.btn_undo_scenario = QPushButton("↩️ 취소")
-        self.btn_undo_scenario.setToolTip("시나리오 목록 변경 작업 실행 취소 (Ctrl+Z)")
-        self.btn_undo_scenario.clicked.connect(self._undo_scenario)
-        self.btn_undo_scenario.setEnabled(False)
-        tb_layout.addWidget(self.btn_undo_scenario)
-
-        self.btn_redo_scenario = QPushButton("▶️ 다시")
-        self.btn_redo_scenario.setToolTip("취소한 시나리오 목록 변경 작업 다시 실행 (Ctrl+Y / Ctrl+Shift+Z)")
-        self.btn_redo_scenario.clicked.connect(self._redo_scenario)
-        self.btn_redo_scenario.setEnabled(False)
-        tb_layout.addWidget(self.btn_redo_scenario)
+        row1_flow.addWidget(btn_del)
 
         # PRESET BUTTON
         self.btn_preset = QPushButton("📦 프리셋 ▼")
@@ -607,23 +618,63 @@ class MainWindow(QMainWindow):
         act_q3.triggered.connect(lambda: self._on_quick_load_preset("preset_loop_block"))
 
         self.btn_preset.setMenu(menu_preset)
-        tb_layout.addWidget(self.btn_preset)
+        row1_flow.addWidget(self.btn_preset)
 
         btn_save_proj = QPushButton("💾 저장")
         btn_save_proj.setToolTip("불러들인 파일에 바로 저장 (Ctrl+S)")
         btn_save_proj.clicked.connect(self._on_save_project)
-        tb_layout.addWidget(btn_save_proj)
+        row1_flow.addWidget(btn_save_proj)
 
         btn_save_as_proj = QPushButton("💾 다른이름 저장")
         btn_save_as_proj.setToolTip("새로운 파일로 다른 이름 저장")
         btn_save_as_proj.clicked.connect(self._on_save_project_as)
-        tb_layout.addWidget(btn_save_as_proj)
+        row1_flow.addWidget(btn_save_as_proj)
 
         btn_open_proj = QPushButton("📂 열기")
         btn_open_proj.clicked.connect(self._on_open_project)
-        tb_layout.addWidget(btn_open_proj)
+        row1_flow.addWidget(btn_open_proj)
 
-        l_layout.addWidget(tb_widget)
+        tb_v_layout.addWidget(row1_flow_widget)
+
+        # Row 2 (마지막 줄): 순서 위, 아래 이동, 취소, 다시(redo) 를 한 그룹으로 마지막 줄에 배치
+        row2_reorder_bar = QWidget()
+        row2_reorder_layout = QHBoxLayout(row2_reorder_bar)
+        row2_reorder_layout.setContentsMargins(0, 0, 0, 0)
+        row2_reorder_layout.setSpacing(4)
+
+        btn_up = QPushButton("⬆️ 위로")
+        btn_up.setToolTip("선택한 시나리오를 한 줄 위로 이동")
+        btn_up.clicked.connect(self._on_move_up)
+        row2_reorder_layout.addWidget(btn_up)
+
+        btn_down = QPushButton("⬇️ 아래로")
+        btn_down.setToolTip("선택한 시나리오를 한 줄 아래로 이동")
+        btn_down.clicked.connect(self._on_move_down)
+        row2_reorder_layout.addWidget(btn_down)
+
+        sep_tb = QFrame()
+        sep_tb.setFrameShape(QFrame.VLine)
+        sep_tb.setFrameShadow(QFrame.Sunken)
+        sep_tb.setStyleSheet("color: #94a3b8; margin: 2px 2px;")
+        row2_reorder_layout.addWidget(sep_tb)
+
+        # Undo / Redo for Scenario List
+        self.btn_undo_scenario = QPushButton("↩️ 취소")
+        self.btn_undo_scenario.setToolTip("시나리오 목록 변경 작업 실행 취소 (Ctrl+Z)")
+        self.btn_undo_scenario.clicked.connect(self._undo_scenario)
+        self.btn_undo_scenario.setEnabled(False)
+        row2_reorder_layout.addWidget(self.btn_undo_scenario)
+
+        self.btn_redo_scenario = QPushButton("▶️ 다시")
+        self.btn_redo_scenario.setToolTip("취소한 시나리오 목록 변경 작업 다시 실행 (Ctrl+Y / Ctrl+Shift+Z)")
+        self.btn_redo_scenario.clicked.connect(self._redo_scenario)
+        self.btn_redo_scenario.setEnabled(False)
+        row2_reorder_layout.addWidget(self.btn_redo_scenario)
+
+        row2_reorder_layout.addStretch()
+        tb_v_layout.addWidget(row2_reorder_bar)
+
+        l_layout.addWidget(tb_container)
 
         # Scenario Table (Full height)
         self.tbl_scenarios = DraggableScenarioTableWidget()
@@ -649,8 +700,8 @@ class MainWindow(QMainWindow):
         self.tbl_scenarios.customContextMenuRequested.connect(self._on_scenario_context_menu)
         l_layout.addWidget(self.tbl_scenarios, 1)
 
-        # Dock 1: Left Pane (Scenarios & Modules Tab Widget)
-        self.tab_scenario_manager = QTabWidget()
+        # Dock 1: Left Pane (Scenarios & Modules Responsive Tab Widget)
+        self.tab_scenario_manager = ResponsiveTabWidget()
         self.tab_scenario_manager.setObjectName("TabScenarioManager")
         self.tab_scenario_manager.addTab(left_pane, "📜 시나리오 흐름")
 
@@ -658,6 +709,7 @@ class MainWindow(QMainWindow):
         self.modules_widget.sig_module_changed.connect(self._on_modules_changed)
         self.modules_widget.sig_log.connect(self._append_log)
         self.tab_scenario_manager.addTab(self.modules_widget, "🧩 모듈 / 노드 목록")
+        self.tab_scenario_manager.currentChanged.connect(lambda _: self.dock_scenarios.updateGeometry())
 
         self.dock_scenarios = QDockWidget("📜 시나리오 및 모듈 (Hierarchy)", self)
         self.dock_scenarios.setObjectName("DockScenarios")
@@ -665,6 +717,7 @@ class MainWindow(QMainWindow):
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetClosable
         )
         self.dock_scenarios.setWidget(self.tab_scenario_manager)
+        self.dock_scenarios.setMinimumWidth(200)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
 
         # ==========================================
@@ -763,96 +816,140 @@ class MainWindow(QMainWindow):
         # Compatibility placeholder for legacy splitter
         self.main_h_splitter = None
 
-        # 3. Execution Controller Bottom Bar (시나리오 재생 창)
+        # 3. Execution Controller Bottom Bar (시나리오 재생 컨트롤 - 2줄 기능별 분류 레이아웃)
         ctrl_frame = QFrame()
         ctrl_frame.setObjectName("card_frame")
         ctrl_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        c_layout = QHBoxLayout(ctrl_frame)
+        c_layout = QVBoxLayout(ctrl_frame)
         c_layout.setContentsMargins(10, 6, 10, 6)
+        c_layout.setSpacing(6)
+
+        # ----------------------------------------------------
+        # Row 1: 시나리오 재생 실행 제어 & 시각화/플로팅 & 상태
+        # ----------------------------------------------------
+        row1_ctrl = QHBoxLayout()
+        row1_ctrl.setContentsMargins(0, 0, 0, 0)
+        row1_ctrl.setSpacing(6)
 
         lbl_playback_title = QLabel("▶ 시나리오 재생:")
         lbl_playback_title.setStyleSheet("font-weight: bold; font-size: 9.5pt;")
-        c_layout.addWidget(lbl_playback_title)
+        row1_ctrl.addWidget(lbl_playback_title)
 
         self.btn_run = QPushButton("▶ 전체 시작 (F5)")
         self.btn_run.setObjectName("btn_run")
         self.btn_run.setToolTip("첫 번째 시나리오 노드부터 전체를 순차적으로 실행합니다. (단축키: F5)")
         self.btn_run.clicked.connect(self._on_start_all_execution)
-        c_layout.addWidget(self.btn_run)
+        row1_ctrl.addWidget(self.btn_run)
 
         self.btn_run_selected = QPushButton("▶ 선택부터 시작 (Shift+F5)")
         self.btn_run_selected.setObjectName("btn_run_selected")
         self.btn_run_selected.setToolTip("현재 목록에서 선택된 시나리오 노드부터 이어서 실행합니다. (단축키: Shift+F5)")
         self.btn_run_selected.clicked.connect(self._on_start_selected_execution)
-        c_layout.addWidget(self.btn_run_selected)
+        row1_ctrl.addWidget(self.btn_run_selected)
 
         self.btn_pause = QPushButton("⏸ 일시정지")
         self.btn_pause.setObjectName("btn_pause")
         self.btn_pause.setEnabled(False)
         self.btn_pause.clicked.connect(self._on_pause_execution)
-        c_layout.addWidget(self.btn_pause)
+        row1_ctrl.addWidget(self.btn_pause)
 
         self.btn_stop = QPushButton("⏹ 정지 (F6)")
         self.btn_stop.setObjectName("btn_stop")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._on_stop_execution)
-        c_layout.addWidget(self.btn_stop)
+        row1_ctrl.addWidget(self.btn_stop)
 
         self.btn_step = QPushButton("⏭ 단일 스텝 (F7)")
         self.btn_step.setToolTip("선택한 시나리오 노드부터 1단계를 실행하고 다음 노드로 포인터를 이동한 뒤 일시정지합니다. (단축키: F7)")
         self.btn_step.clicked.connect(self._on_step_execution)
-        c_layout.addWidget(self.btn_step)
+        row1_ctrl.addWidget(self.btn_step)
+
+        sep_c1 = QFrame()
+        sep_c1.setFrameShape(QFrame.VLine)
+        sep_c1.setFrameShadow(QFrame.Sunken)
+        sep_c1.setStyleSheet("color: #94a3b8; margin: 2px 4px;")
+        row1_ctrl.addWidget(sep_c1)
 
         self.chk_action_overlay = QCheckBox("🎯 조작 시각화")
         self.chk_action_overlay.setChecked(True)
         self.chk_action_overlay.setToolTip("오토 실행 중 조작할 좌표나 범위를 앱 화면 위에 점선 박스/화살표로 시각화 표시합니다.")
         self.chk_action_overlay.toggled.connect(self._on_toggle_action_overlay)
-        c_layout.addWidget(self.chk_action_overlay)
+        row1_ctrl.addWidget(self.chk_action_overlay)
 
         self.chk_floating_stop = QCheckBox("🛑 전역 플로팅 정지")
         self.chk_floating_stop.setChecked(False)
         self.chk_floating_stop.setToolTip("오토 실행 시 화면 최상위에 어디서나 마우스로 원클릭 정지 가능한 빨간색 플로팅 버튼을 자동 표시합니다.")
-        c_layout.addWidget(self.chk_floating_stop)
+        row1_ctrl.addWidget(self.chk_floating_stop)
 
-        c_layout.addSpacing(20)
+        row1_ctrl.addStretch()
 
-        c_layout.addWidget(QLabel("반복:"))
+        self.lbl_run_status = QLabel("대기 중")
+        self.lbl_run_status.setStyleSheet("font-weight: bold; font-size: 10pt;")
+        row1_ctrl.addWidget(self.lbl_run_status)
+
+        c_layout.addLayout(row1_ctrl)
+
+        # ----------------------------------------------------
+        # Row 2: 반복 제어, 루프 간격, 안전/보안(안티밴), 디스플레이(번인 방지)
+        # ----------------------------------------------------
+        row2_ctrl = QHBoxLayout()
+        row2_ctrl.setContentsMargins(0, 0, 0, 0)
+        row2_ctrl.setSpacing(6)
+
+        lbl_loop_icon = QLabel("🔁 반복 실행:")
+        lbl_loop_icon.setStyleSheet("font-weight: bold; font-size: 9pt;")
+        row2_ctrl.addWidget(lbl_loop_icon)
+
         self.spin_loops = QSpinBox()
         self.spin_loops.setRange(0, 99999)
         self.spin_loops.setValue(self.project.loop_count)
         self.spin_loops.setSpecialValueText("무한 반복 (∞)")
         self.spin_loops.valueChanged.connect(self._on_loop_count_changed)
-        c_layout.addWidget(self.spin_loops)
+        row2_ctrl.addWidget(self.spin_loops)
 
         self.lbl_loop_progress = QLabel("(대기)")
         self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #64748b; font-size: 8.5pt;")
         self.lbl_loop_progress.setToolTip("현재 진행 중인 시나리오 루프 횟수")
-        c_layout.addWidget(self.lbl_loop_progress)
+        row2_ctrl.addWidget(self.lbl_loop_progress)
 
-        c_layout.addWidget(QLabel("루프 간격:"))
+        sep_c2 = QFrame()
+        sep_c2.setFrameShape(QFrame.VLine)
+        sep_c2.setFrameShadow(QFrame.Sunken)
+        sep_c2.setStyleSheet("color: #94a3b8; margin: 2px 4px;")
+        row2_ctrl.addWidget(sep_c2)
+
+        row2_ctrl.addWidget(QLabel("루프 간격:"))
         self.spin_loop_delay = QDoubleSpinBox()
         self.spin_loop_delay.setRange(0.0, 3600.0)
         self.spin_loop_delay.setValue(self.project.loop_delay_seconds)
         self.spin_loop_delay.setSuffix(" 초")
         self.spin_loop_delay.valueChanged.connect(self._on_loop_delay_changed)
-        c_layout.addWidget(self.spin_loop_delay)
+        row2_ctrl.addWidget(self.spin_loop_delay)
 
-        c_layout.addSpacing(10)
+        sep_c3 = QFrame()
+        sep_c3.setFrameShape(QFrame.VLine)
+        sep_c3.setFrameShadow(QFrame.Sunken)
+        sep_c3.setStyleSheet("color: #94a3b8; margin: 2px 4px;")
+        row2_ctrl.addWidget(sep_c3)
 
         self.btn_anti_ban = QPushButton("🛡️ 안티밴 설정...")
         self.btn_anti_ban.setObjectName("btn_anti_ban")
         self.btn_anti_ban.setToolTip("타임 지연 및 좌표 오프셋 안티밴 설정을 엽니다.")
         self.btn_anti_ban.clicked.connect(self._on_open_anti_ban_dialog)
-        c_layout.addWidget(self.btn_anti_ban)
+        row2_ctrl.addWidget(self.btn_anti_ban)
 
-        c_layout.addSpacing(10)
+        sep_c4 = QFrame()
+        sep_c4.setFrameShape(QFrame.VLine)
+        sep_c4.setFrameShadow(QFrame.Sunken)
+        sep_c4.setStyleSheet("color: #94a3b8; margin: 2px 4px;")
+        row2_ctrl.addWidget(sep_c4)
 
         # Monitor Burn-in Prevention
         self.chk_anti_burn = QCheckBox("🖥️ 번인 방지")
         self.chk_anti_burn.setChecked(False)
         self.chk_anti_burn.setToolTip("지정한 n분 주기마다 UI 전체를 흑-백으로 서서히 전환하여 모니터 번인을 방지합니다. (조작 간섭 전혀 없음)")
         self.chk_anti_burn.toggled.connect(self._on_toggle_anti_burn)
-        c_layout.addWidget(self.chk_anti_burn)
+        row2_ctrl.addWidget(self.chk_anti_burn)
 
         self.spin_anti_burn_min = QSpinBox()
         self.spin_anti_burn_min.setRange(1, 120)
@@ -860,13 +957,10 @@ class MainWindow(QMainWindow):
         self.spin_anti_burn_min.setSuffix("분")
         self.spin_anti_burn_min.setToolTip("번인 방지 화면 전환 주기 (1~120분)")
         self.spin_anti_burn_min.valueChanged.connect(self._on_anti_burn_interval_changed)
-        c_layout.addWidget(self.spin_anti_burn_min)
+        row2_ctrl.addWidget(self.spin_anti_burn_min)
 
-        c_layout.addStretch()
-
-        self.lbl_run_status = QLabel("대기 중")
-        self.lbl_run_status.setStyleSheet("font-weight: bold; font-size: 10pt;")
-        c_layout.addWidget(self.lbl_run_status)
+        row2_ctrl.addStretch()
+        c_layout.addLayout(row2_ctrl)
 
         # Bottom ToolBar
         self.bottom_toolbar = QToolBar("시나리오 재생 컨트롤", self)
@@ -1255,6 +1349,7 @@ class MainWindow(QMainWindow):
         self.tbl_scenarios.blockSignals(True)
         self.tbl_scenarios.setRowCount(len(self.project.scenarios))
 
+        is_hidden_by_folder = False
         for row, scen in enumerate(self.project.scenarios):
             depth = depths[row] if row < len(depths) else 0
             loop_info = loop_analysis.get(row)
@@ -1265,6 +1360,12 @@ class MainWindow(QMainWindow):
             if not v_item:
                 v_item = QTableWidgetItem(str(row + 1))
                 self.tbl_scenarios.setVerticalHeaderItem(row, v_item)
+
+            if scen.node_type == "folder":
+                self.tbl_scenarios.setRowHidden(row, False)
+                is_hidden_by_folder = getattr(scen, "is_collapsed", False)
+            else:
+                self.tbl_scenarios.setRowHidden(row, is_hidden_by_folder)
 
         self.tbl_scenarios.blockSignals(False)
 
@@ -1283,46 +1384,70 @@ class MainWindow(QMainWindow):
             self.popup_play_bar.refresh_scenarios(self.project.scenarios)
 
     def _update_table_row(self, row: int, scen: Scenario, depth: int = 0, loop_info: Optional[Dict[str, Any]] = None):
+        is_folder = (scen.node_type == "folder")
+        folder_bg = QColor("#fef3c7" if self.current_theme == "light" else "#451a03")
+        folder_txt = QColor("#b45309" if self.current_theme == "light" else "#fde68a")
 
         # 0. Snapshot (레퍼런스 이미지 스냅샷 - 인식조건 이미지 기본값, 없으면 빈칸)
-        eff_ref = scen.get_effective_reference_image(self.project)
-        abs_ref = to_absolute_path(eff_ref) if eff_ref else None
-        if abs_ref and os.path.isfile(abs_ref):
-            pix = QPixmap(abs_ref)
-            if not pix.isNull():
-                thumb = pix.scaled(44, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                lbl_thumb = QLabel()
-                lbl_thumb.setPixmap(thumb)
-                lbl_thumb.setAlignment(Qt.AlignCenter)
-                lbl_thumb.setToolTip(f"📸 레퍼런스 스냅샷: {os.path.basename(abs_ref)}")
-                lbl_thumb.setStyleSheet("background-color: transparent;")
+        if is_folder:
+            self.tbl_scenarios.setCellWidget(row, 0, None)
+            it_empty = QTableWidgetItem("")
+            it_empty.setBackground(folder_bg)
+            it_empty.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.tbl_scenarios.setItem(row, 0, it_empty)
+        else:
+            eff_ref = scen.get_effective_reference_image(self.project)
+            abs_ref = to_absolute_path(eff_ref) if eff_ref else None
+            if abs_ref and os.path.isfile(abs_ref):
+                pix = QPixmap(abs_ref)
+                if not pix.isNull():
+                    thumb = pix.scaled(44, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    lbl_thumb = QLabel()
+                    lbl_thumb.setPixmap(thumb)
+                    lbl_thumb.setAlignment(Qt.AlignCenter)
+                    lbl_thumb.setToolTip(f"📸 레퍼런스 스냅샷: {os.path.basename(abs_ref)}")
+                    lbl_thumb.setStyleSheet("background-color: transparent;")
 
-                box = QWidget()
-                bl = QHBoxLayout(box)
-                bl.setContentsMargins(1, 1, 1, 1)
-                bl.setAlignment(Qt.AlignCenter)
-                bl.addWidget(lbl_thumb)
-                self.tbl_scenarios.setCellWidget(row, 0, box)
+                    box = QWidget()
+                    bl = QHBoxLayout(box)
+                    bl.setContentsMargins(1, 1, 1, 1)
+                    bl.setAlignment(Qt.AlignCenter)
+                    bl.addWidget(lbl_thumb)
+                    self.tbl_scenarios.setCellWidget(row, 0, box)
+                else:
+                    self.tbl_scenarios.setCellWidget(row, 0, None)
+                    it_empty = QTableWidgetItem("")
+                    it_empty.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                    self.tbl_scenarios.setItem(row, 0, it_empty)
             else:
                 self.tbl_scenarios.setCellWidget(row, 0, None)
                 it_empty = QTableWidgetItem("")
                 it_empty.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 self.tbl_scenarios.setItem(row, 0, it_empty)
-        else:
-            self.tbl_scenarios.setCellWidget(row, 0, None)
-            it_empty = QTableWidgetItem("")
-            it_empty.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            self.tbl_scenarios.setItem(row, 0, it_empty)
 
         # 1. Scenario # (시나리오 고유 번호)
-        it_uid = QTableWidgetItem(f"s{scen.scenario_number}")
-        it_uid.setTextAlignment(Qt.AlignCenter)
-        it_uid.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-        it_uid.setToolTip(f"시나리오 고유 ID: s{scen.scenario_number}")
-        self.tbl_scenarios.setItem(row, 1, it_uid)
+        if is_folder:
+            it_uid = QTableWidgetItem(f"📁s{scen.scenario_number}")
+            it_uid.setTextAlignment(Qt.AlignCenter)
+            it_uid.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            it_uid.setToolTip(f"그룹 폴더: s{scen.scenario_number}")
+            it_uid.setForeground(folder_txt)
+            it_uid.setBackground(folder_bg)
+            f = it_uid.font()
+            f.setBold(True)
+            it_uid.setFont(f)
+            self.tbl_scenarios.setItem(row, 1, it_uid)
+        else:
+            it_uid = QTableWidgetItem(f"s{scen.scenario_number}")
+            it_uid.setTextAlignment(Qt.AlignCenter)
+            it_uid.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            it_uid.setToolTip(f"시나리오 고유 ID: s{scen.scenario_number}")
+            self.tbl_scenarios.setItem(row, 1, it_uid)
 
         # 2. Enabled Checkbox
         chk_widget = QWidget()
+        if is_folder:
+            chk_widget.setStyleSheet(f"background-color: {folder_bg.name()};")
         chk_layout = QHBoxLayout(chk_widget)
         chk_layout.setContentsMargins(0, 0, 0, 0)
         chk_layout.setAlignment(Qt.AlignCenter)
@@ -1333,7 +1458,16 @@ class MainWindow(QMainWindow):
         self.tbl_scenarios.setCellWidget(row, 2, chk_widget)
 
         # 3. Name with Loop Hierarchy UI, distinct pair colors, and orphaned warnings
-        if scen.node_type == "loop_start":
+        if is_folder:
+            collapse_icon = "▶ " if getattr(scen, "is_collapsed", False) else "▼ "
+            it_name = QTableWidgetItem(f"{collapse_icon}📁 [폴더] {scen.name}")
+            it_name.setForeground(folder_txt)
+            it_name.setBackground(folder_bg)
+            it_name.setToolTip(f"📁 그룹 폴더: {scen.name} (더블 클릭하여 펼치기/접기)")
+            f = it_name.font()
+            f.setBold(True)
+            it_name.setFont(f)
+        elif scen.node_type == "loop_start":
             if loop_info and not loop_info.get("has_pair", True):
                 # 짝 소실 경고!
                 loop_desc = scen.get_loop_summary()
@@ -1377,52 +1511,75 @@ class MainWindow(QMainWindow):
 
         # 4. Condition Module (Eye)
         self.tbl_scenarios.setCellWidget(row, 4, None)
-        eff_cond = scen.get_effective_condition(self.project)
-        if scen.node_type == "loop_end":
-            cond_text = "-"
-        elif eff_cond:
-            c_num = getattr(eff_cond, "condition_number", "")
-            prefix = f"[C{c_num}] " if (c_num and getattr(scen, "condition_id", None)) else "[인스턴트] "
-            cond_text = f"{prefix}{eff_cond.name} ({len(eff_cond.points)}pt)"
+        if is_folder:
+            it_cond = QTableWidgetItem("(그룹 폴더)")
+            it_cond.setForeground(folder_txt)
+            it_cond.setBackground(folder_bg)
+            it_cond.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            it_cond.setToolTip("하위 시나리오들을 시각적으로 묶어주는 그룹 폴더입니다. (실행 시 즉시 통과)")
+            self.tbl_scenarios.setItem(row, 4, it_cond)
         else:
-            cond_text = "(조건 없음)"
-        it_cond = QTableWidgetItem(cond_text)
-        if eff_cond and getattr(scen, "condition_id", None):
-            it_cond.setForeground(QColor("#2563eb" if self.current_theme == "light" else "#60a5fa"))
-        elif scen.node_type != "normal":
-            it_cond.setForeground(QColor("#64748b"))
-        it_cond.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-        it_cond.setToolTip("더블 클릭하여 인식조건 모듈 교체")
-        self.tbl_scenarios.setItem(row, 4, it_cond)
+            eff_cond = scen.get_effective_condition(self.project)
+            if scen.node_type == "loop_end":
+                cond_text = "-"
+            elif eff_cond:
+                c_num = getattr(eff_cond, "condition_number", "")
+                prefix = f"[C{c_num}] " if (c_num and getattr(scen, "condition_id", None)) else "[인스턴트] "
+                cond_text = f"{prefix}{eff_cond.name} ({len(eff_cond.points)}pt)"
+            else:
+                cond_text = "(조건 없음)"
+            it_cond = QTableWidgetItem(cond_text)
+            if eff_cond and getattr(scen, "condition_id", None):
+                it_cond.setForeground(QColor("#2563eb" if self.current_theme == "light" else "#60a5fa"))
+            elif scen.node_type != "normal":
+                it_cond.setForeground(QColor("#64748b"))
+            it_cond.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            it_cond.setToolTip("더블 클릭하여 인식조건 모듈 교체")
+            self.tbl_scenarios.setItem(row, 4, it_cond)
 
         # 5. ActionSequence Module (Hand)
         self.tbl_scenarios.setCellWidget(row, 5, None)
-        eff_acts = scen.get_effective_actions(self.project)
-        if scen.node_type == "loop_end":
-            act_text = "-"
-        elif getattr(scen, "sequence_id", None):
-            seq = self.project.find_action_sequence(scen.sequence_id)
-            if seq:
-                s_num = getattr(seq, "sequence_number", "")
-                prefix = f"[A{s_num}] " if s_num else ""
-                act_text = f"{prefix}{seq.name} ({len(eff_acts)}개)"
-            else:
-                act_text = f"{len(eff_acts)}개 액션"
-        elif eff_acts:
-            act_text = f"[인스턴트] ({len(eff_acts)}개)"
+        if is_folder:
+            it_act = QTableWidgetItem("(하위 항목 정리용)")
+            it_act.setForeground(folder_txt)
+            it_act.setBackground(folder_bg)
+            it_act.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            it_act.setToolTip("시나리오 목록의 가독성을 위한 폴더로 실제 동작에는 영향을 주지 않습니다.")
+            self.tbl_scenarios.setItem(row, 5, it_act)
         else:
-            act_text = "(액션 없음)"
-        it_act = QTableWidgetItem(act_text)
-        if getattr(scen, "sequence_id", None):
-            it_act.setForeground(QColor("#16a34a" if self.current_theme == "light" else "#4ade80"))
-        elif scen.node_type != "normal":
-            it_act.setForeground(QColor("#64748b"))
-        it_act.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-        it_act.setToolTip("더블 클릭하여 액션시퀀스 모듈 교체")
-        self.tbl_scenarios.setItem(row, 5, it_act)
+            eff_acts = scen.get_effective_actions(self.project)
+            if scen.node_type == "loop_end":
+                act_text = "-"
+            elif getattr(scen, "sequence_id", None):
+                seq = self.project.find_action_sequence(scen.sequence_id)
+                if seq:
+                    s_num = getattr(seq, "sequence_number", "")
+                    prefix = f"[A{s_num}] " if s_num else ""
+                    act_text = f"{prefix}{seq.name} ({len(eff_acts)}개)"
+                else:
+                    act_text = f"{len(eff_acts)}개 액션"
+            elif eff_acts:
+                act_text = f"[인스턴트] ({len(eff_acts)}개)"
+            else:
+                act_text = "(액션 없음)"
+            it_act = QTableWidgetItem(act_text)
+            if getattr(scen, "sequence_id", None):
+                it_act.setForeground(QColor("#16a34a" if self.current_theme == "light" else "#4ade80"))
+            elif scen.node_type != "normal":
+                it_act.setForeground(QColor("#64748b"))
+            it_act.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            it_act.setToolTip("더블 클릭하여 액션시퀀스 모듈 교체")
+            self.tbl_scenarios.setItem(row, 5, it_act)
 
         # 6. Branch Summary (On Match / On Mismatch / Loop)
-        if scen.node_type == "loop_start":
+        if is_folder:
+            it_branch = QTableWidgetItem("-")
+            it_branch.setForeground(folder_txt)
+            it_branch.setBackground(folder_bg)
+            it_branch.setTextAlignment(Qt.AlignCenter)
+            it_branch.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.tbl_scenarios.setItem(row, 6, it_branch)
+        elif scen.node_type == "loop_start":
             it_branch = QTableWidgetItem("🔁 회차 반복 제어")
             it_branch.setForeground(QColor("#2563eb" if self.current_theme == "light" else "#60a5fa"))
         elif scen.node_type == "loop_end":
@@ -1446,9 +1603,9 @@ class MainWindow(QMainWindow):
                 mm_str = "정지"
             it_branch = QTableWidgetItem(f"{m_str} / {mm_str}")
 
-        it_branch.setTextAlignment(Qt.AlignCenter)
-        it_branch.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-        self.tbl_scenarios.setItem(row, 6, it_branch)
+            it_branch.setTextAlignment(Qt.AlignCenter)
+            it_branch.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.tbl_scenarios.setItem(row, 6, it_branch)
 
     def _get_jump_display(self, target_id: str) -> str:
         if not target_id:
@@ -1754,14 +1911,24 @@ class MainWindow(QMainWindow):
         curr_row = self.tbl_scenarios.rowAt(pos.y())
         if 0 <= curr_row < len(self.project.scenarios):
             scen = self.project.scenarios[curr_row]
-            act_pick_cond = menu.addAction(f"👁️ [s{scen.scenario_number}] 인식조건 모듈 교체...")
-            act_pick_cond.triggered.connect(lambda: self._show_condition_module_picker(scen))
-            act_pick_seq = menu.addAction(f"✋ [s{scen.scenario_number}] 액션시퀀스 모듈 교체...")
-            act_pick_seq.triggered.connect(lambda: self._show_sequence_module_picker(scen))
-            menu.addSeparator()
+            if scen.node_type == "folder":
+                toggle_txt = "📂 폴더 펼치기" if getattr(scen, "is_collapsed", False) else "📁 폴더 접기"
+                act_toggle = menu.addAction(toggle_txt)
+                act_toggle.triggered.connect(lambda checked, s=scen: self._toggle_folder_collapse(s))
+                act_rename = menu.addAction("✏️ 폴더 이름 변경...")
+                act_rename.triggered.connect(lambda checked, s=scen: self._rename_folder(s))
+                menu.addSeparator()
+            else:
+                act_pick_cond = menu.addAction(f"👁️ [s{scen.scenario_number}] 인식조건 모듈 교체...")
+                act_pick_cond.triggered.connect(lambda checked, s=scen: self._show_condition_module_picker(s))
+                act_pick_seq = menu.addAction(f"✋ [s{scen.scenario_number}] 액션시퀀스 모듈 교체...")
+                act_pick_seq.triggered.connect(lambda checked, s=scen: self._show_sequence_module_picker(s))
+                menu.addSeparator()
 
         act_add = menu.addAction("➕ 새 시나리오 추가 (조합형)")
         act_add.triggered.connect(self._on_add_scenario)
+        act_add_folder = menu.addAction("📁 새 그룹 폴더 추가")
+        act_add_folder.triggered.connect(self._on_add_folder)
         act_dup = menu.addAction("📋 시나리오 복제")
         act_dup.triggered.connect(self._on_duplicate_scenario)
         act_del = menu.addAction("🗑️ 시나리오 삭제")
@@ -1797,6 +1964,9 @@ class MainWindow(QMainWindow):
         if not (0 <= row < len(self.project.scenarios)):
             return
         scen = self.project.scenarios[row]
+        if scen.node_type == "folder":
+            self._toggle_folder_collapse(scen)
+            return
         if col == 0:
             self.tbl_scenarios.selectRow(row)
             if hasattr(self, "inspector") and self.inspector:
@@ -2013,6 +2183,43 @@ class MainWindow(QMainWindow):
         if hasattr(self, "modules_widget"):
             self.modules_widget.refresh_modules()
         self.tbl_scenarios.selectRow(len(self.project.scenarios) - 1)
+
+    def _on_add_folder(self):
+        """Add an organizational folder node to group scenarios."""
+        fld_num = self.project.get_next_scenario_number()
+        self._push_scenario_undo_state(f"폴더 #{fld_num} 추가")
+        new_fld = Scenario(
+            scenario_number=fld_num,
+            name=f"그룹 폴더 {fld_num}",
+            node_type="folder",
+            enabled=True
+        )
+        insert_idx = len(self.project.scenarios)
+        rows = self.tbl_scenarios.selectionModel().selectedRows()
+        if rows:
+            insert_idx = rows[0].row() + 1
+        self.project.scenarios.insert(insert_idx, new_fld)
+        self.project.renumber_steps()
+        self._refresh_scenario_table()
+        self.tbl_scenarios.selectRow(insert_idx)
+        self.status_bar.showMessage(f"📁 새 그룹 폴더 's{new_fld.scenario_number}'가 추가되었습니다.", 3000)
+
+    def _toggle_folder_collapse(self, scen: Scenario):
+        """Toggle collapse/expand state of a folder node."""
+        scen.is_collapsed = not getattr(scen, "is_collapsed", False)
+        self._refresh_scenario_table()
+        state_str = "접힘" if scen.is_collapsed else "펼침"
+        self.status_bar.showMessage(f"📁 폴더 '{scen.name}' {state_str}", 2000)
+
+    def _rename_folder(self, scen: Scenario):
+        """Prompt to rename a folder node."""
+        name, ok = QInputDialog.getText(self, "폴더 이름 변경", "폴더 이름을 입력하세요:", text=scen.name)
+        if ok and name.strip():
+            self._push_scenario_undo_state(f"폴더 '{scen.name}' 이름 변경")
+            scen.name = name.strip()
+            self._refresh_scenario_table()
+            if hasattr(self, "inspector") and self.inspector.current_scenario and self.inspector.current_scenario.id == scen.id:
+                self.inspector.edit_name.setText(scen.name)
 
     def _on_add_loop_block(self):
         """Create a complete loop block (Loop Start + inner child + Loop End)."""
@@ -2284,22 +2491,8 @@ class MainWindow(QMainWindow):
                 f"(우클릭: 해상도 직접 수동 입력)"
             )
 
-    def _on_register_authoring_image(self):
-        """Register a reference screenshot to automatically determine and track project authoring resolution."""
-        start_dir = ""
-        cur_ref = getattr(self.project, "reference_image_path", None)
-        if cur_ref:
-            abs_p = to_absolute_path(cur_ref)
-            if abs_p and os.path.exists(abs_p):
-                start_dir = os.path.dirname(abs_p)
-
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "제작 해상도 추적용 레퍼런스 이미지 선택",
-            start_dir,
-            "이미지 파일 (*.png *.jpg *.jpeg *.bmp *.webp);;모든 파일 (*.*)"
-        )
-        if not file_path:
+    def _apply_authoring_image(self, file_path: str):
+        if not file_path or not os.path.exists(file_path):
             return
 
         pix = QPixmap(file_path)
@@ -2333,16 +2526,60 @@ class MainWindow(QMainWindow):
         if hasattr(self, "status_bar"):
             self.status_bar.showMessage(f"제작 기준 해상도 설정됨: {img_w}×{img_h} ({os.path.basename(file_path)})", 4000)
 
-    def _on_authoring_res_context_menu(self, pos):
-        """Context menu for authoring resolution display and button."""
+    def _on_register_authoring_image(self):
+        """Register a reference screenshot via file dialog."""
+        start_dir = ""
+        cur_ref = getattr(self.project, "reference_image_path", None)
+        if cur_ref:
+            abs_p = to_absolute_path(cur_ref)
+            if abs_p and os.path.exists(abs_p):
+                start_dir = os.path.dirname(abs_p)
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "제작 해상도 추적용 레퍼런스 이미지 선택",
+            start_dir,
+            "이미지 파일 (*.png *.jpg *.jpeg *.bmp *.webp);;모든 파일 (*.*)"
+        )
+        if file_path:
+            self._apply_authoring_image(file_path)
+
+    def _on_select_authoring_image_from_gallery(self):
+        """Select authoring reference image from Reference Gallery dialog."""
+        from ui.reference_gallery_dialog import ReferenceGalleryDialog
+        dlg = ReferenceGalleryDialog(project=self.project, target_hwnd=self.target_hwnd, picker_mode=True, parent=self)
+        if dlg.exec_() == QDialog.Accepted:
+            sel_path = dlg.get_selected_image_path()
+            if sel_path:
+                self._apply_authoring_image(sel_path)
+
+    def _create_authoring_menu(self) -> QMenu:
+        """Create popup menu for authoring reference image options."""
         menu = QMenu(self)
-        act_reg = menu.addAction("🖼️ 기준 이미지 등록/변경...")
-        act_reg.triggered.connect(self._on_register_authoring_image)
+        act_gallery = menu.addAction("🖼️ 레퍼런스 갤러리에서 선택...")
+        act_gallery.triggered.connect(self._on_select_authoring_image_from_gallery)
+        act_file = menu.addAction("📂 파일 탐색기에서 선택...")
+        act_file.triggered.connect(self._on_register_authoring_image)
+        menu.addSeparator()
         act_manual = menu.addAction("📐 해상도 수동 직접 입력...")
         act_manual.triggered.connect(self._on_manual_authoring_resolution)
         if getattr(self.project, "reference_image_path", None):
+            menu.addSeparator()
             act_clear = menu.addAction("❌ 기준 이미지 등록 해제")
             act_clear.triggered.connect(self._on_clear_authoring_image)
+        return menu
+
+    def _on_show_authoring_menu(self):
+        """Show dropdown menu on clicking the register reference image button."""
+        menu = self._create_authoring_menu()
+        if hasattr(self, "btn_register_ref_img"):
+            menu.exec_(self.btn_register_ref_img.mapToGlobal(QPoint(0, self.btn_register_ref_img.height())))
+        else:
+            menu.exec_(QCursor.pos())
+
+    def _on_authoring_res_context_menu(self, pos):
+        """Context menu for authoring resolution display and button."""
+        menu = self._create_authoring_menu()
         menu.exec_(QCursor.pos())
 
     def _on_manual_authoring_resolution(self):

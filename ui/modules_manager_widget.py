@@ -8,13 +8,14 @@ from typing import Optional, List, Dict, Any
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QSplitter,
-    QMessageBox, QInputDialog, QFrame, QAbstractItemView
+    QMessageBox, QInputDialog, QFrame, QAbstractItemView, QSizePolicy
 )
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QSize
 from PyQt5.QtGui import QColor, QFont
 
 from core.models import Project, Condition, ActionSequence
 from core.path_utils import to_absolute_path
+from ui.widgets.flow_layout import FlowLayout
 
 
 class ModulesManagerWidget(QWidget):
@@ -54,35 +55,37 @@ class ModulesManagerWidget(QWidget):
         cf_layout.setContentsMargins(6, 6, 6, 6)
         cf_layout.setSpacing(4)
 
-        cond_header = QHBoxLayout()
         lbl_cond_title = QLabel("👁️ 인식조건 모듈 목록 (Conditions)")
         lbl_cond_title.setStyleSheet("font-weight: bold; font-size: 9pt; color: #2563eb;")
-        cond_header.addWidget(lbl_cond_title)
-        cond_header.addStretch()
+        cf_layout.addWidget(lbl_cond_title)
+
+        cond_btn_bar = QWidget()
+        cond_btn_bar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        cond_btn_layout = FlowLayout(cond_btn_bar, margin=0, spacing=4)
 
         btn_add_cond = QPushButton("➕ 새 조건")
         btn_add_cond.clicked.connect(self._on_add_condition)
-        cond_header.addWidget(btn_add_cond)
+        cond_btn_layout.addWidget(btn_add_cond)
 
         btn_dup_cond = QPushButton("📋 복제")
         btn_dup_cond.clicked.connect(self._on_duplicate_condition)
-        cond_header.addWidget(btn_dup_cond)
+        cond_btn_layout.addWidget(btn_dup_cond)
 
         btn_edit_cond = QPushButton("🎯 편집")
         btn_edit_cond.clicked.connect(self._on_edit_condition)
-        cond_header.addWidget(btn_edit_cond)
+        cond_btn_layout.addWidget(btn_edit_cond)
 
         btn_del_cond = QPushButton("🗑️ 삭제")
         btn_del_cond.setStyleSheet("color: #ef4444;")
         btn_del_cond.clicked.connect(self._on_delete_condition)
-        cond_header.addWidget(btn_del_cond)
+        cond_btn_layout.addWidget(btn_del_cond)
 
         btn_clean_unused_cond = QPushButton("🧹 안쓰이는 노드 제거")
         btn_clean_unused_cond.setToolTip("시나리오에서 전혀 사용되지 않는 미사용 인식 조건 노드를 일괄 삭제합니다.")
         btn_clean_unused_cond.clicked.connect(self._on_clean_unused_conditions)
-        cond_header.addWidget(btn_clean_unused_cond)
+        cond_btn_layout.addWidget(btn_clean_unused_cond)
 
-        cf_layout.addLayout(cond_header)
+        cf_layout.addWidget(cond_btn_bar)
 
         self.tbl_conditions = QTableWidget()
         self.tbl_conditions.setColumnCount(6)
@@ -115,35 +118,37 @@ class ModulesManagerWidget(QWidget):
         sf_layout.setContentsMargins(6, 6, 6, 6)
         sf_layout.setSpacing(4)
 
-        seq_header = QHBoxLayout()
         lbl_seq_title = QLabel("✋ 액션시퀀스 모듈 목록 (Action Sequences)")
         lbl_seq_title.setStyleSheet("font-weight: bold; font-size: 9pt; color: #16a34a;")
-        seq_header.addWidget(lbl_seq_title)
-        seq_header.addStretch()
+        sf_layout.addWidget(lbl_seq_title)
+
+        seq_btn_bar = QWidget()
+        seq_btn_bar.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        seq_btn_layout = FlowLayout(seq_btn_bar, margin=0, spacing=4)
 
         btn_add_seq = QPushButton("➕ 새 시퀀스")
         btn_add_seq.clicked.connect(self._on_add_sequence)
-        seq_header.addWidget(btn_add_seq)
+        seq_btn_layout.addWidget(btn_add_seq)
 
         btn_dup_seq = QPushButton("📋 복제")
         btn_dup_seq.clicked.connect(self._on_duplicate_sequence)
-        seq_header.addWidget(btn_dup_seq)
+        seq_btn_layout.addWidget(btn_dup_seq)
 
         btn_edit_seq = QPushButton("🎯 편집")
         btn_edit_seq.clicked.connect(self._on_edit_sequence)
-        seq_header.addWidget(btn_edit_seq)
+        seq_btn_layout.addWidget(btn_edit_seq)
 
         btn_del_seq = QPushButton("🗑️ 삭제")
         btn_del_seq.setStyleSheet("color: #ef4444;")
         btn_del_seq.clicked.connect(self._on_delete_sequence)
-        seq_header.addWidget(btn_del_seq)
+        seq_btn_layout.addWidget(btn_del_seq)
 
         btn_clean_unused_seq = QPushButton("🧹 안쓰이는 노드 제거")
         btn_clean_unused_seq.setToolTip("시나리오 및 조건에서 전혀 사용되지 않는 미사용 액션 시퀀스 노드를 일괄 삭제합니다.")
         btn_clean_unused_seq.clicked.connect(self._on_clean_unused_sequences)
-        seq_header.addWidget(btn_clean_unused_seq)
+        seq_btn_layout.addWidget(btn_clean_unused_seq)
 
-        sf_layout.addLayout(seq_header)
+        sf_layout.addWidget(seq_btn_bar)
 
         self.tbl_sequences = QTableWidget()
         self.tbl_sequences.setColumnCount(5)
@@ -491,7 +496,9 @@ class ModulesManagerWidget(QWidget):
             act_del = menu.addAction("🗑️ 삭제")
             act_del.triggered.connect(self._on_delete_sequence)
 
-        menu.addSeparator()
         act_clean = menu.addAction("🧹 안쓰이는 액션 노드 제거")
         act_clean.triggered.connect(self._on_clean_unused_sequences)
         menu.exec_(self.tbl_sequences.viewport().mapToGlobal(pos))
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(220, 200)
