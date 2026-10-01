@@ -1,0 +1,43 @@
+[일시 / Timestamp]
+2026-10-01 19:37:53
+
+[요청 내용 / User Request]
+- 마지막 기록 참고해서 타겟창 자동 추적해서 등록하기.
+- 시나리오 목록에 뜨는 스냅샷은 조건인식에서 사용하는 레퍼런스 이미지를 연동하는게 기본값.
+- 시나리오 전체 루프 한번 도는 동안 몇분 걸리는지 로그와 Ui 하단 루프회수 옆에 표기.
+- 모니터 버닝 방지를 위해 조작간섭없이 n분 주기로 ui전체를 흑-백으로 서서히 전환했다가 돌아오는 기능 추가. 기능 온오프 가능.
+
+[결과 요약 / Summary of Results]
+1. 타겟창 자동 추적 및 자동 등록 기능 구현
+   - MainWindow._auto_track_target_window() 구현: 앱 실행 시, 타겟 창 소실 감지 시, 프로젝트 파일 로드 시 마지막 기록된 target_window_title을 기반으로 현재 실행 중인 윈도우 목록을 검색하여 자동으로 매칭 및 타겟창 등록 완료.
+   - 앱 종료 시 및 타겟 선택 시 last_target_title을 app_config에 영구 저장 및 복원.
+
+2. 시나리오 목록 스냅샷의 인식 조건 레퍼런스 이미지 연동 기본값 보장
+   - core/models.py의 Scenario.get_effective_reference_image()를 기반으로, 시나리오의 reference_image_path가 None일 때 연동된 인식조건(Condition)의 레퍼런스 이미지를 1순위 기본값으로 반환하도록 동작 보장.
+   - ui/inspector_widget.py의 _on_node_snapshot_clicked() 및 _set_condition_reference_image() 개선: 스냅샷 클릭 시 나타나는 기본 옵션("조건 인식 레퍼런스 이미지 선택 (기본 연동)", "현재 화면 캡처하여 조건 레퍼런스로 지정 (기본 연동)")을 선택하면 활성 조건의 reference_image_path에 저장하고 시나리오 노드의 고유 경로는 None으로 유지하여 영구적으로 조건 이미지와 동기화되도록 구현.
+   - 조건과 분리된 시나리오 고유 스냅샷은 별도 고급 서브메뉴("📌 [고급] 노드 전용 분리 스냅샷 지정")로 분리 제공하고 언제든 "🔄 조건 인식 레퍼런스 이미지 연동으로 복구 (기본값)" 가능하도록 지원.
+   - _on_field_changed()에서 sig_scenario_changed 시그널을 방출하고 MainWindow._on_inspector_scenario_changed()에서 조건 레퍼런스 이미지 변경을 프로젝트 원본 시나리오에 실시간 동기화하여 시나리오 테이블 목록(0번 컬럼)에 즉각 반영.
+
+3. 시나리오 전체 루프 소요 시간 실시간 계산, 로그 출력 및 UI 하단 표기
+   - core/runner.py의 WorkflowRunner에 sig_loop_completed(int, int, float) 시그널 추가 및 루프 시작 시각 기록, 1회 루프 종료 시 소요 시간 계산 및 로그("⏱️ [루프 소요 시간] ...") 출력.
+   - 시간/분/초 단위 변환 유틸리티 WorkflowRunner._format_duration() 구현 (소수점 초, 분 초, 시간 분 초 지원).
+   - ui/main_window.py 하단 루프 진행 라벨(lbl_loop_progress)에 "이전 루프: X분 Y초" 및 루프 완료 시 "소요: X분 Y초" 실시간 표기 연동.
+
+4. 모니터 번인 방지 오버레이 및 온/오프 제어 기능 구현
+   - ui/anti_burn_in_overlay.py 생성: Qt.WA_TransparentForMouseEvents 및 Qt.WA_NoSystemBackground, Qt.NoFocus 적용으로 사용자 마우스 클릭/드래그 및 매크로 조작에 일체 간섭하지 않는 투과형 오버레이 위젯 구현.
+   - 30 FPS 부드러운 애니메이션으로 검정 페이드인 -> 홀드 -> 페이드아웃 -> 흰색 페이드인 -> 홀드 -> 페이드아웃 -> 투명 복귀 사이클 수행.
+   - ui/main_window.py 하단 컨트롤 바에 번인 방지 체크박스(chk_anti_burn) 및 n분 주기 스핀박스(spin_anti_burn_min) 배치, app_config 저장 및 복원 연동.
+
+5. 버전 관리 및 테스트 검증
+   - core/version.py의 __version__을 261001.1935로 갱신.
+   - tests/test_user_enhancements_20261001.py 신규 작성 (타겟창 자동 추적, 스냅샷 기본 연동, 소요 시간 포맷 및 시그널, 번인 방지 오버레이 투과성 및 단계 전이 검증).
+   - python -m unittest discover -b -s tests 실행하여 1,275개 전체 테스트 스위트 전건 통과 확인.
+
+[영향 파일 목록 / Affected Files]
+- core/version.py
+- core/runner.py
+- ui/anti_burn_in_overlay.py
+- ui/main_window.py
+- ui/inspector_widget.py
+- tests/test_user_enhancements_20261001.py
+- history/2026-10-01_193753_타겟창_자동추적_스냅샷연동_루프시간_번인방지.txt

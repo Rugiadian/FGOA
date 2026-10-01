@@ -61,6 +61,7 @@ class InspectorWidget(QWidget):
 
         self._init_ui()
         self._init_shortcuts()
+        self.hide()
 
     def set_project(self, project: Project):
         self.project = project
@@ -1223,15 +1224,40 @@ class InspectorWidget(QWidget):
                     f"🎯 액션 좌표 지정 레퍼런스 (가로 50px)\n클릭 시 액션 좌표 지정 작업창 열기\n파일: {fname}"
                 )
 
+    def _set_condition_reference_image(self, rel_path: str):
+        """Sets reference image on active condition and resets node-specific snapshot to maintain default linking."""
+        if not self.current_scenario:
+            return
+        eff_cond = self._get_active_condition()
+        if eff_cond is None:
+            new_cond = Condition(name=f"{self.current_scenario.name} 인식조건", reference_image_path=rel_path)
+            self.current_scenario.condition = new_cond
+            if hasattr(self, "chk_has_condition"):
+                self.chk_has_condition.setChecked(True)
+        else:
+            eff_cond.reference_image_path = rel_path
+            if getattr(self.current_scenario, "condition_id", None) and self.project:
+                c_mod = self.project.find_condition(self.current_scenario.condition_id)
+                if c_mod:
+                    c_mod.reference_image_path = rel_path
+
+        # 노드 고유 스냅샷은 None으로 설정하여 조건 레퍼런스 이미지 자동 연동(기본값 유지)
+        self.current_scenario.reference_image_path = None
+        self._on_field_changed()
+
     def _on_node_snapshot_clicked(self):
         """Displays options menu when user clicks the scenario node snapshot box."""
         if not self.current_scenario:
             return
 
         menu = QMenu(self)
-        act_gallery = menu.addAction("🖼️ 레퍼런스 갤러리에서 선택...")
-        act_capture = menu.addAction("📸 현재 게임창 캡처하여 지정...")
+        act_gallery = menu.addAction("🖼️ 조건 인식 레퍼런스 이미지 선택 (기본 연동)...")
+        act_capture = menu.addAction("📸 현재 화면 캡처하여 조건 레퍼런스로 지정 (기본 연동)...")
         menu.addSeparator()
+
+        sub_custom = menu.addMenu("📌 [고급] 노드 전용 분리 스냅샷 지정")
+        act_gallery_custom = sub_custom.addAction("🖼️ 갤러리에서 노드 전용 스냅샷 선택...")
+        act_capture_custom = sub_custom.addAction("📸 타겟 창 캡처하여 노드 전용 스냅샷 지정...")
 
         eff_cond = self._get_active_condition()
         if eff_cond and getattr(eff_cond, "reference_image_path", None):
@@ -1240,23 +1266,26 @@ class InspectorWidget(QWidget):
             act_edit_cond_img = None
 
         if self.current_scenario.reference_image_path is not None:
-            act_reset_cond = menu.addAction("🔄 인식 조건 레퍼런스 이미지로 초기화 (기본값)")
+            act_reset_cond = menu.addAction("🔄 조건 인식 레퍼런스 이미지 연동으로 복구 (기본값)")
         else:
             act_reset_cond = None
 
         act_clear = menu.addAction("❌ 스냅샷 비우기 (빈칸으로 두기)")
 
         selected = menu.exec_(QCursor.pos())
-        if selected == act_gallery:
+        if selected in (act_gallery, act_gallery_custom):
             from ui.reference_gallery_dialog import ReferenceGalleryDialog
             dlg = ReferenceGalleryDialog(self.project, target_hwnd=self.target_hwnd, picker_mode=True, parent=self)
             if dlg.exec_() == QDialog.Accepted:
                 sel_path = dlg.get_selected_image_path()
                 if sel_path and os.path.exists(sel_path):
-                    self.current_scenario.reference_image_path = to_relative_path(sel_path)
-                    self._on_field_changed()
-                    self._update_reference_thumbnails()
-        elif selected == act_capture:
+                    rel_path = to_relative_path(sel_path)
+                    if selected == act_gallery:
+                        self._set_condition_reference_image(rel_path)
+                    else:
+                        self.current_scenario.reference_image_path = rel_path
+                        self._on_field_changed()
+        elif selected in (act_capture, act_capture_custom):
             if not self.target_hwnd:
                 QMessageBox.warning(self, "타겟 창 없음", "타겟 게임 창이 선택되어 있지 않습니다.")
                 return
@@ -1271,10 +1300,13 @@ class InspectorWidget(QWidget):
                 ref_path = os.path.join(save_dir, fname)
                 img.save(ref_path, "PNG")
                 rel_path = to_relative_path(ref_path)
-                self.current_scenario.reference_image_path = rel_path
-                self._on_field_changed()
-                self._update_reference_thumbnails()
-                QMessageBox.information(self, "캡처 완료", f"타겟 창 화면을 캡처하여 노드 스냅샷으로 저장했습니다:\n{fname}")
+                if selected == act_capture:
+                    self._set_condition_reference_image(rel_path)
+                    QMessageBox.information(self, "캡처 완료", f"타겟 창 화면을 캡처하여 조건 레퍼런스(스냅샷 기본 연동)로 저장했습니다:\n{fname}")
+                else:
+                    self.current_scenario.reference_image_path = rel_path
+                    self._on_field_changed()
+                    QMessageBox.information(self, "캡처 완료", f"타겟 창 화면을 캡처하여 노드 전용 스냅샷으로 저장했습니다:\n{fname}")
             else:
                 QMessageBox.warning(self, "캡처 실패", "타겟 창을 캡처할 수 없습니다.")
         elif act_edit_cond_img and selected == act_edit_cond_img:
@@ -1282,11 +1314,9 @@ class InspectorWidget(QWidget):
         elif act_reset_cond and selected == act_reset_cond:
             self.current_scenario.reference_image_path = None
             self._on_field_changed()
-            self._update_reference_thumbnails()
         elif selected == act_clear:
             self.current_scenario.reference_image_path = ""
             self._on_field_changed()
-            self._update_reference_thumbnails()
 
     def _on_action_log_toggled(self, checked: bool):
         # Kept for backward compatibility
@@ -1952,6 +1982,7 @@ class InspectorWidget(QWidget):
 
         self._update_reference_thumbnails()
         self._mark_dirty()
+        self.sig_scenario_changed.emit(self.current_scenario)
 
     def _on_node_type_changed(self):
         if self._is_loading or not self.current_scenario:

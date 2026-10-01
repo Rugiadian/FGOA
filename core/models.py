@@ -399,6 +399,9 @@ class Project:
     target_window_title: str = ""
     target_client_width: int = 1600
     target_client_height: int = 900
+    authoring_width: int = 1600
+    authoring_height: int = 900
+    reference_image_path: Optional[str] = None
     loop_count: int = 1  # 0 means infinite loop
     loop_delay_seconds: float = 1.0
     anti_ban_enabled: bool = False
@@ -411,6 +414,12 @@ class Project:
     conditions: List[Condition] = field(default_factory=list)
     action_sequences: List[ActionSequence] = field(default_factory=list)
     scenarios: List[Scenario] = field(default_factory=list)
+
+    def __post_init__(self):
+        if self.authoring_width == 1600 and self.target_client_width != 1600:
+            self.authoring_width = self.target_client_width
+        if self.authoring_height == 900 and self.target_client_height != 900:
+            self.authoring_height = self.target_client_height
 
     def renumber_steps(self):
         """Update step_number for all scenarios sequentially starting at 1,
@@ -737,6 +746,9 @@ class Project:
             "target_window_title": self.target_window_title,
             "target_client_width": self.target_client_width,
             "target_client_height": self.target_client_height,
+            "authoring_width": getattr(self, "authoring_width", self.target_client_width),
+            "authoring_height": getattr(self, "authoring_height", self.target_client_height),
+            "reference_image_path": to_relative_path(self.reference_image_path) if getattr(self, "reference_image_path", None) else None,
             "loop_count": self.loop_count,
             "loop_delay_seconds": self.loop_delay_seconds,
             "anti_ban_enabled": self.anti_ban_enabled,
@@ -757,12 +769,21 @@ class Project:
         action_sequences = [ActionSequence.from_dict(s) for s in data.get("action_sequences", [])]
         scenarios = [Scenario.from_dict(s) for s in data.get("scenarios", [])]
         offset_sec = float(data.get("anti_ban_offset_seconds", data.get("anti_ban_max_delay", 1.0)))
+        raw_ref = data.get("reference_image_path")
+        ref_path = to_relative_path(raw_ref) if raw_ref else None
+        target_w = data.get("target_client_width", 1600)
+        target_h = data.get("target_client_height", 900)
+        auth_w = data.get("authoring_width", target_w)
+        auth_h = data.get("authoring_height", target_h)
         proj = cls(
             version=data.get("version", "1.0.0"),
             name=data.get("name", "FGOA Auto Project"),
             target_window_title=data.get("target_window_title", ""),
-            target_client_width=data.get("target_client_width", 1600),
-            target_client_height=data.get("target_client_height", 900),
+            target_client_width=target_w,
+            target_client_height=target_h,
+            authoring_width=auth_w,
+            authoring_height=auth_h,
+            reference_image_path=ref_path,
             loop_count=data.get("loop_count", 1),
             loop_delay_seconds=data.get("loop_delay_seconds", 1.0),
             anti_ban_enabled=data.get("anti_ban_enabled", False),

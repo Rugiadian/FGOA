@@ -213,6 +213,12 @@ class ReferenceGalleryDialog(QDialog):
                 if abs_p and os.path.exists(abs_p):
                     paths.add(os.path.normpath(abs_p))
 
+        # Check project authoring reference image
+        if getattr(project, "reference_image_path", None):
+            abs_p = to_absolute_path(project.reference_image_path)
+            if abs_p and os.path.exists(abs_p):
+                paths.add(os.path.normpath(abs_p))
+
         # Check scenarios
         for scen in project.scenarios:
             if scen.condition and scen.condition.reference_image_path:
@@ -253,6 +259,18 @@ class ReferenceGalleryDialog(QDialog):
         usages = []
         norm_target = os.path.normpath(os.path.abspath(image_path))
         target_fname = os.path.basename(norm_target)
+
+        # 0. Check Project Authoring Reference Image
+        if getattr(project, "reference_image_path", None):
+            p_abs = to_absolute_path(project.reference_image_path)
+            if (p_abs and os.path.normpath(p_abs) == norm_target) or os.path.basename(project.reference_image_path) == target_fname:
+                auth_w = getattr(project, "authoring_width", getattr(project, "target_client_width", 1600))
+                auth_h = getattr(project, "authoring_height", getattr(project, "target_client_height", 900))
+                usages.append({
+                    "scenario_name": "📐 프로젝트 환경",
+                    "type": "📐 제작 기준 해상도",
+                    "detail": f"프로젝트 제작 기준 레퍼런스 ({auth_w}×{auth_h})"
+                })
 
         # 1. Check Condition Modules
         for cond in getattr(project, "conditions", []):

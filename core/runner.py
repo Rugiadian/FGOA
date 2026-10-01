@@ -24,6 +24,7 @@ class WorkflowRunner(QThread):
     sig_action_sequence_started = pyqtSignal(list, str)  # (actions, scenario_name)
     sig_action_sequence_finished = pyqtSignal()
     sig_loop_progress = pyqtSignal(int, int)  # (current_loop, total_loops)
+    sig_loop_completed = pyqtSignal(int, int, float)  # (current_loop, total_loops, duration_seconds)
     sig_step_completed = pyqtSignal(int)  # next_scenario_index
     sig_finished = pyqtSignal(str)  # reason
 
@@ -79,6 +80,7 @@ class WorkflowRunner(QThread):
         current_loop = 1
 
         while self._is_running:
+            loop_start_time = time.time()
             loop_str = f"{current_loop}/{total_loops}" if total_loops > 0 else f"{current_loop}/무한"
             self.sig_loop_progress.emit(current_loop, total_loops)
             self.sig_log.emit("INFO", f"--- 루프 회차 {loop_str} 시작 ---")
@@ -318,11 +320,16 @@ class WorkflowRunner(QThread):
                     self.sig_step_completed.emit(current_index)
 
             # Check loop completion
+            loop_duration = time.time() - loop_start_time
+            dur_str = self._format_duration(loop_duration)
+            self.sig_log.emit("INFO", f"⏱️ [루프 소요 시간] 루프 {loop_str} 완료 (소요: {dur_str})")
+            self.sig_loop_completed.emit(current_loop, total_loops, loop_duration)
+
             if not self._is_running:
                 break
 
             if total_loops > 0 and current_loop >= total_loops:
-                self.sig_log.emit("SUCCESS", f"지정된 반복 횟수({total_loops}회)를 모두 완료했습니다.")
+                self.sig_log.emit("SUCCESS", f"지정된 반복 횟수({total_loops}회)를 모두 완료했습니다. (최근 루프: {dur_str})")
                 break
 
             current_loop += 1
@@ -434,3 +441,23 @@ class WorkflowRunner(QThread):
             pass
 
         return None
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        if seconds < 0:
+            return "0.0초"
+        h = int(seconds // 3600)
+        rem = seconds % 3600
+        m = int(rem // 60)
+        s = int(rem % 60)
+        if h > 0:
+            parts = [f"{h}시간"]
+            if m > 0:
+                parts.append(f"{m}분")
+            if s > 0:
+                parts.append(f"{s}초")
+            return " ".join(parts)
+        elif m > 0:
+            return f"{m}분 {s}초" if s > 0 else f"{m}분"
+        else:
+            return f"{seconds:.1f}초"

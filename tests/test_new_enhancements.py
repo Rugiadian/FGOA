@@ -151,6 +151,61 @@ class TestNewEnhancements(unittest.TestCase):
 
         main_win.close()
 
+    def test_05_authoring_resolution_display_and_reference_image(self):
+        """Verify authoring resolution display, reference image registration, and serialization."""
+        main_win = MainWindow()
+        self.assertIn("1600 × 900", main_win.lbl_authoring_res.text())
+
+        # Test registration of reference image and resolution change
+        main_win.project.authoring_width = 1920
+        main_win.project.authoring_height = 1080
+        main_win.project.reference_image_path = self.dummy_img_path
+        main_win._update_authoring_resolution_display()
+
+        self.assertIn("1920 × 1080", main_win.lbl_authoring_res.text())
+        self.assertIn("test_ref.png", main_win.lbl_authoring_res.text())
+
+        # Test project serialization & deserialization
+        p_dict = main_win.project.to_dict()
+        self.assertEqual(p_dict.get("authoring_width"), 1920)
+        self.assertEqual(p_dict.get("authoring_height"), 1080)
+        self.assertIsNotNone(p_dict.get("reference_image_path"))
+
+        restored = Project.from_dict(p_dict)
+        self.assertEqual(restored.authoring_width, 1920)
+        self.assertEqual(restored.authoring_height, 1080)
+        self.assertIn("test_ref.png", restored.reference_image_path)
+        main_win.close()
+
+    def test_06_top_toolbar_two_row_wrapping(self):
+        """Verify top toolbar is wrapped into a clean multi-line (2-row) layout."""
+        main_win = MainWindow()
+        card_frames = [w for w in main_win.top_toolbar.findChildren(object) if getattr(w, "objectName", lambda: "")() == "card_frame"]
+        self.assertTrue(len(card_frames) >= 1)
+        target_frame = card_frames[0]
+        layout = target_frame.layout()
+        # Must be a QVBoxLayout with multiple child row layouts
+        from PyQt5.QtWidgets import QVBoxLayout
+        self.assertIsInstance(layout, QVBoxLayout)
+        self.assertGreaterEqual(layout.count(), 2)
+
+        # Check presence of authoring resolution widgets in toolbar
+        self.assertTrue(hasattr(main_win, "lbl_authoring_res"))
+        self.assertTrue(hasattr(main_win, "btn_register_ref_img"))
+        self.assertEqual(main_win.btn_register_ref_img.parent(), target_frame)
+        main_win.close()
+
+    def test_07_inspector_hidden_at_top_left(self):
+        """Verify inspector widget does not float as an unmanaged child at (0, 0)."""
+        main_win = MainWindow()
+        if hasattr(main_win, "dock_actions"):
+            # FGOA dual-dock architecture: parent container must be hidden
+            self.assertTrue(main_win.inspector.isHidden())
+        else:
+            # Single dock architecture: inspector must be properly managed inside dock
+            self.assertEqual(main_win.dock_inspector.widget(), main_win.inspector)
+        main_win.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -42,6 +42,7 @@ from ui.preset_dialog import SavePresetDialog, PresetManagerDialog
 from ui.action_overlay import ActionOverlayWindow
 from ui.anti_ban_dialog import AntiBanDialog
 from ui.virtual_canvas_window import VirtualCanvasWindow
+from ui.anti_burn_in_overlay import AntiBurnInOverlay
 from core.global_hotkey import GlobalHotkeyListener
 from ui.floating_stop_widget import GlobalFloatingStopWidget
 from core.path_utils import to_absolute_path, to_relative_path
@@ -67,9 +68,12 @@ class MainWindow(QMainWindow):
         self.target_hwnd: int = 0
         self.runner: Optional[WorkflowRunner] = None
         self._current_run_loop: int = 0
+        self._last_loop_duration: float = 0.0
+        self._last_config_target_title: str = ""
         self.current_project_path: Optional[str] = None
         self.last_project_path: Optional[str] = None
         self.virtual_canvas_window: Optional[VirtualCanvasWindow] = None
+        self.anti_burn_overlay: AntiBurnInOverlay = AntiBurnInOverlay(self)
         self.current_theme: str = "light"  # Default to light mode
 
         self._update_window_title()
@@ -109,6 +113,7 @@ class MainWindow(QMainWindow):
         self._apply_theme()
         self._refresh_scenario_table()
         self._update_target_label(None)
+        self._auto_track_target_window()
         self._start_target_monitor_timer()
         self._init_code_watcher()
 
@@ -183,10 +188,18 @@ class MainWindow(QMainWindow):
                     self.custom_layouts = cfg.get("custom_layouts", {})
                     self._saved_dock_state = cfg.get("dock_layout_state", None)
                     self.last_project_path = cfg.get("last_project_path", None)
+                    self._last_config_target_title = cfg.get("last_target_title", "")
                     if hasattr(self.project, "target_client_width"):
                         self.project.target_client_width = cfg.get("last_target_width", 1600)
                         self.project.target_client_height = cfg.get("last_target_height", 900)
-                        self.project.target_window_title = cfg.get("last_target_title", "")
+                        self.project.target_window_title = self._last_config_target_title
+                    if hasattr(self, "chk_anti_burn") and self.chk_anti_burn:
+                        self.chk_anti_burn.setChecked(cfg.get("anti_burn_enabled", False))
+                    if hasattr(self, "spin_anti_burn_min") and self.spin_anti_burn_min:
+                        self.spin_anti_burn_min.setValue(cfg.get("anti_burn_interval_min", 5))
+                    if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
+                        self.anti_burn_overlay.set_interval_minutes(cfg.get("anti_burn_interval_min", 5))
+                        self.anti_burn_overlay.set_enabled(cfg.get("anti_burn_enabled", False))
             except Exception:
                 pass
 
@@ -204,9 +217,11 @@ class MainWindow(QMainWindow):
                 "theme": self.current_theme,
                 "window_width": self.width(),
                 "window_height": self.height(),
-                "last_target_title": getattr(self.project, "target_window_title", ""),
+                "last_target_title": getattr(self.project, "target_window_title", "") or getattr(self, "_last_config_target_title", ""),
                 "last_target_width": getattr(self.project, "target_client_width", 1600),
                 "last_target_height": getattr(self.project, "target_client_height", 900),
+                "anti_burn_enabled": self.chk_anti_burn.isChecked() if hasattr(self, "chk_anti_burn") else False,
+                "anti_burn_interval_min": self.spin_anti_burn_min.value() if hasattr(self, "spin_anti_burn_min") else 5,
                 "layout_name": getattr(self, "current_layout_name", "기본 3열 (Default)"),
                 "custom_layouts": getattr(self, "custom_layouts", {}),
                 "last_project_path": self.current_project_path,
@@ -251,8 +266,33 @@ class MainWindow(QMainWindow):
                 self.virtual_canvas_window.close()
             except Exception:
                 pass
+        if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
+            try:
+                self.anti_burn_overlay.stop_transition()
+            except Exception:
+                pass
         self._save_app_config()
         super().closeEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
+            self.anti_burn_overlay.update_geometry()
+
+    def _on_toggle_anti_burn(self, checked: bool):
+        if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
+            self.anti_burn_overlay.set_enabled(checked)
+            self._save_app_config()
+            mins = self.spin_anti_burn_min.value() if hasattr(self, "spin_anti_burn_min") else 5
+            if checked:
+                self._append_log("INFO", f"🖥️ [모니터 번인 방지] {mins}분 주기로 화면 흑-백 전환 활성화 (조작 간섭 없음)")
+            else:
+                self._append_log("INFO", "🖥️ [모니터 번인 방지] 비활성화됨")
+
+    def _on_anti_burn_interval_changed(self, val: int):
+        if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
+            self.anti_burn_overlay.set_interval_minutes(val)
+            self._save_app_config()
 
     def __del__(self):
         if hasattr(self, "global_hotkey") and self.global_hotkey:
@@ -335,85 +375,140 @@ class MainWindow(QMainWindow):
         dummy_central.setMaximumSize(0, 0)
         self.setCentralWidget(dummy_central)
 
-        # 1. Top Target Window & Layout Selector Bar
+        # 1. Top Target Window & Layout Selector Bar (2-Row Wrapped Layout)
         target_frame = QFrame()
         target_frame.setObjectName("card_frame")
         target_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        t_layout = QHBoxLayout(target_frame)
-        t_layout.setContentsMargins(10, 6, 10, 6)
+        t_main_layout = QVBoxLayout(target_frame)
+        t_main_layout.setContentsMargins(10, 6, 10, 6)
+        t_main_layout.setSpacing(6)
 
-        t_layout.addWidget(QLabel("🎯 대상 게임 창:"))
+        # ----------------------------------------------------
+        # Row 1: Target Window & Authoring Resolution Settings
+        # ----------------------------------------------------
+        row1_layout = QHBoxLayout()
+        row1_layout.setContentsMargins(0, 0, 0, 0)
+        row1_layout.setSpacing(6)
+
+        row1_layout.addWidget(QLabel("🎯 대상 게임 창:"))
         self.lbl_target_info = QLabel("선택된 창 없음 (창 선택 버튼을 클릭하세요)")
         self.lbl_target_info.setStyleSheet("font-weight: bold; color: #d97706;")
-        t_layout.addWidget(self.lbl_target_info, 1)
+        row1_layout.addWidget(self.lbl_target_info, 1)
 
         btn_select_win = QPushButton("창 선택...")
         btn_select_win.setObjectName("btn_primary")
         btn_select_win.clicked.connect(self._on_select_target_window)
-        t_layout.addWidget(btn_select_win)
+        row1_layout.addWidget(btn_select_win)
 
         btn_focus_win = QPushButton("창 활성화")
         btn_focus_win.clicked.connect(self._on_focus_target_window)
-        t_layout.addWidget(btn_focus_win)
+        row1_layout.addWidget(btn_focus_win)
 
         btn_virtual_canvas = QPushButton("🎨 가상 캔버스")
         btn_virtual_canvas.setToolTip("타깃 게임 창 없이 테스트/시뮬레이션을 수행할 수 있는 가상 캔버스 창을 띄웁니다.")
         btn_virtual_canvas.clicked.connect(self._on_open_virtual_canvas)
-        t_layout.addWidget(btn_virtual_canvas)
+        row1_layout.addWidget(btn_virtual_canvas)
+
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.VLine)
+        sep1.setFrameShadow(QFrame.Sunken)
+        sep1.setStyleSheet("color: #94a3b8; margin: 2px 4px;")
+        row1_layout.addWidget(sep1)
+
+        # Scenario Authoring Resolution Display
+        self.lbl_authoring_res = QLabel()
+        self.lbl_authoring_res.setObjectName("lbl_authoring_res")
+        self.lbl_authoring_res.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.lbl_authoring_res.customContextMenuRequested.connect(self._on_authoring_res_context_menu)
+        row1_layout.addWidget(self.lbl_authoring_res)
+
+        # Register Authoring Reference Image Button
+        self.btn_register_ref_img = QPushButton("🖼️ 기준 이미지 등록...")
+        self.btn_register_ref_img.setToolTip(
+            "시나리오 제작 기준 해상도를 추적/지정할 레퍼런스 이미지를 등록합니다.\n"
+            "이미지 크기에 맞추어 제작 기준 해상도가 자동 설정됩니다.\n"
+            "(우클릭: 수동 해상도 입력 또는 등록 해제)"
+        )
+        self.btn_register_ref_img.clicked.connect(self._on_register_authoring_image)
+        self.btn_register_ref_img.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.btn_register_ref_img.customContextMenuRequested.connect(self._on_authoring_res_context_menu)
+        row1_layout.addWidget(self.btn_register_ref_img)
 
         btn_gallery = QPushButton("🖼️ 레퍼런스 갤러리")
         btn_gallery.setToolTip("참조 이미지 보관함 및 어느 조건/액션에서 사용 중인지 확인합니다.")
         btn_gallery.clicked.connect(self._on_open_reference_gallery)
-        t_layout.addWidget(btn_gallery)
+        row1_layout.addWidget(btn_gallery)
 
-        t_layout.addSpacing(10)
+        t_main_layout.addLayout(row1_layout)
+
+        # ----------------------------------------------------
+        # Row 2: Layout, Tools, Reload & Quick Controls
+        # ----------------------------------------------------
+        row2_layout = QHBoxLayout()
+        row2_layout.setContentsMargins(0, 0, 0, 0)
+        row2_layout.setSpacing(6)
 
         # Unity-style Dynamic Layout Selector
-        t_layout.addWidget(QLabel("📐 레이아웃:"))
+        row2_layout.addWidget(QLabel("📐 레이아웃:"))
         self.combo_layout = QComboBox()
         self.combo_layout.setObjectName("combo_layout")
         self.combo_layout.setMinimumWidth(135)
         self.combo_layout.setToolTip("유니티 스타일 유동적 레이아웃 전환 (기본/와이드/세로/탭/인스펙터 전면 등)")
         self.combo_layout.currentTextChanged.connect(self._on_layout_combo_changed)
-        t_layout.addWidget(self.combo_layout)
+        row2_layout.addWidget(self.combo_layout)
 
         # Unity-style Window/Panels Menu
         self.btn_panels_menu = QPushButton("🪟 패널 표시 ▼")
         self.btn_panels_menu.setToolTip("패널(시나리오 목록, 인스펙터, 실행 로그) 표시/숨김 상태 제어")
-        t_layout.addWidget(self.btn_panels_menu)
+        row2_layout.addWidget(self.btn_panels_menu)
 
-        t_layout.addSpacing(10)
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.VLine)
+        sep2.setFrameShadow(QFrame.Sunken)
+        sep2.setStyleSheet("color: #94a3b8; margin: 2px 4px;")
+        row2_layout.addWidget(sep2)
 
         # Hot Reload Controls
         self.chk_hot_reload = QCheckBox("코드 자동 리로드")
         self.chk_hot_reload.setChecked(False)
         self.chk_hot_reload.setToolTip("코드(.py) 파일 수정 저장 시 프로그램을 즉시 자동 재시작합니다.")
-        t_layout.addWidget(self.chk_hot_reload)
+        row2_layout.addWidget(self.chk_hot_reload)
 
         btn_reload = QPushButton("🔄 리로드 (Ctrl+R)")
         btn_reload.setToolTip("프로그램을 즉시 리로드합니다. (단축키: Ctrl+R / F8)")
         btn_reload.clicked.connect(self._reload_application)
-        t_layout.addWidget(btn_reload)
+        row2_layout.addWidget(btn_reload)
 
         btn_error_log = QPushButton("📋 에러 로그")
         btn_error_log.setToolTip("오류 발생 기록(fgoa_crash.log)을 텍스트 편집기로 엽니다.")
         btn_error_log.clicked.connect(self._on_open_crash_log)
-        t_layout.addWidget(btn_error_log)
+        row2_layout.addWidget(btn_error_log)
+
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.VLine)
+        sep3.setFrameShadow(QFrame.Sunken)
+        sep3.setStyleSheet("color: #94a3b8; margin: 2px 4px;")
+        row2_layout.addWidget(sep3)
 
         self.btn_popup_playbar = QPushButton("🎮 플레이바 (F4)")
         self.btn_popup_playbar.setCheckable(True)
         self.btn_popup_playbar.setToolTip("항상 위에 떠 있는 미니 플레이바 창을 열거나 닫습니다. (단축키: F4)")
         self.btn_popup_playbar.clicked.connect(self._toggle_popup_playbar)
-        t_layout.addWidget(self.btn_popup_playbar)
+        row2_layout.addWidget(self.btn_popup_playbar)
 
-        t_layout.addSpacing(10)
+        row2_layout.addStretch()
 
         # Theme Toggle Button
         self.btn_theme_toggle = QPushButton()
         self.btn_theme_toggle.setObjectName("btn_theme")
         self.btn_theme_toggle.clicked.connect(self._toggle_theme)
         self._update_theme_toggle_btn()
-        t_layout.addWidget(self.btn_theme_toggle)
+        row2_layout.addWidget(self.btn_theme_toggle)
+
+        t_main_layout.addLayout(row2_layout)
+
+        # Initial authoring resolution display update
+        self._update_authoring_resolution_display()
 
         # Top ToolBar
         self.top_toolbar = QToolBar("Target & Tools", self)
@@ -576,6 +671,7 @@ class MainWindow(QMainWindow):
         # Pane 2: Center (Unity-Style Always-Open Inspector)
         # ==========================================
         self.inspector = InspectorWidget(self)
+        self.inspector.hide()
         self.inspector.sig_scenario_saved.connect(self._on_inspector_scenario_saved)
         self.inspector.sig_scenario_changed.connect(self._on_inspector_scenario_changed)
         self.inspector.sig_modules_manager_requested.connect(lambda: self.tab_scenario_manager.setCurrentIndex(1))
@@ -749,6 +845,23 @@ class MainWindow(QMainWindow):
         self.btn_anti_ban.clicked.connect(self._on_open_anti_ban_dialog)
         c_layout.addWidget(self.btn_anti_ban)
 
+        c_layout.addSpacing(10)
+
+        # Monitor Burn-in Prevention
+        self.chk_anti_burn = QCheckBox("🖥️ 번인 방지")
+        self.chk_anti_burn.setChecked(False)
+        self.chk_anti_burn.setToolTip("지정한 n분 주기마다 UI 전체를 흑-백으로 서서히 전환하여 모니터 번인을 방지합니다. (조작 간섭 전혀 없음)")
+        self.chk_anti_burn.toggled.connect(self._on_toggle_anti_burn)
+        c_layout.addWidget(self.chk_anti_burn)
+
+        self.spin_anti_burn_min = QSpinBox()
+        self.spin_anti_burn_min.setRange(1, 120)
+        self.spin_anti_burn_min.setValue(5)
+        self.spin_anti_burn_min.setSuffix("분")
+        self.spin_anti_burn_min.setToolTip("번인 방지 화면 전환 주기 (1~120분)")
+        self.spin_anti_burn_min.valueChanged.connect(self._on_anti_burn_interval_changed)
+        c_layout.addWidget(self.spin_anti_burn_min)
+
         c_layout.addStretch()
 
         self.lbl_run_status = QLabel("대기 중")
@@ -896,6 +1009,8 @@ class MainWindow(QMainWindow):
     def _apply_theme(self):
         self.setStyleSheet(get_stylesheet(self.current_theme))
         self._update_theme_toggle_btn()
+        if hasattr(self, "lbl_authoring_res"):
+            self._update_authoring_resolution_display()
         if self.target_hwnd:
             win_info = WindowManager.get_window_info(self.target_hwnd)
             self._update_target_label(win_info)
@@ -1024,6 +1139,16 @@ class MainWindow(QMainWindow):
 
     def _on_inspector_scenario_changed(self, modified_scen: Scenario):
         """Called when properties are edited inside the Inspector."""
+        if modified_scen and self.project:
+            for s in self.project.scenarios:
+                if s.id == modified_scen.id:
+                    s.reference_image_path = modified_scen.reference_image_path
+                    if modified_scen.condition and s.condition:
+                        s.condition.reference_image_path = modified_scen.condition.reference_image_path
+                    elif modified_scen.condition and not s.condition:
+                        s.condition = copy.deepcopy(modified_scen.condition)
+                    s.name = modified_scen.name
+                    break
         self._refresh_scenario_table()
 
     # ==========================================
@@ -2000,6 +2125,35 @@ class MainWindow(QMainWindow):
     # ==========================================
     # Target Window Management
     # ==========================================
+    def _auto_track_target_window(self) -> bool:
+        """
+        마지막 기록(프로젝트 설정 또는 앱 config)의 타겟 창 제목을 참고하여,
+        현재 실행 중인 윈도우 중 일치하는 창을 자동으로 검색하고 타겟으로 등록합니다.
+        """
+        last_title = getattr(self.project, "target_window_title", "") or getattr(self, "_last_config_target_title", "")
+        if not last_title or last_title == "가상 캔버스 타겟":
+            return False
+
+        win = WindowManager.find_window_by_title(last_title)
+        if win and win.hwnd:
+            if self.target_hwnd == win.hwnd:
+                return True
+            self.target_hwnd = win.hwnd
+            self.project.target_window_title = win.title
+            self.project.target_client_width = win.client_width
+            self.project.target_client_height = win.client_height
+            self._save_app_config()
+            if hasattr(self, "inspector") and self.inspector:
+                self.inspector.set_target_hwnd(self.target_hwnd)
+            if hasattr(self, "modules_widget") and self.modules_widget:
+                self.modules_widget.target_hwnd = self.target_hwnd
+            if hasattr(self, "action_overlay") and self.action_overlay:
+                self.action_overlay.set_target_hwnd(self.target_hwnd)
+            self._update_target_label(win)
+            self._append_log("INFO", f"🎯 [타겟창 자동 추적] 마지막 기록('{last_title}')의 타겟 창 '{win.title}'(HWND: 0x{win.hwnd:X})을 자동으로 감지하여 등록했습니다.")
+            return True
+        return False
+
     def _on_select_target_window(self):
         cur_w = getattr(self.project, "target_client_width", 1600)
         cur_h = getattr(self.project, "target_client_height", 900)
@@ -2093,6 +2247,140 @@ class MainWindow(QMainWindow):
                 self.lbl_target_info.setText("선택된 창 없음 (창 선택 버튼을 클릭하세요)")
                 self.lbl_target_info.setStyleSheet(f"font-weight: bold; color: {pal['warning']};")
 
+    def _update_authoring_resolution_display(self):
+        """Update the authoring resolution badge text, tooltip, and theme styling."""
+        if not hasattr(self, "lbl_authoring_res") or not self.lbl_authoring_res:
+            return
+
+        auth_w = getattr(self.project, "authoring_width", getattr(self.project, "target_client_width", 1600))
+        auth_h = getattr(self.project, "authoring_height", getattr(self.project, "target_client_height", 900))
+        ref_path = getattr(self.project, "reference_image_path", None)
+
+        is_dark = getattr(self, "current_theme", "light") == "dark"
+        bg_col = "rgba(59, 130, 246, 0.22)" if is_dark else "rgba(37, 99, 235, 0.10)"
+        txt_col = "#60a5fa" if is_dark else "#1d4ed8"
+        border_col = "rgba(96, 165, 250, 0.4)" if is_dark else "rgba(37, 99, 235, 0.3)"
+
+        style = (
+            f"font-weight: bold; font-size: 9pt; padding: 2px 8px; border-radius: 4px; "
+            f"background-color: {bg_col}; color: {txt_col}; border: 1px solid {border_col};"
+        )
+        self.lbl_authoring_res.setStyleSheet(style)
+
+        base_txt = f"📐 제작 해상도: {auth_w} × {auth_h}"
+        if ref_path:
+            fname = os.path.basename(ref_path)
+            self.lbl_authoring_res.setText(f"{base_txt} ({fname})")
+            self.lbl_authoring_res.setToolTip(
+                f"시나리오 제작 기준 해상도: {auth_w} × {auth_h}\n"
+                f"기준 레퍼런스 이미지: {ref_path}\n"
+                f"(우클릭: 기준 이미지 변경/해제 또는 해상도 직접 입력)"
+            )
+        else:
+            self.lbl_authoring_res.setText(base_txt)
+            self.lbl_authoring_res.setToolTip(
+                f"시나리오 제작 기준 해상도: {auth_w} × {auth_h}\n"
+                f"(등록된 기준 이미지가 없습니다. [🖼️ 기준 이미지 등록...] 버튼으로 등록할 수 있습니다.)\n"
+                f"(우클릭: 해상도 직접 수동 입력)"
+            )
+
+    def _on_register_authoring_image(self):
+        """Register a reference screenshot to automatically determine and track project authoring resolution."""
+        start_dir = ""
+        cur_ref = getattr(self.project, "reference_image_path", None)
+        if cur_ref:
+            abs_p = to_absolute_path(cur_ref)
+            if abs_p and os.path.exists(abs_p):
+                start_dir = os.path.dirname(abs_p)
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "제작 해상도 추적용 레퍼런스 이미지 선택",
+            start_dir,
+            "이미지 파일 (*.png *.jpg *.jpeg *.bmp *.webp);;모든 파일 (*.*)"
+        )
+        if not file_path:
+            return
+
+        pix = QPixmap(file_path)
+        img_w, img_h = 0, 0
+        if not pix.isNull():
+            img_w, img_h = pix.width(), pix.height()
+        else:
+            try:
+                from PIL import Image
+                with Image.open(file_path) as img:
+                    img_w, img_h = img.size
+            except Exception as e:
+                QMessageBox.warning(self, "이미지 오류", f"이미지 파일을 읽을 수 없습니다:\n{e}")
+                return
+
+        if img_w <= 0 or img_h <= 0:
+            QMessageBox.warning(self, "해상도 오류", "유효한 해상도를 가진 이미지가 아닙니다.")
+            return
+
+        self.project.authoring_width = img_w
+        self.project.authoring_height = img_h
+        self.project.reference_image_path = to_relative_path(file_path)
+
+        # If no active window is attached, also sync target client size
+        if not self.target_hwnd:
+            self.project.target_client_width = img_w
+            self.project.target_client_height = img_h
+
+        self._update_authoring_resolution_display()
+        self._append_log("INFO", f"📐 제작 기준 해상도가 {img_w}×{img_h}로 설정되었습니다. (기준 이미지: {os.path.basename(file_path)})")
+        if hasattr(self, "status_bar"):
+            self.status_bar.showMessage(f"제작 기준 해상도 설정됨: {img_w}×{img_h} ({os.path.basename(file_path)})", 4000)
+
+    def _on_authoring_res_context_menu(self, pos):
+        """Context menu for authoring resolution display and button."""
+        menu = QMenu(self)
+        act_reg = menu.addAction("🖼️ 기준 이미지 등록/변경...")
+        act_reg.triggered.connect(self._on_register_authoring_image)
+        act_manual = menu.addAction("📐 해상도 수동 직접 입력...")
+        act_manual.triggered.connect(self._on_manual_authoring_resolution)
+        if getattr(self.project, "reference_image_path", None):
+            act_clear = menu.addAction("❌ 기준 이미지 등록 해제")
+            act_clear.triggered.connect(self._on_clear_authoring_image)
+        menu.exec_(QCursor.pos())
+
+    def _on_manual_authoring_resolution(self):
+        """Prompt user for manual entry of authoring resolution."""
+        cur_w = getattr(self.project, "authoring_width", getattr(self.project, "target_client_width", 1600))
+        cur_h = getattr(self.project, "authoring_height", getattr(self.project, "target_client_height", 900))
+        text, ok = QInputDialog.getText(
+            self,
+            "제작 기준 해상도 수동 입력",
+            "시나리오 제작 기준 해상도를 '가로x세로' 형식으로 입력하세요 (예: 1600x900):",
+            text=f"{cur_w}x{cur_h}"
+        )
+        if ok and text:
+            clean = text.lower().replace(" ", "").replace("*", "x")
+            if "x" in clean:
+                parts = clean.split("x")
+                try:
+                    w = int(parts[0])
+                    h = int(parts[1])
+                    if w > 0 and h > 0:
+                        self.project.authoring_width = w
+                        self.project.authoring_height = h
+                        if not self.target_hwnd:
+                            self.project.target_client_width = w
+                            self.project.target_client_height = h
+                        self._update_authoring_resolution_display()
+                        self._append_log("INFO", f"📐 제작 기준 해상도가 수동으로 {w}×{h}로 변경되었습니다.")
+                        return
+                except ValueError:
+                    pass
+            QMessageBox.warning(self, "입력 오류", "유효한 해상도 형식이 아닙니다. (예: 1600x900 또는 1920x1080)")
+
+    def _on_clear_authoring_image(self):
+        """Clear registered reference image from project."""
+        self.project.reference_image_path = None
+        self._update_authoring_resolution_display()
+        self._append_log("INFO", "제작 기준 레퍼런스 이미지 등록이 해제되었습니다.")
+
     def _start_target_monitor_timer(self):
         self.timer_monitor = QTimer(self)
         self.timer_monitor.setInterval(1500)
@@ -2103,11 +2391,15 @@ class MainWindow(QMainWindow):
         if self.target_hwnd:
             win_info = WindowManager.get_window_info(self.target_hwnd)
             if not win_info:
-                pal = get_theme_colors(self.current_theme)
-                self.lbl_target_info.setText("⚠️ 타겟 창이 닫혔거나 감지되지 않습니다!")
-                self.lbl_target_info.setStyleSheet(f"font-weight: bold; color: {pal['danger']};")
+                if not self._auto_track_target_window():
+                    self.target_hwnd = 0
+                    pal = get_theme_colors(self.current_theme)
+                    self.lbl_target_info.setText("⚠️ 타겟 창이 닫혔거나 감지되지 않습니다!")
+                    self.lbl_target_info.setStyleSheet(f"font-weight: bold; color: {pal['danger']};")
             else:
                 self._update_target_label(win_info)
+        else:
+            self._auto_track_target_window()
 
     # ==========================================
     # Execution Engine Control
@@ -2152,10 +2444,12 @@ class MainWindow(QMainWindow):
         self.runner.sig_action_sequence_started.connect(self._on_action_sequence_started_visual)
         self.runner.sig_action_sequence_finished.connect(self._on_action_sequence_finished_visual)
         self.runner.sig_loop_progress.connect(self._on_loop_progress)
+        self.runner.sig_loop_completed.connect(self._on_loop_completed)
         self.runner.sig_step_completed.connect(self._on_step_completed)
         self.runner.sig_finished.connect(self._on_runner_finished)
 
         self._current_run_loop = 0
+        self._last_loop_duration = 0.0
         if hasattr(self, "lbl_loop_progress"):
             self.lbl_loop_progress.setText("(준비 중...)")
             self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #16a34a; font-size: 8.5pt;")
@@ -2213,8 +2507,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "action_overlay") and self.action_overlay:
             self.action_overlay.clear_action()
         if hasattr(self, "lbl_loop_progress"):
+            dur_str = f" | 최근 루프: {WorkflowRunner._format_duration(self._last_loop_duration)}" if self._last_loop_duration > 0 else ""
             if self._current_run_loop > 0:
-                self.lbl_loop_progress.setText(f"({self._current_run_loop}회차 정지)")
+                self.lbl_loop_progress.setText(f"({self._current_run_loop}회차 정지{dur_str})")
                 self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #dc2626; font-size: 8.5pt;")
             else:
                 self.lbl_loop_progress.setText("(대기)")
@@ -2347,20 +2642,32 @@ class MainWindow(QMainWindow):
         if hasattr(self, "action_overlay") and self.action_overlay:
             self.action_overlay.clear_action()
         if hasattr(self, "lbl_loop_progress"):
+            dur_str = f" | 최근 루프: {WorkflowRunner._format_duration(self._last_loop_duration)}" if self._last_loop_duration > 0 else ""
             if self._current_run_loop > 0:
-                self.lbl_loop_progress.setText(f"(총 {self._current_run_loop}회 완료)")
+                self.lbl_loop_progress.setText(f"(총 {self._current_run_loop}회 완료{dur_str})")
                 self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #2563eb; font-size: 8.5pt;")
             else:
                 self.lbl_loop_progress.setText("(대기)")
                 self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #64748b; font-size: 8.5pt;")
 
-    def _on_loop_progress(self, current_loop: int, total_loops: int):
-        self._current_run_loop = current_loop
+    def _on_loop_completed(self, completed_loop: int, total_loops: int, duration: float):
+        self._last_loop_duration = duration
+        dur_str = WorkflowRunner._format_duration(duration)
         if hasattr(self, "lbl_loop_progress"):
             if total_loops > 0:
-                self.lbl_loop_progress.setText(f"({current_loop} / {total_loops}회 진행 중)")
+                self.lbl_loop_progress.setText(f"({completed_loop} / {total_loops}회 완료 | 소요: {dur_str})")
             else:
-                self.lbl_loop_progress.setText(f"({current_loop}회 진행 중)")
+                self.lbl_loop_progress.setText(f"({completed_loop}회 완료 | 소요: {dur_str})")
+            self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #16a34a; font-size: 8.5pt;")
+
+    def _on_loop_progress(self, current_loop: int, total_loops: int):
+        self._current_run_loop = current_loop
+        dur_str = f" | 이전 루프: {WorkflowRunner._format_duration(self._last_loop_duration)}" if self._last_loop_duration > 0 else ""
+        if hasattr(self, "lbl_loop_progress"):
+            if total_loops > 0:
+                self.lbl_loop_progress.setText(f"({current_loop} / {total_loops}회 진행 중{dur_str})")
+            else:
+                self.lbl_loop_progress.setText(f"({current_loop}회 진행 중{dur_str})")
             self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #16a34a; font-size: 8.5pt;")
 
     # ==========================================
@@ -2682,9 +2989,11 @@ class MainWindow(QMainWindow):
                 self.inspector.set_project(self.project)
             if self.project.scenarios and hasattr(self, "tbl_scenarios"):
                 self.tbl_scenarios.selectRow(0)
+            self._update_authoring_resolution_display()
             if hasattr(self, "status_bar"):
                 self.status_bar.showMessage(f"프로젝트 불러오기 완료: {path}", 4000)
             self._save_app_config()
+            self._auto_track_target_window()
             return True
         except Exception as e:
             if not silent:
