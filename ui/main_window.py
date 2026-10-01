@@ -111,6 +111,8 @@ class MainWindow(QMainWindow):
         self.scenario_redo_stack: List[Tuple[str, List[Dict[str, Any]]]] = []
         self._is_undoing_redoing_scenario: bool = False
         self._current_running_row: Optional[int] = None
+        self._paused_scenario_id: Optional[str] = None
+        self._last_running_scenario_id: Optional[str] = None
 
         # Load user settings
         self._load_app_config()
@@ -1337,6 +1339,7 @@ class MainWindow(QMainWindow):
         self.project.renumber_steps()
         depths = self.project.compute_hierarchy_depths()
         loop_analysis = self.project.analyze_loops() if hasattr(self.project, "analyze_loops") else {}
+        folder_analysis = self.project.analyze_folders() if hasattr(self.project, "analyze_folders") else {}
 
         if hasattr(self, "lbl_scen_count"):
             self.lbl_scen_count.setText(f"총 {len(self.project.scenarios)}개")
@@ -1349,11 +1352,15 @@ class MainWindow(QMainWindow):
         self.tbl_scenarios.blockSignals(True)
         self.tbl_scenarios.setRowCount(len(self.project.scenarios))
 
-        is_hidden_by_folder = False
+        collapsed_stack = []
         for row, scen in enumerate(self.project.scenarios):
+            is_hidden = any(collapsed_stack)
+            self.tbl_scenarios.setRowHidden(row, is_hidden)
+
             depth = depths[row] if row < len(depths) else 0
             loop_info = loop_analysis.get(row)
-            self._update_table_row(row, scen, depth, loop_info)
+            folder_info = folder_analysis.get(row)
+            self._update_table_row(row, scen, depth, loop_info, folder_info)
 
             # Ensure vertical header item exists
             v_item = self.tbl_scenarios.verticalHeaderItem(row)
@@ -1361,17 +1368,28 @@ class MainWindow(QMainWindow):
                 v_item = QTableWidgetItem(str(row + 1))
                 self.tbl_scenarios.setVerticalHeaderItem(row, v_item)
 
-            if scen.node_type == "folder":
-                self.tbl_scenarios.setRowHidden(row, False)
-                is_hidden_by_folder = getattr(scen, "is_collapsed", False)
-            else:
-                self.tbl_scenarios.setRowHidden(row, is_hidden_by_folder)
+            is_start = getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start"))
+            is_end = getattr(scen, "is_folder_end", scen.node_type == "folder_end")
+            if is_start:
+                collapsed_stack.append(getattr(scen, "is_collapsed", False))
+            elif is_end:
+                if collapsed_stack:
+                    collapsed_stack.pop()
 
         self.tbl_scenarios.blockSignals(False)
 
         # Restore running header highlight if actively executing
         if hasattr(self, "_current_running_row") and self._current_running_row is not None:
             self._highlight_running_row_header(self._current_running_row)
+
+        # Restore paused row highlight if execution is paused
+        if getattr(self, "_paused_scenario_id", None):
+            paused_idx = next((i for i, s in enumerate(self.project.scenarios) if s.id == self._paused_scenario_id), None)
+            if paused_idx is not None and hasattr(self.tbl_scenarios, "set_paused_row"):
+                self.tbl_scenarios.set_paused_row(paused_idx)
+        else:
+            if hasattr(self.tbl_scenarios, "set_paused_row"):
+                self.tbl_scenarios.set_paused_row(-1)
 
         # Restore selection
         if 0 <= selected_row < len(self.project.scenarios):
@@ -1383,10 +1401,19 @@ class MainWindow(QMainWindow):
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             self.popup_play_bar.refresh_scenarios(self.project.scenarios)
 
-    def _update_table_row(self, row: int, scen: Scenario, depth: int = 0, loop_info: Optional[Dict[str, Any]] = None):
-        is_folder = (scen.node_type == "folder")
-        folder_bg = QColor("#fef3c7" if self.current_theme == "light" else "#451a03")
-        folder_txt = QColor("#b45309" if self.current_theme == "light" else "#fde68a")
+    def _update_table_row(self, row: int, scen: Scenario, depth: int = 0, loop_info: Optional[Dict[str, Any]] = None, folder_info: Optional[Dict[str, Any]] = None):
+        is_folder_start = getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start"))
+        is_folder_end = getattr(scen, "is_folder_end", scen.node_type == "folder_end")
+        is_folder = is_folder_start or is_folder_end
+
+        if folder_info and folder_info.get("has_pair", True):
+            folder_bg_str = folder_info.get("bg_light" if self.current_theme == "light" else "bg_dark", "#fef3c7")
+            folder_txt_str = folder_info.get("color_light" if self.current_theme == "light" else "color_dark", "#b45309")
+            folder_bg = QColor(folder_bg_str)
+            folder_txt = QColor(folder_txt_str)
+        else:
+            folder_bg = QColor("#fef3c7" if self.current_theme == "light" else "#451a03")
+            folder_txt = QColor("#b45309" if self.current_theme == "light" else "#fde68a")
 
         # 0. Snapshot (레퍼런스 이미지 스냅샷 - 인식조건 이미지 기본값, 없으면 빈칸)
         if is_folder:
@@ -1457,27 +1484,53 @@ class MainWindow(QMainWindow):
         chk_layout.addWidget(chk)
         self.tbl_scenarios.setCellWidget(row, 2, chk_widget)
 
-        # 3. Name with Loop Hierarchy UI, distinct pair colors, and orphaned warnings
-        if is_folder:
-            collapse_icon = "▶ " if getattr(scen, "is_collapsed", False) else "▼ "
-            it_name = QTableWidgetItem(f"{collapse_icon}📁 [폴더] {scen.name}")
-            it_name.setForeground(folder_txt)
-            it_name.setBackground(folder_bg)
-            it_name.setToolTip(f"📁 그룹 폴더: {scen.name} (더블 클릭하여 펼치기/접기)")
+        # 3. Name with Loop & Folder Hierarchy UI, distinct pair colors, and orphaned warnings
+        indent = ("    " * (depth - 1)) + "  │  ↳ " if depth > 0 else ""
+        if is_folder_start:
+            p_num = folder_info.get("pair_number", 1) if folder_info else 1
+            c_cnt = folder_info.get("child_count", 0) if folder_info else 0
+            if folder_info and not folder_info.get("has_pair", True):
+                it_name = QTableWidgetItem(f"{indent}⚠️ [폴더 짝 없음: 종료 노드 소실!] 📁 {scen.name}")
+                it_name.setForeground(QColor("#ef4444"))
+                it_name.setToolTip("대응되는 폴더 종료 노드가 없습니다. 폴더 블록을 확인해주세요.")
+            else:
+                collapse_icon = "▶ " if getattr(scen, "is_collapsed", False) else "▼ "
+                if getattr(scen, "is_collapsed", False):
+                    it_name = QTableWidgetItem(f"{indent}{collapse_icon}📁 [폴더 #{p_num}] {scen.name}  ({c_cnt}개 항목 접힘)")
+                else:
+                    it_name = QTableWidgetItem(f"{indent}{collapse_icon}📂 [폴더 #{p_num} 시작] {scen.name}")
+                it_name.setForeground(folder_txt)
+                it_name.setBackground(folder_bg)
+                it_name.setToolTip(f"📁 그룹 폴더 #{p_num}: {scen.name} (더블 클릭하여 펼치기/접기)")
+            f = it_name.font()
+            f.setBold(True)
+            it_name.setFont(f)
+        elif is_folder_end:
+            p_num = folder_info.get("pair_number", 1) if folder_info else 1
+            if folder_info and not folder_info.get("has_pair", True):
+                it_name = QTableWidgetItem(f"{indent}⚠️ [폴더 짝 없음: 시작 노드 소실!] 📁 {scen.name}")
+                it_name.setForeground(QColor("#ef4444"))
+                it_name.setToolTip("대응되는 폴더 시작 노드가 없습니다.")
+            else:
+                partner_idx = folder_info.get("partner_index") if folder_info else None
+                start_str = f"s{self.project.scenarios[partner_idx].scenario_number} " if partner_idx is not None and partner_idx < len(self.project.scenarios) else ""
+                it_name = QTableWidgetItem(f"{indent}📁 [폴더 #{p_num} 끝] → {start_str}{scen.name} 종료")
+                it_name.setForeground(folder_txt)
+                it_name.setBackground(folder_bg)
+                it_name.setToolTip(f"📁 그룹 폴더 #{p_num} 종료 지점")
             f = it_name.font()
             f.setBold(True)
             it_name.setFont(f)
         elif scen.node_type == "loop_start":
             if loop_info and not loop_info.get("has_pair", True):
-                # 짝 소실 경고!
                 loop_desc = scen.get_loop_summary()
-                it_name = QTableWidgetItem(f"⚠️ [루프 짝 없음: 종료 노드 소실!] {loop_desc} [{scen.name}]")
+                it_name = QTableWidgetItem(f"{indent}⚠️ [루프 짝 없음: 종료 노드 소실!] {loop_desc} [{scen.name}]")
                 it_name.setForeground(QColor("#ef4444"))
                 it_name.setToolTip("⚠️ 대응되는 루프 종료 노드가 없습니다! 루프 블록을 확인해주세요.")
             else:
                 p_num = loop_info.get("pair_number", 1) if loop_info else 1
                 color_hex = (loop_info.get("color_light") if self.current_theme == "light" else loop_info.get("color_dark")) if loop_info else ("#2563eb" if self.current_theme == "light" else "#60a5fa")
-                it_name = QTableWidgetItem(f"🔁 [루프 #{p_num} 시작: {scen.loop_count}회] [{scen.name}]")
+                it_name = QTableWidgetItem(f"{indent}🔁 [루프 #{p_num} 시작: {scen.loop_count}회] [{scen.name}]")
                 it_name.setForeground(QColor(color_hex))
                 it_name.setToolTip(f"루프 #{p_num} 시작 노드")
             f = it_name.font()
@@ -1485,8 +1538,7 @@ class MainWindow(QMainWindow):
             it_name.setFont(f)
         elif scen.node_type == "loop_end":
             if loop_info and not loop_info.get("has_pair", True):
-                # 짝 소실 경고!
-                it_name = QTableWidgetItem(f"⚠️ [루프 짝 없음: 시작 노드 소실!] 🔁 루프 종료 (시작 노드 없음)")
+                it_name = QTableWidgetItem(f"{indent}⚠️ [루프 짝 없음: 시작 노드 소실!] 🔁 루프 종료 (시작 노드 없음)")
                 it_name.setForeground(QColor("#ef4444"))
                 it_name.setToolTip("⚠️ 대응되는 루프 시작 노드가 없습니다! 루프 블록을 확인해주세요.")
             else:
@@ -1494,7 +1546,7 @@ class MainWindow(QMainWindow):
                 color_hex = (loop_info.get("color_light") if self.current_theme == "light" else loop_info.get("color_dark")) if loop_info else ("#7c3aed" if self.current_theme == "light" else "#c084fc")
                 partner_idx = loop_info.get("partner_index") if loop_info else None
                 start_num_str = f"s{self.project.scenarios[partner_idx].scenario_number}" if partner_idx is not None and partner_idx < len(self.project.scenarios) else ""
-                it_name = QTableWidgetItem(f"🔁 [루프 #{p_num} 종료] → 루프 {start_num_str} 복귀")
+                it_name = QTableWidgetItem(f"{indent}🔁 [루프 #{p_num} 종료] → 루프 {start_num_str} 복귀")
                 it_name.setForeground(QColor(color_hex))
                 it_name.setToolTip(f"루프 #{p_num} 종료 노드 (루프 #{p_num} 시작점으로 복귀)")
             f = it_name.font()
@@ -1502,21 +1554,35 @@ class MainWindow(QMainWindow):
             it_name.setFont(f)
         else:
             if depth > 0:
-                indent = ("    " * (depth - 1)) + "  │  ↳ "
                 it_name = QTableWidgetItem(f"{indent}{scen.name}")
             else:
                 it_name = QTableWidgetItem(scen.name)
         it_name.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        is_paused = (scen.id == getattr(self, "_paused_scenario_id", None))
+        if is_paused:
+            it_name.setText(f"⏸ [일시정지] {it_name.text()}")
+            it_name.setForeground(QColor("#ea580c"))
+            f = it_name.font()
+            f.setBold(True)
+            it_name.setFont(f)
+            it_name.setToolTip(f"⏸ [일시정지 중] 실행이 일시정지된 노드입니다. 재개 시 이 노드(s{scen.scenario_number})부터 실행됩니다.\n{it_name.toolTip() or ''}")
         self.tbl_scenarios.setItem(row, 3, it_name)
 
         # 4. Condition Module (Eye)
         self.tbl_scenarios.setCellWidget(row, 4, None)
-        if is_folder:
-            it_cond = QTableWidgetItem("(그룹 폴더)")
+        if is_folder_start:
+            it_cond = QTableWidgetItem("(그룹 폴더 시작)")
             it_cond.setForeground(folder_txt)
             it_cond.setBackground(folder_bg)
             it_cond.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             it_cond.setToolTip("하위 시나리오들을 시각적으로 묶어주는 그룹 폴더입니다. (실행 시 즉시 통과)")
+            self.tbl_scenarios.setItem(row, 4, it_cond)
+        elif is_folder_end:
+            it_cond = QTableWidgetItem("(그룹 폴더 종료)")
+            it_cond.setForeground(folder_txt)
+            it_cond.setBackground(folder_bg)
+            it_cond.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            it_cond.setToolTip("그룹 폴더가 끝나는 지점입니다. (실행 시 즉시 통과)")
             self.tbl_scenarios.setItem(row, 4, it_cond)
         else:
             eff_cond = scen.get_effective_condition(self.project)
@@ -1539,12 +1605,19 @@ class MainWindow(QMainWindow):
 
         # 5. ActionSequence Module (Hand)
         self.tbl_scenarios.setCellWidget(row, 5, None)
-        if is_folder:
-            it_act = QTableWidgetItem("(하위 항목 정리용)")
+        if is_folder_start:
+            c_cnt = folder_info.get("child_count", 0) if folder_info else 0
+            it_act = QTableWidgetItem(f"하위 {c_cnt}개 항목 포함" if c_cnt > 0 else "(비어 있음)")
             it_act.setForeground(folder_txt)
             it_act.setBackground(folder_bg)
             it_act.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            it_act.setToolTip("시나리오 목록의 가독성을 위한 폴더로 실제 동작에는 영향을 주지 않습니다.")
+            it_act.setToolTip("폴더 내 하위 항목 수")
+            self.tbl_scenarios.setItem(row, 5, it_act)
+        elif is_folder_end:
+            it_act = QTableWidgetItem("(통과)")
+            it_act.setForeground(folder_txt)
+            it_act.setBackground(folder_bg)
+            it_act.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.tbl_scenarios.setItem(row, 5, it_act)
         else:
             eff_acts = scen.get_effective_actions(self.project)
@@ -1908,15 +1981,35 @@ class MainWindow(QMainWindow):
         act_load_preset.triggered.connect(self._on_open_preset_manager)
         menu.addSeparator()
 
+        selected_rows = self.tbl_scenarios.selectionModel().selectedRows()
+        if len(selected_rows) >= 2:
+            act_group = menu.addAction(f"📁 선택한 {len(selected_rows)}개 시나리오를 새 폴더로 묶기")
+            act_group.triggered.connect(self._on_add_folder)
+            menu.addSeparator()
+
         curr_row = self.tbl_scenarios.rowAt(pos.y())
         if 0 <= curr_row < len(self.project.scenarios):
             scen = self.project.scenarios[curr_row]
-            if scen.node_type == "folder":
+            is_fld_start = getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start"))
+            is_fld_end = getattr(scen, "is_folder_end", scen.node_type == "folder_end")
+            if is_fld_start:
                 toggle_txt = "📂 폴더 펼치기" if getattr(scen, "is_collapsed", False) else "📁 폴더 접기"
                 act_toggle = menu.addAction(toggle_txt)
                 act_toggle.triggered.connect(lambda checked, s=scen: self._toggle_folder_collapse(s))
                 act_rename = menu.addAction("✏️ 폴더 이름 변경...")
                 act_rename.triggered.connect(lambda checked, s=scen: self._rename_folder(s))
+                act_move_up = menu.addAction("⬆️ 폴더 단위 위로 이동")
+                act_move_up.triggered.connect(self._on_move_up)
+                act_move_dn = menu.addAction("⬇️ 폴더 단위 아래로 이동")
+                act_move_dn.triggered.connect(self._on_move_down)
+                menu.addSeparator()
+            elif is_fld_end:
+                act_rename = menu.addAction("✏️ 폴더 이름 변경...")
+                act_rename.triggered.connect(lambda checked, s=scen: self._rename_folder(s))
+                act_move_up = menu.addAction("⬆️ 폴더 단위 위로 이동")
+                act_move_up.triggered.connect(self._on_move_up)
+                act_move_dn = menu.addAction("⬇️ 폴더 단위 아래로 이동")
+                act_move_dn.triggered.connect(self._on_move_down)
                 menu.addSeparator()
             else:
                 act_pick_cond = menu.addAction(f"👁️ [s{scen.scenario_number}] 인식조건 모듈 교체...")
@@ -1964,8 +2057,13 @@ class MainWindow(QMainWindow):
         if not (0 <= row < len(self.project.scenarios)):
             return
         scen = self.project.scenarios[row]
-        if scen.node_type == "folder":
+        if getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start")):
             self._toggle_folder_collapse(scen)
+            return
+        if getattr(scen, "is_folder_end", scen.node_type == "folder_end"):
+            s_idx = self.project.find_matching_folder_start(row)
+            if s_idx is not None:
+                self.tbl_scenarios.selectRow(s_idx)
             return
         if col == 0:
             self.tbl_scenarios.selectRow(row)
@@ -2184,39 +2282,138 @@ class MainWindow(QMainWindow):
             self.modules_widget.refresh_modules()
         self.tbl_scenarios.selectRow(len(self.project.scenarios) - 1)
 
+    def _get_block_range(self, row: int) -> Tuple[int, int]:
+        """
+        If row is a folder or loop boundary (start or end), returns (start_idx, end_idx) of the block.
+        Otherwise returns (row, row).
+        """
+        if not (0 <= row < len(self.project.scenarios)):
+            return (row, row)
+        scen = self.project.scenarios[row]
+        if getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start")):
+            end_idx = self.project.find_matching_folder_end(row)
+            if end_idx is not None and end_idx >= row:
+                return (row, end_idx)
+        elif getattr(scen, "is_folder_end", scen.node_type == "folder_end"):
+            start_idx = self.project.find_matching_folder_start(row)
+            if start_idx is not None and start_idx <= row:
+                return (start_idx, row)
+        elif scen.node_type == "loop_start":
+            end_idx = self.project.find_matching_loop_end(row)
+            if end_idx is not None and end_idx >= row:
+                return (row, end_idx)
+        elif scen.node_type == "loop_end":
+            start_idx = self.project.find_matching_loop_start(row)
+            if start_idx is not None and start_idx <= row:
+                return (start_idx, row)
+        return (row, row)
+
     def _on_add_folder(self):
-        """Add an organizational folder node to group scenarios."""
+        """Add an organizational folder block to group scenarios (Photoshop-like layer group)."""
+        selected_rows = sorted([r.row() for r in self.tbl_scenarios.selectionModel().selectedRows()])
         fld_num = self.project.get_next_scenario_number()
-        self._push_scenario_undo_state(f"폴더 #{fld_num} 추가")
-        new_fld = Scenario(
-            scenario_number=fld_num,
-            name=f"그룹 폴더 {fld_num}",
-            node_type="folder",
-            enabled=True
-        )
-        insert_idx = len(self.project.scenarios)
-        rows = self.tbl_scenarios.selectionModel().selectedRows()
-        if rows:
-            insert_idx = rows[0].row() + 1
-        self.project.scenarios.insert(insert_idx, new_fld)
-        self.project.renumber_steps()
-        self._refresh_scenario_table()
-        self.tbl_scenarios.selectRow(insert_idx)
-        self.status_bar.showMessage(f"📁 새 그룹 폴더 's{new_fld.scenario_number}'가 추가되었습니다.", 3000)
+
+        if len(selected_rows) >= 2:
+            min_r = selected_rows[0]
+            max_r = selected_rows[-1]
+            self._push_scenario_undo_state(f"선택 항목을 폴더 #{fld_num}로 그룹화")
+
+            start_scen = Scenario(
+                scenario_number=fld_num,
+                name=f"그룹 폴더 {fld_num}",
+                node_type="folder_start",
+                enabled=True
+            )
+            end_num = self.project.get_next_scenario_number()
+            end_scen = Scenario(
+                scenario_number=end_num,
+                name=f"그룹 폴더 {fld_num} 끝",
+                node_type="folder_end",
+                folder_target_id=start_scen.id,
+                enabled=True
+            )
+            start_scen.folder_target_id = end_scen.id
+
+            self.project.scenarios.insert(min_r, start_scen)
+            self.project.scenarios.insert(max_r + 2, end_scen)
+            self.project.renumber_steps()
+            self._refresh_scenario_table()
+            self.tbl_scenarios.selectRow(min_r)
+            self.status_bar.showMessage(f"📁 선택한 {len(selected_rows)}개 시나리오를 '그룹 폴더 {fld_num}'로 묶었습니다.", 3000)
+        else:
+            insert_idx = len(self.project.scenarios)
+            if selected_rows:
+                insert_idx = selected_rows[0] + 1
+
+            self._push_scenario_undo_state(f"폴더 블록 #{fld_num} 추가")
+            start_scen = Scenario(
+                scenario_number=fld_num,
+                name=f"그룹 폴더 {fld_num}",
+                node_type="folder_start",
+                enabled=True
+            )
+            child_num = self.project.get_next_scenario_number()
+            child_scen = Scenario(
+                scenario_number=child_num,
+                name=f"폴더 항목 1",
+                node_type="normal",
+                enabled=True
+            )
+            end_num = self.project.get_next_scenario_number()
+            end_scen = Scenario(
+                scenario_number=end_num,
+                name=f"그룹 폴더 {fld_num} 끝",
+                node_type="folder_end",
+                folder_target_id=start_scen.id,
+                enabled=True
+            )
+            start_scen.folder_target_id = end_scen.id
+
+            self.project.scenarios[insert_idx:insert_idx] = [start_scen, child_scen, end_scen]
+            self.project.renumber_steps()
+            self._refresh_scenario_table()
+            self.tbl_scenarios.selectRow(insert_idx)
+            self.status_bar.showMessage(f"📁 새 그룹 폴더 's{start_scen.scenario_number}' 블록이 추가되었습니다.", 3000)
 
     def _toggle_folder_collapse(self, scen: Scenario):
         """Toggle collapse/expand state of a folder node."""
+        if getattr(scen, "is_folder_end", scen.node_type == "folder_end"):
+            idx = self.project.scenarios.index(scen) if scen in self.project.scenarios else -1
+            if idx >= 0:
+                s_idx = self.project.find_matching_folder_start(idx)
+                if s_idx is not None:
+                    scen = self.project.scenarios[s_idx]
         scen.is_collapsed = not getattr(scen, "is_collapsed", False)
         self._refresh_scenario_table()
         state_str = "접힘" if scen.is_collapsed else "펼침"
         self.status_bar.showMessage(f"📁 폴더 '{scen.name}' {state_str}", 2000)
 
     def _rename_folder(self, scen: Scenario):
-        """Prompt to rename a folder node."""
-        name, ok = QInputDialog.getText(self, "폴더 이름 변경", "폴더 이름을 입력하세요:", text=scen.name)
+        """Prompt to rename a folder node and synchronize start & end names."""
+        base_name = scen.name
+        if base_name.endswith(" 끝") or base_name.endswith(" 종료"):
+            base_name = base_name.replace(" 끝", "").replace(" 종료", "")
+        name, ok = QInputDialog.getText(self, "폴더 이름 변경", "폴더 이름을 입력하세요:", text=base_name)
         if ok and name.strip():
+            new_name = name.strip()
             self._push_scenario_undo_state(f"폴더 '{scen.name}' 이름 변경")
-            scen.name = name.strip()
+            idx = self.project.scenarios.index(scen) if scen in self.project.scenarios else -1
+            if idx >= 0:
+                if getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start")):
+                    scen.name = new_name
+                    e_idx = self.project.find_matching_folder_end(idx)
+                    if e_idx is not None:
+                        self.project.scenarios[e_idx].name = f"{new_name} 끝"
+                elif getattr(scen, "is_folder_end", scen.node_type == "folder_end"):
+                    scen.name = f"{new_name} 끝"
+                    s_idx = self.project.find_matching_folder_start(idx)
+                    if s_idx is not None:
+                        self.project.scenarios[s_idx].name = new_name
+                else:
+                    scen.name = new_name
+            else:
+                scen.name = new_name
+
             self._refresh_scenario_table()
             if hasattr(self, "inspector") and self.inspector.current_scenario and self.inspector.current_scenario.id == scen.id:
                 self.inspector.edit_name.setText(scen.name)
@@ -2284,10 +2481,49 @@ class MainWindow(QMainWindow):
             return
         row = rows[0].row()
         scen = self.project.scenarios[row]
+        is_fld_start = getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start"))
+        is_fld_end = getattr(scen, "is_folder_end", scen.node_type == "folder_end")
+
+        if is_fld_start or is_fld_end:
+            b_start, b_end = self._get_block_range(row)
+            if b_end > b_start:
+                msg_box = QMessageBox(self)
+                msg_box.setWindowTitle("폴더 삭제 확인")
+                msg_box.setText(f"📁 그룹 폴더 [{self.project.scenarios[b_start].name}] 삭제 방식 선택")
+                msg_box.setInformativeText("폴더와 내부 시나리오를 모두 삭제하시겠습니까, 아니면 폴더만 해제(내용물 유지)하시겠습니까?")
+                btn_all = msg_box.addButton("전체 삭제 (하위 포함)", QMessageBox.YesRole)
+                btn_group_only = msg_box.addButton("폴더만 해제 (내용물 유지)", QMessageBox.NoRole)
+                btn_cancel = msg_box.addButton("취소", QMessageBox.RejectRole)
+                msg_box.exec_()
+
+                clicked = msg_box.clickedButton()
+                if clicked == btn_all:
+                    self._push_scenario_undo_state(f"폴더 '{self.project.scenarios[b_start].name}' 전체 삭제")
+                    del self.project.scenarios[b_start : b_end + 1]
+                    self.project.renumber_steps()
+                    self._refresh_scenario_table()
+                    new_sel = min(b_start, len(self.project.scenarios) - 1)
+                    if new_sel >= 0:
+                        self.tbl_scenarios.selectRow(new_sel)
+                    return
+                elif clicked == btn_group_only:
+                    self._push_scenario_undo_state(f"폴더 '{self.project.scenarios[b_start].name}' 그룹 해제")
+                    del self.project.scenarios[b_end]
+                    del self.project.scenarios[b_start]
+                    self.project.renumber_steps()
+                    self._refresh_scenario_table()
+                    new_sel = min(b_start, len(self.project.scenarios) - 1)
+                    if new_sel >= 0:
+                        self.tbl_scenarios.selectRow(new_sel)
+                    return
+                else:
+                    return
+
         res = QMessageBox.question(self, "삭제 확인", f"시나리오 고유 s{scen.scenario_number} (실행 #{scen.step_number}) [{scen.name}]를 삭제하시겠습니까?")
         if res == QMessageBox.Yes:
             self._push_scenario_undo_state(f"시나리오 s{scen.scenario_number} 삭제")
             del self.project.scenarios[row]
+            self.project.renumber_steps()
             self._refresh_scenario_table()
             new_sel = min(row, len(self.project.scenarios) - 1)
             if new_sel >= 0:
@@ -2295,39 +2531,77 @@ class MainWindow(QMainWindow):
 
     def _on_move_up(self):
         rows = self.tbl_scenarios.selectionModel().selectedRows()
-        if not rows or rows[0].row() == 0:
+        if not rows:
             return
         row = rows[0].row()
-        self._push_scenario_undo_state(f"시나리오 s{self.project.scenarios[row].scenario_number} 위로 이동")
-        self.project.scenarios[row - 1], self.project.scenarios[row] = (
-            self.project.scenarios[row], self.project.scenarios[row - 1]
-        )
+        b_start, b_end = self._get_block_range(row)
+        if b_start <= 0:
+            self.status_bar.showMessage("이미 최상단에 위치해 있어 위로 이동할 수 없습니다.", 2000)
+            return
+
+        prev_row = b_start - 1
+        prev_b_start, prev_b_end = self._get_block_range(prev_row)
+        target = prev_b_start
+
+        self._push_scenario_undo_state(f"시나리오 s{self.project.scenarios[b_start].scenario_number} 위로 이동")
+        block = self.project.scenarios[b_start : b_end + 1]
+        del self.project.scenarios[b_start : b_end + 1]
+        self.project.scenarios[target:target] = block
+        self.project.renumber_steps()
         self._refresh_scenario_table()
-        self.tbl_scenarios.selectRow(row - 1)
+        self.tbl_scenarios.selectRow(target)
+        unit_str = "📁 폴더" if getattr(block[0], "is_folder", False) else "시나리오"
+        self.status_bar.showMessage(f"{unit_str} '{block[0].name}' 위로 이동 완료", 2000)
 
     def _on_move_down(self):
         rows = self.tbl_scenarios.selectionModel().selectedRows()
-        if not rows or rows[0].row() >= len(self.project.scenarios) - 1:
+        if not rows:
             return
         row = rows[0].row()
-        self._push_scenario_undo_state(f"시나리오 s{self.project.scenarios[row].scenario_number} 아래로 이동")
-        self.project.scenarios[row + 1], self.project.scenarios[row] = (
-            self.project.scenarios[row], self.project.scenarios[row + 1]
-        )
+        b_start, b_end = self._get_block_range(row)
+        if b_end >= len(self.project.scenarios) - 1:
+            self.status_bar.showMessage("이미 최하단에 위치해 있어 아래로 이동할 수 없습니다.", 2000)
+            return
+
+        next_row = b_end + 1
+        next_b_start, next_b_end = self._get_block_range(next_row)
+        target = next_b_end + 1
+
+        self._push_scenario_undo_state(f"시나리오 s{self.project.scenarios[b_start].scenario_number} 아래로 이동")
+        block = self.project.scenarios[b_start : b_end + 1]
+        block_len = len(block)
+        del self.project.scenarios[b_start : b_end + 1]
+        target_after_del = target - block_len
+        self.project.scenarios[target_after_del:target_after_del] = block
+        self.project.renumber_steps()
         self._refresh_scenario_table()
-        self.tbl_scenarios.selectRow(row + 1)
+        self.tbl_scenarios.selectRow(target_after_del)
+        unit_str = "📁 폴더" if getattr(block[0], "is_folder", False) else "시나리오"
+        self.status_bar.showMessage(f"{unit_str} '{block[0].name}' 아래로 이동 완료", 2000)
 
     def _on_scenario_row_reordered(self, from_row: int, to_row: int):
         """Reorders scenarios in the project via drag-and-drop."""
         if not self.project or not self.project.scenarios or from_row == to_row:
             return
         scens = self.project.scenarios
-        if 0 <= from_row < len(scens) and 0 <= to_row < len(scens):
-            self._push_scenario_undo_state(f"시나리오 s{scens[from_row].scenario_number} 드래그 이동")
-            scen = scens.pop(from_row)
-            scens.insert(to_row, scen)
-            self._refresh_scenario_table()
-            self.tbl_scenarios.selectRow(to_row)
+        if not (0 <= from_row < len(scens) and 0 <= to_row < len(scens)):
+            return
+        b_start, b_end = self._get_block_range(from_row)
+        if b_start <= to_row <= b_end:
+            return
+
+        self._push_scenario_undo_state(f"시나리오 s{scens[b_start].scenario_number} 드래그 이동")
+        block = scens[b_start : b_end + 1]
+        block_len = len(block)
+        del scens[b_start : b_end + 1]
+        if to_row > b_start:
+            target_idx = max(0, to_row - block_len + 1)
+        else:
+            target_idx = to_row
+        scens[target_idx:target_idx] = block
+        self.project.renumber_steps()
+        self._refresh_scenario_table()
+        self.tbl_scenarios.selectRow(target_idx)
 
     # ==========================================
     # Target Window Management
@@ -2655,6 +2929,16 @@ class MainWindow(QMainWindow):
                 selected_scen_id = self.project.scenarios[row].id
         self._on_start_execution(start_scenario_id=selected_scen_id)
 
+    def _set_paused_state(self, scenario_id: Optional[str]):
+        """Records paused scenario ID and visually marks it in header and scenario list."""
+        self._paused_scenario_id = scenario_id
+        self._refresh_scenario_table()
+
+    def _clear_paused_state(self):
+        """Clears paused scenario ID and removes paused visual markers."""
+        self._paused_scenario_id = None
+        self._refresh_scenario_table()
+
     def _on_start_execution(self, start_scenario_id: Optional[str] = None):
         if not self.target_hwnd or not WindowManager.get_window_info(self.target_hwnd):
             # Target window not selected or closed: Auto-launch virtual canvas window
@@ -2663,14 +2947,24 @@ class MainWindow(QMainWindow):
 
         if self.runner and self.runner.isRunning():
             if self.runner._is_paused:
-                if start_scenario_id:
-                    self.runner.set_next_scenario_id(start_scenario_id)
+                target_id = start_scenario_id or getattr(self, "_paused_scenario_id", None)
+                if target_id:
+                    self.runner.set_next_scenario_id(target_id)
                 self.runner.resume()
+                self._clear_paused_state()
                 self.lbl_run_status.setText("실행 중...")
                 self.btn_pause.setText("⏸ 일시정지")
                 if hasattr(self, "popup_play_bar") and self.popup_play_bar:
                     self.popup_play_bar.set_runner_state("running", "재개되어 실행 중...")
                 return
+            else:
+                self.runner.stop()
+                self.runner.wait(100)
+
+        # If starting execution with a paused scenario remembered and no specific start_scenario_id
+        if start_scenario_id is None and getattr(self, "_paused_scenario_id", None):
+            start_scenario_id = self._paused_scenario_id
+        self._clear_paused_state()
 
         self.runner = WorkflowRunner(self.project, self.target_hwnd, start_scenario_id=start_scenario_id, parent=self)
         self.runner.sig_log.connect(self._append_log)
@@ -2713,7 +3007,11 @@ class MainWindow(QMainWindow):
     def _on_pause_execution(self):
         if self.runner and self.runner.isRunning():
             if self.runner._is_paused:
+                # Resuming execution from paused node
+                if getattr(self, "_paused_scenario_id", None):
+                    self.runner.set_next_scenario_id(self._paused_scenario_id)
                 self.runner.resume()
+                self._clear_paused_state()
                 self.btn_pause.setText("⏸ 일시정지")
                 self.lbl_run_status.setText("실행 중...")
                 self.lbl_run_status.setStyleSheet("color: #16a34a; font-weight: bold;")
@@ -2722,7 +3020,10 @@ class MainWindow(QMainWindow):
                 if hasattr(self, "floating_stop") and self.floating_stop:
                     self.floating_stop.set_paused_state(False)
             else:
+                # Pausing execution and recording paused node
                 self.runner.pause()
+                paused_id = getattr(self.runner, "current_scenario_id", None) or getattr(self, "_last_running_scenario_id", None)
+                self._set_paused_state(paused_id)
                 self.btn_pause.setText("▶ 재개")
                 self.lbl_run_status.setText("일시정지됨")
                 self.lbl_run_status.setStyleSheet("color: #ea580c; font-weight: bold;")
@@ -2734,8 +3035,17 @@ class MainWindow(QMainWindow):
     def _on_stop_execution(self):
         if self.runner:
             self.runner.stop()
-            self.lbl_run_status.setText("정지 요청 중...")
-            self.lbl_run_status.setStyleSheet("color: #dc2626; font-weight: bold;")
+            self.runner.wait(50)
+        self._clear_paused_state()
+        self._last_running_scenario_id = None
+        self.btn_run.setEnabled(True)
+        if hasattr(self, "btn_run_selected"):
+            self.btn_run_selected.setEnabled(True)
+        self.btn_pause.setEnabled(False)
+        self.btn_stop.setEnabled(False)
+        self.btn_pause.setText("⏸ 일시정지")
+        self.lbl_run_status.setText("정지됨")
+        self.lbl_run_status.setStyleSheet("color: #dc2626; font-weight: bold;")
         self._highlight_running_row_header(None)
         if hasattr(self, "floating_stop") and self.floating_stop:
             self.floating_stop.hide()
@@ -2751,6 +3061,7 @@ class MainWindow(QMainWindow):
             else:
                 self.lbl_loop_progress.setText("(대기)")
                 self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #64748b; font-size: 8.5pt;")
+        self.status_bar.showMessage("시나리오 실행이 즉시 정지되었습니다.", 3000)
 
     def _on_step_execution(self):
         if not self.target_hwnd:
@@ -2842,6 +3153,7 @@ class MainWindow(QMainWindow):
                 self.action_overlay.clear_action()
 
     def _on_scenario_started(self, scenario_id: str):
+        self._last_running_scenario_id = scenario_id
         for row, s in enumerate(self.project.scenarios):
             if s.id == scenario_id:
                 # 행 선택(드래그 모양)을 유발하지 않고 스크롤 이동 및 헤더 녹색 하이라이트만 적용
@@ -2863,6 +3175,8 @@ class MainWindow(QMainWindow):
         pass
 
     def _on_runner_finished(self, reason: str):
+        self._clear_paused_state()
+        self._last_running_scenario_id = None
         self.btn_run.setEnabled(True)
         if hasattr(self, "btn_run_selected"):
             self.btn_run_selected.setEnabled(True)

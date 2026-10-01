@@ -15,14 +15,36 @@ class ScenarioVerticalHeader(QHeaderView):
     def __init__(self, parent=None):
         super().__init__(Qt.Vertical, parent)
         self.highlight_row: int = -1
+        self.paused_row: int = -1
 
     def set_highlight_row(self, row: int):
         if self.highlight_row != row:
             self.highlight_row = row
             self.viewport().update()
 
+    def set_paused_row(self, row: int):
+        if self.paused_row != row:
+            self.paused_row = row
+            self.viewport().update()
+
     def paintSection(self, painter, rect, logicalIndex):
-        if logicalIndex == self.highlight_row:
+        if logicalIndex == self.paused_row:
+            painter.save()
+            # Vibrant amber/orange background for paused scenario node
+            painter.fillRect(rect, QColor("#ea580c"))
+            painter.setPen(QColor("#c2410c"))
+            painter.drawRect(rect.adjusted(0, 0, -1, -1))
+            # Bold white text with pause icon
+            painter.setPen(QColor("#ffffff"))
+            font = painter.font()
+            font.setBold(True)
+            painter.setFont(font)
+            text = self.model().headerData(logicalIndex, Qt.Vertical, Qt.DisplayRole) if self.model() else ""
+            if not text:
+                text = str(logicalIndex + 1)
+            painter.drawText(rect, Qt.AlignCenter, f"⏸ {text}")
+            painter.restore()
+        elif logicalIndex == self.highlight_row:
             painter.save()
             # Vivid emerald green background for currently running scenario node
             painter.fillRect(rect, QColor("#16a34a"))
@@ -63,6 +85,10 @@ class DraggableScenarioTableWidget(QTableWidget):
     def set_highlight_row(self, row: int):
         """Highlights the specified row in the vertical header."""
         self._custom_v_header.set_highlight_row(row)
+
+    def set_paused_row(self, row: int):
+        """Marks the specified row as paused in the vertical header."""
+        self._custom_v_header.set_paused_row(row)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

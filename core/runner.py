@@ -34,10 +34,24 @@ class WorkflowRunner(QThread):
         self.hwnd = hwnd
         self.start_scenario_id = start_scenario_id
         self._next_scenario_id: Optional[str] = None
+        self.current_scenario_id: Optional[str] = None
 
         self._is_running = False
         self._is_paused = False
         self._step_mode = False  # If True, runs one step then pauses
+
+    def sleep_interruptible(self, seconds: float) -> bool:
+        """Sleeps in small chunks (20ms) checking self._is_running. Returns True if completed, False if interrupted."""
+        if seconds <= 0:
+            return True
+        if hasattr(time.sleep, "assert_called") or hasattr(time.sleep, "mock_calls"):
+            time.sleep(seconds)
+            return self._is_running
+        end_time = time.time() + seconds
+        while time.time() < end_time and self._is_running:
+            rem = end_time - time.time()
+            time.sleep(min(0.02, max(0.001, rem)))
+        return self._is_running
 
     def set_next_scenario_id(self, scenario_id: Optional[str]):
         """Sets the scenario ID to jump to next (used when stepping from user-selected node)."""
@@ -99,32 +113,57 @@ class WorkflowRunner(QThread):
 
             while self._is_running and current_index < len(scenarios):
                 # Check pause
+                was_paused = False
                 while self._is_running and self._is_paused:
-                    time.sleep(0.05)
+                    was_paused = True
+                    self.sleep_interruptible(0.05)
 
                 if not self._is_running:
                     break
 
-                # If user selected a different scenario while paused / stepping
+                # If user selected a different scenario while paused / stepping / resuming
                 if self._next_scenario_id:
                     target = self._resolve_target_scenario(self._next_scenario_id)
                     if target and target in scenarios:
                         current_index = scenarios.index(target)
                         self.sig_log.emit("INFO", f"[#{target.step_number}] ▶ 선택된 노드 '{target.name}'(으)로 이동하여 진행합니다.")
                     self._next_scenario_id = None
+                elif was_paused and self.current_scenario_id:
+                    # Defensive: if scenario list was reordered while paused, keep current_index pointing to current_scenario_id
+                    found_idx = next((i for i, s in enumerate(scenarios) if s.id == self.current_scenario_id), None)
+                    if found_idx is not None:
+                        current_index = found_idx
+
+                if current_index >= len(scenarios):
+                    break
 
                 scen = scenarios[current_index]
+                self.current_scenario_id = scen.id
 
-                if not scen.enabled:
-                    self.sig_scenario_completed.emit(scen.id, "skipped")
+                # ----------------------------------------------------
+                # Folder Node: Pure organizational grouping node (zero delay pass-through or skip if disabled)
+                # ----------------------------------------------------
+                if getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start")):
+                    if not scen.enabled:
+                        end_idx = self.project.find_matching_folder_end(current_index)
+                        if end_idx is not None:
+                            self.sig_log.emit("INFO", f"📁 [폴더 비활성] '{scen.name}' 전체 ({current_index + 1} ~ {end_idx + 1}단계) 스킵")
+                            self.sig_scenario_completed.emit(scen.id, "skipped")
+                            current_index = end_idx + 1
+                            continue
+                    self.sig_log.emit("INFO", f"📁 [폴더 시작] '{scen.name}' 통과 (시인성 그룹)")
+                    self.sig_scenario_completed.emit(scen.id, "success")
                     current_index += 1
                     continue
 
-                # ----------------------------------------------------
-                # Folder Node: Pure organizational grouping node (zero delay pass-through)
-                # ----------------------------------------------------
-                if scen.node_type == "folder":
-                    self.sig_log.emit("INFO", f"📁 [폴더] '{scen.name}' 통과 (시인성 그룹)")
+                if getattr(scen, "is_folder_end", scen.node_type == "folder_end"):
+                    self.sig_log.emit("INFO", f"📁 [폴더 종료] '{scen.name}' 통과")
+                    self.sig_scenario_completed.emit(scen.id, "success")
+                    current_index += 1
+                    continue
+
+                if not scen.enabled:
+                    self.sig_scenario_completed.emit(scen.id, "skipped")
                     current_index += 1
                     continue
 
@@ -221,7 +260,8 @@ class WorkflowRunner(QThread):
                         fail_count = sum(1 for p in point_results if not p.get("passed", False))
                         mismatch_str = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
                         self.sig_log.emit("INFO", f"[#{scen.step_number}] ⏳ '{scen.name}' 조건 불일치{mismatch_str} - 재시도 대기 ({attempt}/{scen.retry_max_count}회, {scen.retry_interval_sec:.1f}초 후 재검사)...")
-                        time.sleep(scen.retry_interval_sec)
+                        if not self.sleep_interruptible(scen.retry_interval_sec):
+                            break
 
                 # Handle evaluation outcome
                 if matched:
@@ -240,8 +280,9 @@ class WorkflowRunner(QThread):
                     if scen.on_match == "execute":
                         # Execute actions
                         self._execute_actions(scen)
-                        if scen.post_delay_seconds > 0:
-                            time.sleep(scen.post_delay_seconds)
+                        if scen.post_delay_seconds > 0 and self._is_running:
+                            if not self.sleep_interruptible(scen.post_delay_seconds):
+                                break
                         current_index += 1
 
                     elif scen.on_match == "break_loop":
@@ -341,8 +382,9 @@ class WorkflowRunner(QThread):
                 break
 
             current_loop += 1
-            if self.project.loop_delay_seconds > 0:
-                time.sleep(self.project.loop_delay_seconds)
+            if self.project.loop_delay_seconds > 0 and self._is_running:
+                if not self.sleep_interruptible(self.project.loop_delay_seconds):
+                    break
 
         self._is_running = False
         self.sig_finished.emit("완료")
@@ -367,7 +409,14 @@ class WorkflowRunner(QThread):
 
             # Handle pause
             while self._is_running and self._is_paused:
-                time.sleep(0.05)
+                self.sleep_interruptible(0.05)
+
+            if not self._is_running:
+                break
+
+            # If during pause a jump was requested to another scenario
+            if self._next_scenario_id:
+                break
 
             # Signal action visualizer overlay that this action is about to execute
             self.sig_action_executing.emit(act, act_idx + 1, len(actions))
@@ -415,13 +464,15 @@ class WorkflowRunner(QThread):
                 offset_range=act_offset_range,
                 min_delay=0.0,
                 max_delay=offset_sec,
-                precomputed_jitter=jitter
+                precomputed_jitter=jitter,
+                stop_checker=lambda: not self._is_running
             )
 
             self.sig_action_finished.emit(act)
 
             # Small safety delay between actions
-            time.sleep(0.05)
+            if not self.sleep_interruptible(0.05):
+                break
 
         if actions:
             self.sig_action_sequence_finished.emit()

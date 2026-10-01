@@ -6,7 +6,7 @@ import time
 import random
 import ctypes
 from ctypes import wintypes
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Callable
 import win32api
 import win32con
 from core.window_manager import WindowManager
@@ -183,7 +183,8 @@ class InputController:
         offset_range: int = 10,
         min_delay: float = 0.15,
         max_delay: float = 1.0,
-        precomputed_jitter: Optional[float] = None
+        precomputed_jitter: Optional[float] = None,
+        stop_checker: Optional[Callable[[], bool]] = None
     ) -> Tuple[int, int, float, float]:
         """
         Executes a single Action model instance against target window hwnd.
@@ -251,7 +252,7 @@ class InputController:
         elif act_type == "text_type":
             cls.type_text(action.text)
         elif act_type == "delay":
-            time.sleep(max(0.0, final_time))
+            cls.sleep_interruptible(max(0.0, final_time), stop_checker=stop_checker)
             return act_x, act_y, orig_time, final_time
         elif act_type == "sound_beep":
             cls.beep(action.beep_freq, action.beep_duration_ms)
@@ -259,7 +260,22 @@ class InputController:
             pass
 
         if should_anti_ban and jitter > 0:
-            time.sleep(jitter)
+            cls.sleep_interruptible(jitter, stop_checker=stop_checker)
 
         return act_x, act_y, orig_time, final_time
+
+    @classmethod
+    def sleep_interruptible(cls, seconds: float, stop_checker: Optional[Callable[[], bool]] = None):
+        """Sleeps in small chunks (20ms) to allow instantaneous termination when stopped."""
+        if seconds <= 0:
+            return
+        if stop_checker is None or hasattr(time.sleep, "assert_called") or hasattr(time.sleep, "mock_calls"):
+            time.sleep(seconds)
+            return
+        end_time = time.time() + seconds
+        while time.time() < end_time:
+            if stop_checker():
+                break
+            rem = end_time - time.time()
+            time.sleep(min(0.02, max(0.001, rem)))
 

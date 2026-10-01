@@ -214,6 +214,7 @@ class Scenario:
     loop_mode: str = "count"      # "count" (지정 횟수), "until_match" (조건 일치 시 탈출), "while_match" (조건 일치 동안 반복), "infinite" (무한)
     loop_count: int = 5           # 반복 횟수 (또는 최대 안전 한도)
     loop_target_id: str = ""      # loop_end일 때 대응되는 loop_start의 ID
+    folder_target_id: str = ""    # folder_end일 때 대응되는 folder_start의 ID (또는 그 반대)
     
     # Modular Condition slot (references project.conditions[condition_id])
     condition_id: Optional[str] = None
@@ -243,8 +244,16 @@ class Scenario:
     is_collapsed: bool = False  # 폴더 노드인 경우 하위 항목 접힘 여부
 
     @property
+    def is_folder_start(self) -> bool:
+        return self.node_type in ("folder", "folder_start")
+
+    @property
+    def is_folder_end(self) -> bool:
+        return self.node_type == "folder_end"
+
+    @property
     def is_folder(self) -> bool:
-        return self.node_type == "folder"
+        return self.is_folder_start or self.is_folder_end
 
     def get_effective_reference_image(self, project: Optional["Project"] = None) -> Optional[str]:
         """
@@ -301,8 +310,10 @@ class Scenario:
 
     def get_actions_summary(self, project: Optional["Project"] = None) -> str:
         """Returns summarized text of actions in this scenario."""
-        if self.node_type == "folder":
+        if self.is_folder_start:
             return "(하위 항목 정리용)"
+        if self.is_folder_end:
+            return "(그룹 폴더 종료)"
         if self.sequence_id and project:
             seq = project.find_action_sequence(self.sequence_id)
             if seq:
@@ -317,8 +328,10 @@ class Scenario:
 
     def get_condition_summary(self, project: Optional["Project"] = None) -> str:
         """Returns summarized text of condition."""
-        if self.node_type == "folder":
+        if self.is_folder_start:
             return "(그룹 폴더)"
+        if self.is_folder_end:
+            return "(그룹 폴더 종료)"
         if self.node_type == "loop_start":
             eff_cond = self.get_effective_condition(project)
             if self.loop_mode in ("until_match", "while_match") and eff_cond and eff_cond.points:
@@ -348,6 +361,7 @@ class Scenario:
             "loop_mode": self.loop_mode,
             "loop_count": self.loop_count,
             "loop_target_id": self.loop_target_id,
+            "folder_target_id": getattr(self, "folder_target_id", ""),
             "condition_id": self.condition_id,
             "condition": self.condition.to_dict() if self.condition else None,
             "on_match": self.on_match,
@@ -383,6 +397,7 @@ class Scenario:
             loop_mode=data.get("loop_mode", "count"),
             loop_count=data.get("loop_count", 5),
             loop_target_id=data.get("loop_target_id", ""),
+            folder_target_id=data.get("folder_target_id", ""),
             condition_id=data.get("condition_id"),
             condition=condition,
             on_match=data.get("on_match", "execute"),
@@ -459,6 +474,8 @@ class Project:
                             other.jump_target_on_mismatch = new_id
                         if other.loop_target_id == old_id:
                             other.loop_target_id = new_id
+                        if getattr(other, "folder_target_id", "") == old_id:
+                            other.folder_target_id = new_id
             seen_ids.add(scen.id)
 
         # 3. Guarantee strictly unique scenario_number
@@ -611,19 +628,141 @@ class Project:
         return scen
 
     def compute_hierarchy_depths(self) -> List[int]:
-        """Calculate nesting hierarchy depth (0, 1, 2...) for each scenario."""
+        """Calculate nesting hierarchy depth (0, 1, 2...) for each scenario,
+        properly accounting for both loop and folder nested hierarchies."""
         depths = []
         current_depth = 0
         for scen in self.scenarios:
-            if scen.node_type == "loop_end":
+            is_end = scen.node_type == "loop_end" or getattr(scen, "is_folder_end", scen.node_type == "folder_end")
+            is_start = scen.node_type == "loop_start" or getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start"))
+            if is_end:
                 current_depth = max(0, current_depth - 1)
                 depths.append(current_depth)
-            elif scen.node_type == "loop_start":
+            elif is_start:
                 depths.append(current_depth)
                 current_depth += 1
             else:
                 depths.append(current_depth)
         return depths
+
+    def find_matching_folder_end(self, start_idx: int) -> Optional[int]:
+        """Find corresponding folder_end index for a folder_start at start_idx."""
+        if start_idx < 0 or start_idx >= len(self.scenarios):
+            return None
+        depth = 0
+        for i in range(start_idx, len(self.scenarios)):
+            s = self.scenarios[i]
+            if getattr(s, "is_folder_start", s.node_type in ("folder", "folder_start")):
+                depth += 1
+            elif getattr(s, "is_folder_end", s.node_type == "folder_end"):
+                depth -= 1
+                if depth == 0:
+                    return i
+        return None
+
+    def find_matching_folder_start(self, end_idx: int) -> Optional[int]:
+        """Find corresponding folder_start index for a folder_end at end_idx."""
+        if end_idx < 0 or end_idx >= len(self.scenarios):
+            return None
+        depth = 0
+        for i in range(end_idx, -1, -1):
+            s = self.scenarios[i]
+            if getattr(s, "is_folder_end", s.node_type == "folder_end"):
+                depth += 1
+            elif getattr(s, "is_folder_start", s.node_type in ("folder", "folder_start")):
+                depth -= 1
+                if depth == 0:
+                    return i
+        return None
+
+    def analyze_folders(self) -> Dict[int, Dict[str, Any]]:
+        """
+        Analyzes all folder_start and folder_end nodes in scenarios.
+        Pairs matching starts and ends, allocates distinct color palette for each pair,
+        and flags orphaned folder nodes whose counterpart has been lost.
+        Returns mapping from scenario index to folder info dict.
+        """
+        palette_list = [
+            {"light": "#d97706", "dark": "#fbbf24", "bg_light": "#fef3c7", "bg_dark": "#451a03", "name": "앰버"},
+            {"light": "#0284c7", "dark": "#38bdf8", "bg_light": "#e0f2fe", "bg_dark": "#082f49", "name": "스카이블루"},
+            {"light": "#059669", "dark": "#34d399", "bg_light": "#d1fae5", "bg_dark": "#064e3b", "name": "에메랄드"},
+            {"light": "#7c3aed", "dark": "#a78bfa", "bg_light": "#ede9fe", "bg_dark": "#3b0764", "name": "바이올렛"},
+            {"light": "#db2777", "dark": "#f472b6", "bg_light": "#fce7f3", "bg_dark": "#500724", "name": "로즈"},
+            {"light": "#475569", "dark": "#94a3b8", "bg_light": "#f1f5f9", "bg_dark": "#1e293b", "name": "슬레이트"},
+        ]
+        info_map = {}
+        stack = []  # List of (index, scenario, pair_counter)
+        pair_counter = 0
+
+        for idx, scen in enumerate(self.scenarios):
+            is_start = getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start"))
+            is_end = getattr(scen, "is_folder_end", scen.node_type == "folder_end")
+            if is_start:
+                pair_counter += 1
+                stack.append((idx, scen, pair_counter))
+            elif is_end:
+                if stack:
+                    start_idx, start_scen, p_num = stack.pop()
+                    pal = palette_list[(p_num - 1) % len(palette_list)]
+                    child_count = max(0, idx - start_idx - 1)
+                    info_map[start_idx] = {
+                        "is_folder": True,
+                        "node_type": "folder_start",
+                        "has_pair": True,
+                        "pair_number": p_num,
+                        "partner_index": idx,
+                        "child_count": child_count,
+                        "color_light": pal["light"],
+                        "color_dark": pal["dark"],
+                        "bg_light": pal["bg_light"],
+                        "bg_dark": pal["bg_dark"],
+                        "warning": None
+                    }
+                    info_map[idx] = {
+                        "is_folder": True,
+                        "node_type": "folder_end",
+                        "has_pair": True,
+                        "pair_number": p_num,
+                        "partner_index": start_idx,
+                        "child_count": child_count,
+                        "color_light": pal["light"],
+                        "color_dark": pal["dark"],
+                        "bg_light": pal["bg_light"],
+                        "bg_dark": pal["bg_dark"],
+                        "warning": None
+                    }
+                else:
+                    info_map[idx] = {
+                        "is_folder": True,
+                        "node_type": "folder_end",
+                        "has_pair": False,
+                        "pair_number": 0,
+                        "partner_index": None,
+                        "child_count": 0,
+                        "color_light": "#ef4444",
+                        "color_dark": "#f87171",
+                        "bg_light": "#fee2e2",
+                        "bg_dark": "#450a0a",
+                        "warning": "⚠️ [폴더 짝 소실: 시작 노드 없음]"
+                    }
+
+        while stack:
+            start_idx, start_scen, p_num = stack.pop()
+            info_map[start_idx] = {
+                "is_folder": True,
+                "node_type": "folder_start",
+                "has_pair": False,
+                "pair_number": p_num,
+                "partner_index": None,
+                "child_count": 0,
+                "color_light": "#ef4444",
+                "color_dark": "#f87171",
+                "bg_light": "#fee2e2",
+                "bg_dark": "#450a0a",
+                "warning": "⚠️ [폴더 짝 소실: 종료 노드 없음]"
+            }
+
+        return info_map
 
     def find_matching_loop_end(self, start_idx: int) -> Optional[int]:
         """Find corresponding loop_end index for a loop_start at start_idx."""

@@ -392,7 +392,8 @@ class InspectorWidget(QWidget):
 
         self.combo_node_type = QComboBox()
         self.combo_node_type.addItem("📄 일반 시나리오 (조건/액션)", "normal")
-        self.combo_node_type.addItem("📁 그룹 폴더 노드 (Folder)", "folder")
+        self.combo_node_type.addItem("📁 그룹 폴더 시작 (Folder Start)", "folder_start")
+        self.combo_node_type.addItem("📁 그룹 폴더 종료 (Folder End)", "folder_end")
         self.combo_node_type.addItem("🔁 루프 시작 노드 (Loop Start)", "loop_start")
         self.combo_node_type.addItem("🔁 루프 종료 노드 (Loop End)", "loop_end")
         self.combo_node_type.currentIndexChanged.connect(self._on_node_type_changed)
@@ -986,6 +987,8 @@ class InspectorWidget(QWidget):
             # Node Type & Loop Settings
             self.combo_node_type.blockSignals(True)
             idx_nt = self.combo_node_type.findData(scenario.node_type)
+            if idx_nt < 0 and scenario.node_type == "folder":
+                idx_nt = self.combo_node_type.findData("folder_start")
             self.combo_node_type.setCurrentIndex(idx_nt if idx_nt >= 0 else 0)
             self.combo_node_type.blockSignals(False)
 
@@ -2008,7 +2011,7 @@ class InspectorWidget(QWidget):
         nt = self.combo_node_type.currentData() or "normal"
         is_start = (nt == "loop_start")
         is_end = (nt == "loop_end")
-        is_folder = (nt == "folder")
+        is_folder = (nt in ("folder", "folder_start", "folder_end"))
 
         self.loop_container.setVisible(is_start)
         self.lbl_loop_end_info.setVisible(is_end)
