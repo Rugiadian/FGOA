@@ -1,0 +1,30 @@
+[일시 / Timestamp]
+2026-10-02 21:34:41 ~ 2026-10-02 21:43:00
+
+[요청 내용 / User Request]
+mumu플레이어랑 fgoa만 기동시켰을 뿐인데 컴퓨터가 전반적으로 점점 느려져. 이유 해결방법
+
+[결과 요약 / Summary of Results]
+1. 시스템 리소스 및 프로세스 진단 분석:
+   - DWM (Desktop Window Manager, dwm.exe) 메모리 비정상 고갈 확인: 비공개 메모리(PM)가 1,023MB(약 1GB)에 도달하여 전체 윈도우 UI 렌더링 합성 엔진에 극심한 병목 유발.
+   - GPU VRAM 한계 초과 (NVIDIA GeForce GTX 750 Ti 2GB, QHD 2560x1440 환경): 2GB 전용 비디오 메모리 환경에서 QHD 해상도 + Windows DWM(1GB) + MuMu 12 렌더러가 중첩되면서 VRAM 초과(Overcommit) 발생. 이로 인해 GPU가 시스템 RAM으로 비디오 텍스처를 스왑(Shared GPU Memory Throttling)하여 전체 화면 렌더링과 마우스 커서가 슬로우 모션처럼 끊김.
+   - FGOA 프로세스(pythonw) 메모리 및 타이머 낭비 확인: 장시간 실행 중 메모리가 약 875MB에 달함. 1.5초마다 타겟 창을 감시하는 타이머에서 setText 및 setStyleSheet를 매번 무조건 호출하여 Qt CSS 파서 힙 할당 및 스타일 재계산이 누적되고 있었으며, 실행 로그(_log_records 및 txt_log)에 보관 상한이 없어 메모리가 지속 증가함.
+
+2. FGOA 내부 코드 최적화 적용:
+   - ui/main_window.py:
+     1) _update_target_label 및 _check_target_alive에 Dirty Checking 메커니즘을 도입하여 라벨 텍스트나 스타일이 변경되었을 때만 setText()와 setStyleSheet()를 호출하도록 개선 (1.5초 주기마다 불필요한 Qt CSS 파서 재실행 및 힙 단편화 원천 차단).
+     2) txt_log QTextBrowser에 setMaximumBlockCount(1000)을 적용하고 _log_records 버퍼 크기를 최대 1,000건으로 슬라이싱하여 장시간 기동 시에도 메모리가 무한정 불어나지 않도록 방어.
+     3) _on_log_anchor_clicked에서 고유 ID 기반 검색을 적용하여 로그 슬라이싱 후에도 불일치 세부내역 토글이 안정적으로 동작하도록 보장.
+   - core/version.py:
+     버전 번호를 261002.2141로 갱신.
+
+3. 사용자 조치 가이드라인 도출 (MuMu 플레이어 및 윈도우 환경 최적화):
+   - dwm.exe 재시작 또는 PC 재부팅을 통한 DWM 1GB 메모리 누수 해소.
+   - MuMu 12 그래픽 렌더러 모드를 Vulkan에서 DirectX 11 / OpenGL로 변경 (Vulkan VRAM 누수 방지).
+   - MuMu 디스플레이 프레임을 60FPS(또는 30FPS)로 제한 및 "백그라운드 시 프레임 낮추기" 활성화.
+   - MuMu 해상도 설정 조정 및 가상 머신 CPU/RAM 할당 최적화.
+
+[영향 파일 목록 / Affected Files]
+- ui/main_window.py
+- core/version.py
+- history/2026-10-02_214300_MuMu_FGOA_기동_느려짐_원인_분석_및_메모리_최적화.txt

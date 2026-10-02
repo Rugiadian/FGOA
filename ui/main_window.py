@@ -843,6 +843,7 @@ class MainWindow(QMainWindow):
         log_font = QFont("Consolas", 9)
         log_font.setStyleHint(QFont.Monospace)
         self.txt_log.setFont(log_font)
+        self.txt_log.document().setMaximumBlockCount(1000)
         r_layout.addWidget(self.txt_log, 1)
 
         # Dock 3: Right Pane (Log)
@@ -2954,24 +2955,27 @@ class MainWindow(QMainWindow):
         pal = get_theme_colors(self.current_theme)
         if win:
             if win.hwnd:
-                self.lbl_target_info.setText(
-                    f"'{win.title}' (HWND: 0x{win.hwnd:X}, 해상도: {win.client_width}×{win.client_height})"
-                )
+                new_text = f"'{win.title}' (HWND: 0x{win.hwnd:X}, 해상도: {win.client_width}×{win.client_height})"
             else:
-                self.lbl_target_info.setText(
-                    f"📐 직접 지정 해상도: {win.client_width}×{win.client_height} ('{win.title}')"
-                )
-            self.lbl_target_info.setStyleSheet(f"font-weight: bold; color: {pal['info']};")
+                new_text = f"📐 직접 지정 해상도: {win.client_width}×{win.client_height} ('{win.title}')"
+            new_style = f"font-weight: bold; color: {pal['info']};"
         else:
             w = getattr(self.project, "target_client_width", 0)
             h = getattr(self.project, "target_client_height", 0)
             title = getattr(self.project, "target_window_title", "")
             if w > 0 and h > 0:
-                self.lbl_target_info.setText(f"📐 기억된 해상도: {w}×{h} ('{title or '가상 타겟'}')")
-                self.lbl_target_info.setStyleSheet(f"font-weight: bold; color: {pal['info']};")
+                new_text = f"📐 기억된 해상도: {w}×{h} ('{title or '가상 타겟'}')"
+                new_style = f"font-weight: bold; color: {pal['info']};"
             else:
-                self.lbl_target_info.setText("선택된 창 없음 (창 선택 버튼을 클릭하세요)")
-                self.lbl_target_info.setStyleSheet(f"font-weight: bold; color: {pal['warning']};")
+                new_text = "선택된 창 없음 (창 선택 버튼을 클릭하세요)"
+                new_style = f"font-weight: bold; color: {pal['warning']};"
+
+        if getattr(self, "_last_target_label_text", None) != new_text:
+            self._last_target_label_text = new_text
+            self.lbl_target_info.setText(new_text)
+        if getattr(self, "_last_target_label_style", None) != new_style:
+            self._last_target_label_style = new_style
+            self.lbl_target_info.setStyleSheet(new_style)
 
     def _update_authoring_resolution_display(self):
         """Update the authoring resolution badge text, tooltip, and theme styling."""
@@ -3150,8 +3154,14 @@ class MainWindow(QMainWindow):
                 if not self._auto_track_target_window():
                     self.target_hwnd = 0
                     pal = get_theme_colors(self.current_theme)
-                    self.lbl_target_info.setText("⚠️ 타겟 창이 닫혔거나 감지되지 않습니다!")
-                    self.lbl_target_info.setStyleSheet(f"font-weight: bold; color: {pal['danger']};")
+                    warn_text = "⚠️ 타겟 창이 닫혔거나 감지되지 않습니다!"
+                    warn_style = f"font-weight: bold; color: {pal['danger']};"
+                    if getattr(self, "_last_target_label_text", None) != warn_text:
+                        self._last_target_label_text = warn_text
+                        self.lbl_target_info.setText(warn_text)
+                    if getattr(self, "_last_target_label_style", None) != warn_style:
+                        self._last_target_label_style = warn_style
+                        self.lbl_target_info.setStyleSheet(warn_style)
             else:
                 self._update_target_label(win_info)
         else:
@@ -3513,10 +3523,13 @@ class MainWindow(QMainWindow):
         self.txt_log.clear()
         if hasattr(self, "_log_records"):
             self._log_records.clear()
+        self._next_log_id = 0
 
     def _append_log(self, level: str, msg: str):
         if not hasattr(self, "_log_records"):
             self._log_records = []
+        if not hasattr(self, "_next_log_id"):
+            self._next_log_id = 0
 
         pal = get_theme_colors(self.current_theme)
         color_map = {
@@ -3530,7 +3543,9 @@ class MainWindow(QMainWindow):
         color = color_map.get(level, pal["text_primary"])
         prefix_color = "#64748b" if pal["is_light"] else "#8da4c4"
 
-        log_id = len(self._log_records)
+        log_id = self._next_log_id
+        self._next_log_id += 1
+
         record = {
             "id": log_id,
             "level": level,
@@ -3559,6 +3574,11 @@ class MainWindow(QMainWindow):
             record["fail_count"] = ""
 
         self._log_records.append(record)
+
+        # Cap in-memory log records to prevent memory leak on long-running macro sessions
+        MAX_LOG_RECORDS = 1000
+        if len(self._log_records) > MAX_LOG_RECORDS:
+            del self._log_records[:len(self._log_records) - MAX_LOG_RECORDS]
 
         # Append newly formatted HTML
         html = self._format_log_record_html(record, pal, color, prefix_color)
@@ -3650,9 +3670,11 @@ class MainWindow(QMainWindow):
                     if prefix in url_str:
                         log_id = int(url_str.split(prefix)[1].strip("/"))
                         break
-                if hasattr(self, "_log_records") and 0 <= log_id < len(self._log_records):
-                    self._log_records[log_id]["expanded"] = not self._log_records[log_id].get("expanded", False)
-                    self._rerender_all_logs()
+                if hasattr(self, "_log_records"):
+                    target_rec = next((r for r in self._log_records if r.get("id") == log_id), None)
+                    if target_rec:
+                        target_rec["expanded"] = not target_rec.get("expanded", False)
+                        self._rerender_all_logs()
             except Exception:
                 pass
 
