@@ -17,6 +17,29 @@ QMainWindow, QWidget#central_widget {{
     font-size: 9.5pt;
 }}
 
+QDialog, QMessageBox {{
+    background-color: #f8fafc;
+    color: #1e293b;
+}}
+
+QDialog QLabel, QMessageBox QLabel {{
+    background-color: transparent;
+    color: #1e293b;
+}}
+
+QDialog QPushButton, QMessageBox QPushButton {{
+    background-color: #ffffff;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    padding: 5px 14px;
+    font-weight: bold;
+}}
+
+QDialog QPushButton:hover, QMessageBox QPushButton:hover {{
+    background-color: #f1f5f9;
+}}
+
 QWidget {{
     color: #1e293b;
     font-family: "Segoe UI", "Malgun Gothic", sans-serif;
@@ -439,6 +462,29 @@ QMainWindow, QWidget#central_widget {{
     color: #e0e0e6;
     font-family: "Segoe UI", "Malgun Gothic", sans-serif;
     font-size: 9.5pt;
+}}
+
+QDialog, QMessageBox {{
+    background-color: #1e1e28;
+    color: #e2e2e8;
+}}
+
+QDialog QLabel, QMessageBox QLabel {{
+    background-color: transparent;
+    color: #e2e2e8;
+}}
+
+QDialog QPushButton, QMessageBox QPushButton {{
+    background-color: #2a2a38;
+    color: #e2e2e8;
+    border: 1px solid #3e3e50;
+    border-radius: 4px;
+    padding: 5px 14px;
+    font-weight: bold;
+}}
+
+QDialog QPushButton:hover, QMessageBox QPushButton:hover {{
+    background-color: #3b3b4f;
 }}
 
 QWidget {{

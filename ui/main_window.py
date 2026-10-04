@@ -1163,7 +1163,11 @@ class MainWindow(QMainWindow):
             self.btn_theme_toggle.setToolTip("클릭하여 라이트 모드로 전환합니다.")
 
     def _apply_theme(self):
-        self.setStyleSheet(get_stylesheet(self.current_theme))
+        stylesheet = get_stylesheet(self.current_theme)
+        self.setStyleSheet(stylesheet)
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(stylesheet)
         if hasattr(self, "tbl_scenarios"):
             self.tbl_scenarios.current_theme = self.current_theme
         self._update_theme_toggle_btn()

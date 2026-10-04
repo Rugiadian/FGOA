@@ -1,0 +1,30 @@
+[일시 / Timestamp]
+2026-10-04 22:30:00 ~ 2026-10-04 23:00:00
+
+[요청 내용 / User Request]
+1. 일반 팝업창의 폰트 색이 회색이 돼서 회색 팝업창에 뜨면 글자가 거의 안 보임.
+2. 플레이바 기능 축소: 재생, 일시 정지, 정지만 남길 것.
+
+[결과 요약 / Summary of Results]
+1. 일반 팝업창(QMessageBox, QDialog 등) 폰트 색상 및 배경 대비 수정:
+   - `ui/theme.py`: 다크 테마 및 라이트 테마에 QDialog, QMessageBox, QDialog QLabel, QMessageBox QLabel, QDialog QPushButton 스타일시트 규칙을 명시적으로 추가하여, 모달 팝업창 배경색과 라벨/버튼 텍스트 색상 대비를 명확하게 확보.
+   - `ui/main_window.py`: 테마 적용 시 `QApplication.instance().setStyleSheet()`을 통해 독립 최상위 모달/다이얼로그 창 전체에도 글로벌 테마 스타일이 완벽하게 전파되도록 수정.
+2. 팝업 플레이바 UI 축소 및 컴팩트화:
+   - `ui/popup_play_bar.py`:
+     - 크기를 320x100으로 컴팩트하게 축소.
+     - 컨트롤 영역을 [▶ 재생 (F5)], [⏸ 일시 정지], [⏹ 정지 (F6)] 3개 버튼만 남기고 1스텝 버튼(btn_step), 시나리오 프리셋 드롭다운/칩 버튼, 접기 버튼(btn_fold) 제거.
+     - 기존 외부 호출 인터페이스(refresh_scenarios 등) 호환성 유지.
+3. 테스트 코드 갱신 및 검증:
+   - `tests/test_playbar_and_action_sequence.py`, `tests/test_30_comprehensive_features.py`: 축소된 3버튼 구조에 맞춰 단언문 수정.
+   - 전체 단위 테스트(1,302개) 전체 통과 완료 (Ran 1302 tests, OK).
+4. 버전 갱신:
+   - `core/version.py`: __version__을 261004.2258로 갱신.
+
+[영향 파일 목록 / Affected Files]
+- ui/theme.py
+- ui/main_window.py
+- ui/popup_play_bar.py
+- tests/test_playbar_and_action_sequence.py
+- tests/test_30_comprehensive_features.py
+- core/version.py
+- history/2026-10-04_230000_팝업창_폰트대비개선_및_플레이바_기능축소.txt

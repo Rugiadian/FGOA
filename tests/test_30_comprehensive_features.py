@@ -127,24 +127,28 @@ class Test30ComprehensiveFeatures(unittest.TestCase):
         bar.close()
 
     # ----------------------------------------------------------------------
-    # Test 6: Popup Play Bar Scenario Quick Preset Chips
+    # Test 6: Popup Play Bar Controls (Play, Pause, Stop)
     # ----------------------------------------------------------------------
-    def test_06_popup_playbar_scenario_chips(self):
-        """[Test 06] Verify PopupPlayBar creates clickable preset chip buttons for all scenarios."""
+    def test_06_popup_playbar_controls(self):
+        """[Test 06] Verify PopupPlayBar has simplified 3-button controls (Play, Pause, Stop)."""
         bar = PopupPlayBar()
         bar.refresh_scenarios(self.project.scenarios)
 
         start_requests = []
         bar.sig_start_requested.connect(lambda sid: start_requests.append(sid))
 
-        # Check dropdown items count
-        self.assertEqual(bar.combo_presets.count(), 2)
+        # Check buttons exist
+        self.assertTrue(hasattr(bar, "btn_play"))
+        self.assertTrue(hasattr(bar, "btn_pause"))
+        self.assertTrue(hasattr(bar, "btn_stop"))
+        # Verify removed controls
+        self.assertFalse(hasattr(bar, "btn_step"))
+        self.assertFalse(hasattr(bar, "combo_presets"))
 
-        # Trigger run selected
-        bar.combo_presets.setCurrentIndex(1)
-        bar._on_run_selected_preset()
+        # Trigger play
+        bar.btn_play.click()
         self.assertEqual(len(start_requests), 1)
-        self.assertEqual(start_requests[0], "scen_2")
+        self.assertIsNone(start_requests[0])
         bar.close()
 
     # ----------------------------------------------------------------------

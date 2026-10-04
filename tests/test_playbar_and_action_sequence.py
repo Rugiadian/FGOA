@@ -114,8 +114,7 @@ class TestActionSequenceAndPlayBar(unittest.TestCase):
         bar.set_runner_state("paused", "일시정지됨")
         self.assertEqual(bar.lbl_state_badge.text(), "🟡 일시정지")
         self.assertTrue(bar.btn_play.isEnabled())
-        self.assertEqual(bar.btn_play.text(), "▶ 선택 노드 재개")
-        self.assertEqual(bar.btn_pause.text(), "▶ 전역 재개")
+        self.assertIn("재개", bar.btn_play.text())
 
         # Test real-time action status formatting
         act_click = Action(action_type="mouse_click", x=250, y=350)
@@ -128,26 +127,22 @@ class TestActionSequenceAndPlayBar(unittest.TestCase):
 
         bar.set_runner_state("stopped", "완료됨")
         self.assertEqual(bar.lbl_state_badge.text(), "⚪ 대기 중")
-        self.assertEqual(bar.btn_play.text(), "▶ 시작 (F5)")
-        self.assertEqual(bar.btn_pause.text(), "⏸ 일시정지")
+        self.assertIn("재생", bar.btn_play.text())
+        self.assertIn("일시 정지", bar.btn_pause.text())
 
-        # Test play signal emission in paused state (emits current selected combo scenario)
-        bar.set_runner_state("paused")
+        # Test play signal emission (emits start requested)
         play_emitted = []
         bar.sig_start_requested.connect(lambda sid: play_emitted.append(sid))
         bar.btn_play.click()
         self.assertEqual(len(play_emitted), 1)
-        self.assertEqual(play_emitted[0], "scen_1")
 
-        # Test collapse toggle
-        self.assertFalse(bar.preset_section.isHidden())
-        bar._toggle_collapse()
-        self.assertTrue(bar.preset_section.isHidden())
-        self.assertEqual(bar.btn_fold.text(), "▼")
-        bar._toggle_collapse()
-        self.assertFalse(bar.preset_section.isHidden())
-        self.assertEqual(bar.btn_fold.text(), "▲")
-
+        # Verify only 3 playback buttons exist in ctrl layout
+        self.assertTrue(hasattr(bar, "btn_play"))
+        self.assertTrue(hasattr(bar, "btn_pause"))
+        self.assertTrue(hasattr(bar, "btn_stop"))
+        self.assertFalse(hasattr(bar, "btn_step"))
+        self.assertFalse(hasattr(bar, "btn_fold"))
+        self.assertFalse(hasattr(bar, "preset_section"))
         bar.close()
 
     def test_action_sequence_manager_dialog(self):
