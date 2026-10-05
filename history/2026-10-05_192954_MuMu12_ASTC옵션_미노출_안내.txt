@@ -1,0 +1,6 @@
+[일시 / Timestamp]: 2026-10-05 19:29:54
+[요청 내용 / User Request]: MuMu 설정에서 3번(ASTC 텍스처 옵션)이 보이지 않는 문제 문의
+[결과 요약 / Summary of Results]:
+1. MuMu Player 12 최신 버전에서는 ASTC 텍스처 하드웨어 디코딩이 엔진에 기본 내장/자동화되어 UI 메뉴에서 제외되었음을 확인 및 안내
+2. 보이지 않는 3번 옵션 대신 실제 3판 멈춤 현상을 해결하는 결정적 핵심 2가지(DirectX 11 전환, 60 FPS 고정) 집중 안내
+[영향 파일 목록 / Affected Files]: None (상담 및 분석 안내)

@@ -1,0 +1,8 @@
+[일시 / Timestamp]: 2026-10-05 19:26:26
+[요청 내용 / User Request]: MuMu 플레이어 외부에서 주기적으로 메모리를 청소하는 앱/스크립트 제작을 통한 문제 해결 가능성 문의
+[결과 요약 / Summary of Results]:
+1. 외부 Windows 메모리 청소(EmptyWorkingSet/CleanMem 계열)의 기술적 한계 및 부작용(가상 메모리 페이징 스래싱, 디스크 병목으로 인한 렉/프리징 가속) 설명
+2. 안드로이드 ADB 레벨 메모리 트리밍의 한계(Unity 엔진 네이티브 힙/VRAM 누수 미해결) 분석
+3. 현재 겪고 계신 'GPU 화면 정지 + BGM 지속' 현상은 RAM 누수가 아닌 GPU 렌더러 파이프라인 락이므로 외부 램 청소로 해결 불가함을 명시
+4. 외부 자동화 앱(FGOA)에서 구현 가능한 가장 확실한 실무 해결책: N회차 파밍 후 'ADB 기반 FGO 앱 안전 재시작(Graceful Restart)' 기능 제안
+[영향 파일 목록 / Affected Files]: None (상담 및 분석 안내)
