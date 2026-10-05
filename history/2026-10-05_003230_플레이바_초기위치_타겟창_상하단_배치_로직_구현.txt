@@ -1,0 +1,34 @@
+[일시 / Timestamp]
+- 작업 일시: 2026-10-05 00:07:52 ~ 2026-10-05 00:32:30
+
+[요청 내용 / User Request]
+- 플레이바 초기 위치는 타겟 앱 창의 하단. 타겟 앱을 가리지 말 것.
+-- 만약 초기 위치가 모니터 화면 밖으로 밀려난다면 타겟앱 상단으로 배치.
+-- 타겟 앱 창이 너무 커서 상단배치, 하단 배치 모두 모니터 밖으로 나가버린다면 어쩔 수 없이 타겟앱을 가리면서 배치. 이 경우 왼쪽위 상단에 배치.
+
+[결과 요약 / Summary of Results]
+1. 플레이바 상대 위치 계산 알고리즘 모듈화 (`ui/popup_play_bar.py`):
+   - `calculate_playbar_target_position(target_rect, screen_rect, bar_size)` 함수 구현:
+     * 1단계 (하단 배치): 타겟 앱 창의 하단(`y = target_bottom`, `x = target_left`)에 배치하여 타겟 앱 창을 가리지 않음.
+     * 2단계 (상단 배치): 하단 배치 시 모니터 가용 화면(`availableGeometry`) 밖으로 밀려나는 경우, 타겟 앱 창의 상단(`y = target_top - bar_height`)에 배치하여 타겟 앱 창을 가리지 않음.
+     * 3단계 (좌상단 가림 배치): 타겟 창이 너무 커서 상단 배치와 하단 배치 모두 모니터 화면 밖으로 벗어나는 경우, 타겟 앱 창을 가리면서 타겟 앱의 왼쪽 위 상단(`x = target_left, y = target_top`)에 배치.
+     * 경계 안전 보정: 타겟 앱이 화면 경계에 걸쳐 있을 때도 플레이바가 모니터 화면 밖으로 튀어나가지 않도록 가용 영역 내로 클램핑 처리.
+     * 멀티 모니터 지원: 타겟 앱 창의 중심/좌상단 좌표가 속한 모니터 화면(`QApplication.screenAt`)의 가용 작업 영역을 자동 감지.
+2. 플레이바 위젯 상태 및 동작 제어 (`PopupPlayBar`):
+   - `position_relative_to_target`: 타겟 HWND 및 모니터 영역을 분석하여 계산된 위치로 자동 이동.
+   - `_user_moved` 플래그: 사용자가 마우스로 드래그하여 원하는 위치로 옮긴 경우 해당 위치를 보존.
+   - `set_target_hwnd`: 타겟 창이 변경되면 위치 고정을 리셋하고 새 창에 맞춰 초기 위치 재계산.
+   - 마우스 더블클릭 이벤트: 플레이바 헤더/위젯 더블클릭 시 타겟 창 기준 초기 위치로 즉시 재배치.
+3. 메인 윈도우 연동 (`ui/main_window.py`):
+   - 플레이바 토글(F4) 및 시나리오 실행(F5) 시 기존 하드코딩 좌표 대신 타겟 앱 기준 초기 위치 배치 로직(`position_relative_to_target`) 호출.
+   - 타겟 창 자동 감지, 직접 선택, 가상 캔버스 생성/해제 시 `popup_play_bar.set_target_hwnd` 동기화.
+4. 단위 테스트 작성 및 검증 (`tests/test_playbar_and_action_sequence.py`):
+   - 3가지 배치 규칙(하단 배치, 상단 오버플로우 시 상단 배치, 양방향 오버플로우 시 좌상단 배치) 및 경계 보정, 드래그 플래그 동작 등 신규 단위 테스트 5종 추가 및 전원 통과.
+5. 버전 갱신:
+   - `core/version.py`: `__version__ = "261005.0032"`로 업데이트.
+
+[영향 파일 목록 / Affected Files]
+- core/version.py
+- ui/popup_play_bar.py
+- ui/main_window.py
+- tests/test_playbar_and_action_sequence.py

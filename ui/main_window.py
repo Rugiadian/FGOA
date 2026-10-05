@@ -1114,6 +1114,7 @@ class MainWindow(QMainWindow):
         # Popup Play Bar (Floating Mini Control Bar)
         from ui.popup_play_bar import PopupPlayBar
         self.popup_play_bar = PopupPlayBar(self)
+        self.popup_play_bar.set_target_hwnd(self.target_hwnd)
         self.popup_play_bar.sig_start_requested.connect(self._on_playbar_start)
         self.popup_play_bar.sig_start_selected_requested.connect(self._on_start_selected_execution)
         self.popup_play_bar.sig_pause_requested.connect(self._on_pause_execution)
@@ -2937,6 +2938,8 @@ class MainWindow(QMainWindow):
                 self.modules_widget.target_hwnd = self.target_hwnd
             if hasattr(self, "action_overlay") and self.action_overlay:
                 self.action_overlay.set_target_hwnd(self.target_hwnd)
+            if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+                self.popup_play_bar.set_target_hwnd(self.target_hwnd)
             self._update_target_label(win)
             self._append_log("INFO", f"🎯 [타겟창 자동 추적] 마지막 기록('{last_title}')의 타겟 창 '{win.title}'(HWND: 0x{win.hwnd:X})을 자동으로 감지하여 등록했습니다.")
             return True
@@ -2964,6 +2967,8 @@ class MainWindow(QMainWindow):
                 self.modules_widget.target_hwnd = self.target_hwnd
             if hasattr(self, "action_overlay") and self.action_overlay:
                 self.action_overlay.set_target_hwnd(self.target_hwnd)
+            if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+                self.popup_play_bar.set_target_hwnd(self.target_hwnd)
             self._update_target_label(dlg.selected_window)
             self._append_log("INFO", f"타겟 지정 완료: '{dlg.selected_window.title}' ({dlg.selected_window.client_width}×{dlg.selected_window.client_height})")
 
@@ -2999,6 +3004,8 @@ class MainWindow(QMainWindow):
             self.modules_widget.target_hwnd = self.target_hwnd
         if hasattr(self, "action_overlay") and self.action_overlay:
             self.action_overlay.set_target_hwnd(self.target_hwnd)
+        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+            self.popup_play_bar.set_target_hwnd(self.target_hwnd)
 
         win_info = WindowManager.get_window_info(self.target_hwnd)
         self._update_target_label(win_info)
@@ -3009,6 +3016,8 @@ class MainWindow(QMainWindow):
         """Handler invoked when the virtual canvas target window is closed."""
         if self.virtual_canvas_window and self.target_hwnd == int(self.virtual_canvas_window.winId()):
             self.target_hwnd = 0
+            if hasattr(self, "popup_play_bar") and self.popup_play_bar:
+                self.popup_play_bar.set_target_hwnd(0)
             self._update_target_label(None)
             self._append_log("INFO", "🎨 [가상 타겟] 가상 캔버스 창이 닫혀 타깃 연결이 해제되었습니다.")
 
@@ -3311,8 +3320,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             self.popup_play_bar.set_runner_state("running", "시나리오 실행 중...")
             if not self.popup_play_bar.isVisible():
-                geo = self.geometry()
-                self.popup_play_bar.move(max(0, geo.x() + geo.width() - 480), max(0, geo.y() + 60))
+                self.popup_play_bar.position_relative_to_target(self.target_hwnd, self.geometry())
                 self.popup_play_bar.show()
                 self.popup_play_bar.raise_()
                 if hasattr(self, "btn_popup_playbar"):
@@ -3549,8 +3557,7 @@ class MainWindow(QMainWindow):
                 self.btn_popup_playbar.setChecked(False)
         else:
             self.popup_play_bar.refresh_scenarios(self.project.scenarios)
-            geo = self.geometry()
-            self.popup_play_bar.move(max(0, geo.x() + geo.width() - 480), max(0, geo.y() + 60))
+            self.popup_play_bar.position_relative_to_target(self.target_hwnd, self.geometry())
             self.popup_play_bar.show()
             self.popup_play_bar.raise_()
             if hasattr(self, "btn_popup_playbar"):

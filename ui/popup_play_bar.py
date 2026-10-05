@@ -5,14 +5,66 @@ A floating, always-on-top, draggable mini control bar featuring:
 - Status indicator and runner detail label
 - Scenario Quick Preset buttons for fast single-click scenario playback
 """
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QComboBox, QScrollArea, QSizePolicy, QMenu, QAction
+    QFrame, QComboBox, QScrollArea, QSizePolicy, QMenu, QAction, QApplication
 )
-from PyQt5.QtCore import Qt, QPoint, pyqtSignal
+from PyQt5.QtCore import Qt, QPoint, QRect, pyqtSignal
 from PyQt5.QtGui import QFont, QColor
+import win32gui
 from core.models import Scenario
+
+
+def calculate_playbar_target_position(
+    target_rect: Tuple[int, int, int, int],
+    screen_rect: Tuple[int, int, int, int],
+    bar_size: Tuple[int, int]
+) -> Tuple[int, int]:
+    """
+    Calculates play bar position (x, y) relative to target window:
+    1. Initial position: bottom of target window, not covering target app.
+    2. If bottom position overflows monitor screen boundary, place on top of target window.
+    3. If target window is too large and both top and bottom overflow screen,
+       place overlapping on top-left of target window.
+    """
+    t_left, t_top, t_right, t_bottom = target_rect
+    s_left, s_top, s_right, s_bottom = screen_rect
+    bar_w, bar_h = bar_size
+
+    # Candidate 1: Bottom placement (just below target window)
+    cand_bottom_y = t_bottom
+    bottom_overflow = (cand_bottom_y + bar_h > s_bottom)
+
+    # Candidate 2: Top placement (just above target window)
+    cand_top_y = t_top - bar_h
+    top_overflow = (cand_top_y < s_top)
+
+    if not bottom_overflow:
+        # Case 1: Bottom placement
+        pos_y = cand_bottom_y
+        pos_x = t_left
+    elif not top_overflow:
+        # Case 2: Top placement
+        pos_y = cand_top_y
+        pos_x = t_left
+    else:
+        # Case 3: Both overflow -> Overlap on top-left of target window
+        pos_x = t_left
+        pos_y = t_top
+
+    # Boundary safety clamp inside available screen area
+    if pos_x + bar_w > s_right:
+        pos_x = max(s_left, s_right - bar_w)
+    if pos_x < s_left:
+        pos_x = s_left
+
+    if pos_y + bar_h > s_bottom:
+        pos_y = max(s_top, s_bottom - bar_h)
+    if pos_y < s_top:
+        pos_y = s_top
+
+    return pos_x, pos_y
 
 
 class PopupPlayBar(QWidget):
@@ -39,6 +91,8 @@ class PopupPlayBar(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
 
         self._drag_pos: Optional[QPoint] = None
+        self._user_moved: bool = False
+        self.target_hwnd: int = 0
         self._is_collapsed: bool = False
         self._scenarios: List[Scenario] = []
         self._runner_state: str = "stopped"  # "stopped", "running", "paused", "stepping"
@@ -233,11 +287,100 @@ class PopupPlayBar(QWidget):
 
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.LeftButton and self._drag_pos is not None:
+            self._user_moved = True
             self.move(event.globalPos() - self._drag_pos)
             event.accept()
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._user_moved = False
+            self.position_relative_to_target(force=True)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def set_target_hwnd(self, hwnd: int):
+        """Updates target window handle and resets position lock if target changed."""
+        if self.target_hwnd != hwnd:
+            self.target_hwnd = hwnd
+            self._user_moved = False
+            if self.isVisible():
+                self.position_relative_to_target(force=True)
+
+    def position_relative_to_target(
+        self,
+        target_hwnd: Optional[int] = None,
+        fallback_geo: Optional[QRect] = None,
+        force: bool = False
+    ):
+        """
+        Positions play bar relative to the target window according to placement rules:
+        1. Default initial position: below the target app window (not covering it).
+        2. If bottom placement overflows monitor screen boundary, place on top.
+        3. If target window is too large and both top/bottom overflow, place overlapping on top-left.
+        """
+        if self._user_moved and not force:
+            return
+
+        if target_hwnd is not None:
+            if self.target_hwnd != target_hwnd:
+                self.target_hwnd = target_hwnd
+                self._user_moved = False
+
+        hwnd = self.target_hwnd
+        target_rect = None
+
+        if hwnd and win32gui.IsWindow(hwnd) and not win32gui.IsIconic(hwnd):
+            try:
+                rect = win32gui.GetWindowRect(hwnd)
+                # rect is (left, top, right, bottom)
+                if (rect[2] - rect[0] > 50) and (rect[3] - rect[1] > 50):
+                    target_rect = rect
+            except Exception:
+                target_rect = None
+
+        self.adjustSize()
+        bar_w = self.width()
+        bar_h = self.height()
+        if bar_w <= 0 or bar_h <= 0:
+            hint = self.sizeHint()
+            bar_w = max(bar_w, hint.width(), 320)
+            bar_h = max(bar_h, hint.height(), 100)
+
+        if target_rect:
+            t_left, t_top, t_right, t_bottom = target_rect
+            center_x = (t_left + t_right) // 2
+            center_y = (t_top + t_bottom) // 2
+            screen = QApplication.screenAt(QPoint(center_x, center_y))
+            if not screen:
+                screen = QApplication.screenAt(QPoint(t_left, t_top))
+            if not screen:
+                screen = QApplication.primaryScreen()
+
+            if screen:
+                ag = screen.availableGeometry()
+                s_rect = (ag.x(), ag.y(), ag.x() + ag.width(), ag.y() + ag.height())
+            else:
+                s_rect = (0, 0, 1920, 1080)
+
+            pos_x, pos_y = calculate_playbar_target_position(
+                target_rect=target_rect,
+                screen_rect=s_rect,
+                bar_size=(bar_w, bar_h)
+            )
+            self.move(pos_x, pos_y)
+        else:
+            if fallback_geo:
+                self.move(
+                    max(0, fallback_geo.x() + fallback_geo.width() - 480),
+                    max(0, fallback_geo.y() + 60)
+                )
+            else:
+                self.move(100, 100)
+
 
     # ----------------------------------------------------
     # ----------------------------------------------------

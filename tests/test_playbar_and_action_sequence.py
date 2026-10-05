@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
 
 from core.models import Action, ActionSequence, Scenario, Project
-from ui.popup_play_bar import PopupPlayBar
+from ui.popup_play_bar import PopupPlayBar, calculate_playbar_target_position
 from ui.action_sequence_manager_dialog import ActionSequenceManagerDialog
 
 app = QApplication.instance() or QApplication(sys.argv)
@@ -153,6 +153,71 @@ class TestActionSequenceAndPlayBar(unittest.TestCase):
         self.assertEqual(dlg.table.item(0, 2).text(), "3개")
         self.assertIn("s1", dlg.table.item(0, 4).text())
         dlg.close()
+
+    def test_playbar_position_rule1_bottom_placement(self):
+        """Rule 1: Initial position at bottom of target window, not covering target app."""
+        target_rect = (300, 200, 1300, 700)  # w=1000, h=500
+        screen_rect = (0, 0, 1920, 1040)
+        bar_size = (320, 100)
+
+        x, y = calculate_playbar_target_position(target_rect, screen_rect, bar_size)
+        self.assertEqual(x, 300)
+        self.assertEqual(y, 700)  # Exactly at target bottom
+        self.assertGreaterEqual(y, target_rect[3])  # Does not cover target app
+
+    def test_playbar_position_rule2_top_placement_when_bottom_overflows(self):
+        """Rule 2: If bottom overflows screen, place at top of target window."""
+        target_rect = (300, 400, 1300, 980)  # Bottom at 980 + 100 = 1080 > 1040
+        screen_rect = (0, 0, 1920, 1040)
+        bar_size = (320, 100)
+
+        x, y = calculate_playbar_target_position(target_rect, screen_rect, bar_size)
+        self.assertEqual(x, 300)
+        self.assertEqual(y, 300)  # top(400) - bar_h(100)
+        self.assertLessEqual(y + bar_size[1], target_rect[1])  # Does not cover target app
+
+    def test_playbar_position_rule3_overlap_top_left_when_both_overflow(self):
+        """Rule 3: If target window is too large and both top and bottom overflow, place on top-left covering target app."""
+        target_rect = (150, 50, 1700, 1000)  # Top: 50-100=-50 < 0; Bottom: 1000+100=1100 > 1040
+        screen_rect = (0, 0, 1920, 1040)
+        bar_size = (320, 100)
+
+        x, y = calculate_playbar_target_position(target_rect, screen_rect, bar_size)
+        self.assertEqual(x, 150)
+        self.assertEqual(y, 50)  # Exactly at target top-left
+
+    def test_playbar_position_boundary_clamping(self):
+        """Test boundary clamping when target window is partially outside screen."""
+        # Target rect near right boundary: left=1750, screen_right=1920, bar_w=320 -> overflows right
+        target_rect = (1750, 300, 2100, 700)
+        screen_rect = (0, 0, 1920, 1040)
+        bar_size = (320, 100)
+
+        x, y = calculate_playbar_target_position(target_rect, screen_rect, bar_size)
+        self.assertEqual(x, 1920 - 320)  # Clamped to screen right
+        self.assertEqual(y, 700)
+
+    def test_popup_playbar_methods_and_user_move(self):
+        """Test PopupPlayBar widget methods: set_target_hwnd, _user_moved flag, reset."""
+        bar = PopupPlayBar()
+        self.assertEqual(bar.target_hwnd, 0)
+        self.assertFalse(bar._user_moved)
+
+        bar.set_target_hwnd(12345)
+        self.assertEqual(bar.target_hwnd, 12345)
+        self.assertFalse(bar._user_moved)
+
+        # Simulate user move
+        bar._user_moved = True
+        # If user moved, position_relative_to_target without force should not reset _user_moved
+        bar.position_relative_to_target(12345, force=False)
+        self.assertTrue(bar._user_moved)
+
+        # set_target_hwnd with a new hwnd should reset _user_moved
+        bar.set_target_hwnd(67890)
+        self.assertEqual(bar.target_hwnd, 67890)
+        self.assertFalse(bar._user_moved)
+        bar.close()
 
 
 if __name__ == "__main__":
