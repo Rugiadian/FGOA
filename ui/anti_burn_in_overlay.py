@@ -1,29 +1,131 @@
 """
 Anti-Burn-In Overlay Widget for FGOA.
-Periodically and gradually transitions the entire UI across Black ~ White ~ Rainbow
+Periodically and gradually transitions the screen across Black ~ White ~ Rainbow
 gradient spectrum to prevent monitor/display burn-in without interfering with operations.
+
+Supports two modes:
+- Mode 1 (MODE_APP_WINDOW): Applies overlay only to the FGOA application window.
+- Mode 2 (MODE_DESKTOP_FULLSCREEN): Applies overlay across the entire desktop screens
+  (regardless of display resolution or multi-monitor topology).
 """
-from PyQt5.QtWidgets import QWidget
+import sys
+from typing import List, Optional
+from PyQt5.QtWidgets import QWidget, QApplication
 from PyQt5.QtGui import QPainter, QColor, QLinearGradient
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QRect
+
+
+class DesktopScreenOverlayWindow(QWidget):
+    """
+    Transparent, frameless, click-through overlay window covering a single display screen
+    or virtual desktop area for burn-in prevention without interfering with user interaction.
+    """
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(
+            parent,
+            Qt.Window
+            | Qt.FramelessWindowHint
+            | Qt.WindowStaysOnTopHint
+            | Qt.Tool
+            | Qt.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.hide()
+
+        self._stage = 0
+        self._color = QColor(0, 0, 0)
+        self._alpha = 0
+        self._rainbow_hue = 0.0
+        self._rainbow_sat = 0
+
+        self._apply_win32_clickthrough()
+
+    def _apply_win32_clickthrough(self):
+        """Enforces OS-level mouse click-through and non-activation on Windows."""
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                hwnd = int(self.winId())
+                user32 = ctypes.windll.user32
+                GWL_EXSTYLE = -20
+                WS_EX_TRANSPARENT = 0x00000020
+                WS_EX_LAYERED = 0x00080000
+                WS_EX_NOACTIVATE = 0x08000000
+                WS_EX_TOOLWINDOW = 0x00000080
+                style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                user32.SetWindowLongW(
+                    hwnd,
+                    GWL_EXSTYLE,
+                    style | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
+                )
+            except Exception:
+                pass
+
+    def update_render_state(self, stage: int, color: QColor, alpha: int, hue: float, sat: int):
+        self._stage = stage
+        self._color = color
+        self._alpha = alpha
+        self._rainbow_hue = hue
+        self._rainbow_sat = sat
+
+        if alpha > 0 and stage > 0:
+            if not self.isVisible():
+                self.show()
+                self.raise_()
+                self._apply_win32_clickthrough()
+            self.update()
+        else:
+            if self.isVisible():
+                self.hide()
+
+    def paintEvent(self, event):
+        if self._alpha <= 0:
+            return
+        painter = QPainter(self)
+        if self._stage in (5, 6):
+            w = max(1, self.width())
+            h = max(1, self.height())
+            gradient = QLinearGradient(0, 0, w, h)
+            stops = [0.0, 0.16, 0.33, 0.50, 0.66, 0.83, 1.0]
+            for i, pos in enumerate(stops):
+                hue = int((self._rainbow_hue + i * 60) % 360)
+                col = QColor.fromHsv(hue, self._rainbow_sat, 250, self._alpha)
+                gradient.setColorAt(pos, col)
+            painter.fillRect(self.rect(), gradient)
+        else:
+            c = QColor(self._color)
+            c.setAlpha(self._alpha)
+            painter.fillRect(self.rect(), c)
 
 
 class AntiBurnInOverlay(QWidget):
     """
-    Full-window transparent overlay that performs a smooth Black -> White -> Rainbow
+    Transparent overlay controller that performs a smooth Black -> White -> Rainbow
     color transition to prevent monitor/display burn-in.
 
-    Attribute Qt.WA_TransparentForMouseEvents ensures zero interference with mouse clicks/drags.
+    Supports:
+    - Mode 1: App window overlay (parent-bounded)
+    - Mode 2: Fullscreen desktop overlay (all displays, resolution-independent)
     """
+    MODE_APP_WINDOW = 1
+    MODE_DESKTOP_FULLSCREEN = 2
+
     sig_transition_started = pyqtSignal()
     sig_transition_finished = pyqtSignal()
 
-    def __init__(self, parent: QWidget):
+    def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setFocusPolicy(Qt.NoFocus)
         self.hide()
+
+        self._mode: int = self.MODE_APP_WINDOW
+        self._desktop_windows: List[DesktopScreenOverlayWindow] = []
 
         self._color = QColor(0, 0, 0)
         self._alpha = 0  # 0 to 255
@@ -44,6 +146,50 @@ class AntiBurnInOverlay(QWidget):
 
         self._interval_minutes = 5
         self._is_enabled = False
+
+        self._connect_screen_signals()
+
+    def _connect_screen_signals(self):
+        """Monitors display geometry/screen changes to keep fullscreen overlays aligned."""
+        app = QApplication.instance()
+        if app:
+            if hasattr(app, "screenAdded"):
+                try:
+                    app.screenAdded.connect(self._on_screens_changed)
+                except Exception:
+                    pass
+            if hasattr(app, "screenRemoved"):
+                try:
+                    app.screenRemoved.connect(self._on_screens_changed)
+                except Exception:
+                    pass
+            desktop = app.desktop()
+            if desktop and hasattr(desktop, "resized"):
+                try:
+                    desktop.resized.connect(self._on_screens_changed)
+                except Exception:
+                    pass
+
+    def _on_screens_changed(self, *args):
+        if self._mode == self.MODE_DESKTOP_FULLSCREEN:
+            self.update_geometry()
+
+    def set_mode(self, mode: int):
+        """Switches between Mode 1 (App Window) and Mode 2 (Desktop Fullscreen)."""
+        valid_mode = self.MODE_DESKTOP_FULLSCREEN if mode == self.MODE_DESKTOP_FULLSCREEN else self.MODE_APP_WINDOW
+        if self._mode == valid_mode:
+            return
+        was_running = self.is_transitioning()
+        self.stop_transition()
+        self._mode = valid_mode
+        if was_running:
+            self.start_transition()
+
+    def get_mode(self) -> int:
+        return self._mode
+
+    def is_transitioning(self) -> bool:
+        return self._stage > 0
 
     def set_enabled(self, enabled: bool):
         self._is_enabled = enabled
@@ -66,17 +212,59 @@ class AntiBurnInOverlay(QWidget):
     def get_interval_minutes(self) -> int:
         return self._interval_minutes
 
+    def _ensure_desktop_windows(self):
+        """Creates or aligns DesktopScreenOverlayWindow instances for all display screens."""
+        app = QApplication.instance()
+        geometries: List[QRect] = []
+
+        if app and hasattr(app, "screens"):
+            screens = app.screens()
+            for scr in screens:
+                geo = scr.geometry()
+                if geo.isValid() and geo.width() > 0 and geo.height() > 0:
+                    geometries.append(geo)
+
+        if not geometries and app:
+            desktop = app.desktop()
+            if desktop:
+                count = desktop.screenCount()
+                for i in range(count):
+                    geo = desktop.screenGeometry(i)
+                    if geo.isValid() and geo.width() > 0 and geo.height() > 0:
+                        geometries.append(geo)
+                if not geometries:
+                    v_geo = desktop.virtualGeometry()
+                    if v_geo.isValid():
+                        geometries.append(v_geo)
+
+        if not geometries:
+            geometries = [QRect(0, 0, 1920, 1080)]
+
+        # Adjust overlay window pool size
+        while len(self._desktop_windows) < len(geometries):
+            self._desktop_windows.append(DesktopScreenOverlayWindow())
+        while len(self._desktop_windows) > len(geometries):
+            w = self._desktop_windows.pop()
+            w.hide()
+            w.close()
+
+        # Update geometries
+        for win, geo in zip(self._desktop_windows, geometries):
+            win.setGeometry(geo)
+
     def update_geometry(self):
-        if self.parent():
-            p = self.parent()
-            self.setGeometry(0, 0, p.width(), p.height())
-            self.raise_()
+        """Updates geometry for the current mode."""
+        if self._mode == self.MODE_APP_WINDOW:
+            if self.parent():
+                p = self.parent()
+                self.setGeometry(0, 0, p.width(), p.height())
+                self.raise_()
+        elif self._mode == self.MODE_DESKTOP_FULLSCREEN:
+            self._ensure_desktop_windows()
 
     def start_transition(self):
         """Starts the gradual Black -> White -> Rainbow spectrum transition."""
         self.update_geometry()
-        self.show()
-        self.raise_()
         self._stage = 1
         self._color = QColor(0, 0, 0)
         self._alpha = 0
@@ -84,16 +272,38 @@ class AntiBurnInOverlay(QWidget):
         self._lerp_step = 0
         self._rainbow_hue = 0.0
         self._rainbow_sat = 0
+
+        if self._mode == self.MODE_APP_WINDOW:
+            for win in self._desktop_windows:
+                win.hide()
+            self.show()
+            self.raise_()
+        elif self._mode == self.MODE_DESKTOP_FULLSCREEN:
+            self.hide()
+            self._ensure_desktop_windows()
+            for win in self._desktop_windows:
+                win.update_render_state(self._stage, self._color, self._alpha, self._rainbow_hue, self._rainbow_sat)
+
         self._anim_timer.start()
         self.sig_transition_started.emit()
 
     def stop_transition(self):
-        """Immediately aborts transition and hides overlay."""
+        """Immediately aborts transition and hides overlays."""
         self._anim_timer.stop()
         self._stage = 0
         self._alpha = 0
         self.hide()
+        for win in self._desktop_windows:
+            win.update_render_state(0, self._color, 0, 0.0, 0)
+            win.hide()
         self.sig_transition_finished.emit()
+
+    def cleanup(self):
+        """Closes all desktop overlay windows and cleans up resources."""
+        self.stop_transition()
+        for win in self._desktop_windows:
+            win.close()
+        self._desktop_windows.clear()
 
     def _on_anim_step(self):
         fade_step = 6  # ~1.1s for 200 alpha at 33ms/step
@@ -154,10 +364,14 @@ class AntiBurnInOverlay(QWidget):
                 self.stop_transition()
                 return
 
-        self.update()
+        if self._mode == self.MODE_APP_WINDOW:
+            self.update()
+        elif self._mode == self.MODE_DESKTOP_FULLSCREEN:
+            for win in self._desktop_windows:
+                win.update_render_state(self._stage, self._color, self._alpha, self._rainbow_hue, self._rainbow_sat)
 
     def paintEvent(self, event):
-        if self._alpha <= 0:
+        if self._alpha <= 0 or self._mode != self.MODE_APP_WINDOW:
             return
         painter = QPainter(self)
 

@@ -225,9 +225,15 @@ class MainWindow(QMainWindow):
                         self.project.target_window_title = self._last_config_target_title
                     if hasattr(self, "chk_anti_burn") and self.chk_anti_burn:
                         self.chk_anti_burn.setChecked(cfg.get("anti_burn_enabled", False))
+                    burn_mode = cfg.get("anti_burn_mode", 1)
+                    if hasattr(self, "combo_anti_burn_mode") and self.combo_anti_burn_mode:
+                        idx = self.combo_anti_burn_mode.findData(burn_mode)
+                        if idx >= 0:
+                            self.combo_anti_burn_mode.setCurrentIndex(idx)
                     if hasattr(self, "spin_anti_burn_min") and self.spin_anti_burn_min:
                         self.spin_anti_burn_min.setValue(cfg.get("anti_burn_interval_min", 5))
                     if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
+                        self.anti_burn_overlay.set_mode(burn_mode)
                         self.anti_burn_overlay.set_interval_minutes(cfg.get("anti_burn_interval_min", 5))
                         self.anti_burn_overlay.set_enabled(cfg.get("anti_burn_enabled", False))
 
@@ -295,6 +301,7 @@ class MainWindow(QMainWindow):
                 "last_target_width": getattr(self.project, "target_client_width", 1600),
                 "last_target_height": getattr(self.project, "target_client_height", 900),
                 "anti_burn_enabled": self.chk_anti_burn.isChecked() if hasattr(self, "chk_anti_burn") else False,
+                "anti_burn_mode": self.combo_anti_burn_mode.currentData() if hasattr(self, "combo_anti_burn_mode") else 1,
                 "anti_burn_interval_min": self.spin_anti_burn_min.value() if hasattr(self, "spin_anti_burn_min") else 5,
                 "layout_name": getattr(self, "current_layout_name", "기본 3열 (Default)"),
                 "custom_layouts": getattr(self, "custom_layouts", {}),
@@ -344,7 +351,7 @@ class MainWindow(QMainWindow):
                 pass
         if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
             try:
-                self.anti_burn_overlay.stop_transition()
+                self.anti_burn_overlay.cleanup()
             except Exception:
                 pass
         self._save_app_config()
@@ -367,10 +374,42 @@ class MainWindow(QMainWindow):
             self.anti_burn_overlay.set_enabled(checked)
             self._save_app_config()
             mins = self.spin_anti_burn_min.value() if hasattr(self, "spin_anti_burn_min") else 5
+            mode = self.anti_burn_overlay.get_mode()
+            mode_name = "앱 창" if mode == 1 else "데스크탑 전체 화면"
             if checked:
-                self._append_log("INFO", f"🖥️ [모니터 번인 방지] {mins}분 주기로 화면 흑-백 전환 활성화 (조작 간섭 없음)")
+                self._append_log("INFO", f"🖥️ [모니터 번인 방지] 모드 {mode}({mode_name}) {mins}분 주기로 화면 전환 활성화 (조작 간섭 없음)")
             else:
                 self._append_log("INFO", "🖥️ [모니터 번인 방지] 비활성화됨")
+
+    def _on_anti_burn_mode_changed(self, index: int):
+        if not hasattr(self, "combo_anti_burn_mode") or not self.combo_anti_burn_mode:
+            return
+        mode = self.combo_anti_burn_mode.itemData(index)
+        if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
+            self.anti_burn_overlay.set_mode(mode)
+        self._save_app_config()
+        mode_name = "앱 창" if mode == 1 else "데스크탑 전체 화면 (해상도 무관)"
+        self._append_log("INFO", f"🖥️ [모니터 번인 방지] 모드 {mode} ({mode_name}) 설정됨")
+
+    def _on_test_anti_burn(self):
+        if not hasattr(self, "anti_burn_overlay") or not self.anti_burn_overlay:
+            return
+        if self.anti_burn_overlay.is_transitioning():
+            self.anti_burn_overlay.stop_transition()
+            self._append_log("INFO", "🖥️ [모니터 번인 방지] 번인 방지 테스트 중지됨")
+        else:
+            mode = self.anti_burn_overlay.get_mode()
+            mode_name = "모드 1 (앱 창)" if mode == 1 else "모드 2 (데스크탑 전체 화면)"
+            self._append_log("INFO", f"🖥️ [모니터 번인 방지] {mode_name} 화면 전환 효과 테스트 시작 (조작 간섭 없음)")
+            self.anti_burn_overlay.start_transition()
+
+    def _on_anti_burn_started(self):
+        if hasattr(self, "btn_test_anti_burn") and self.btn_test_anti_burn:
+            self.btn_test_anti_burn.setText("⏹ 중지")
+
+    def _on_anti_burn_finished(self):
+        if hasattr(self, "btn_test_anti_burn") and self.btn_test_anti_burn:
+            self.btn_test_anti_burn.setText("🧪 테스트")
 
     def _on_anti_burn_interval_changed(self, val: int):
         if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
@@ -1009,9 +1048,16 @@ class MainWindow(QMainWindow):
         # Monitor Burn-in Prevention
         self.chk_anti_burn = QCheckBox("🖥️ 번인 방지")
         self.chk_anti_burn.setChecked(False)
-        self.chk_anti_burn.setToolTip("지정한 n분 주기마다 UI 전체를 흑-백으로 서서히 전환하여 모니터 번인을 방지합니다. (조작 간섭 전혀 없음)")
+        self.chk_anti_burn.setToolTip("지정한 n분 주기마다 화면을 서서히 전환하여 모니터 번인을 방지합니다. (조작 간섭 전혀 없음)")
         self.chk_anti_burn.toggled.connect(self._on_toggle_anti_burn)
         row2_ctrl.addWidget(self.chk_anti_burn)
+
+        self.combo_anti_burn_mode = QComboBox()
+        self.combo_anti_burn_mode.addItem("모드 1: 앱 창", 1)
+        self.combo_anti_burn_mode.addItem("모드 2: 전체 화면 (데스크탑)", 2)
+        self.combo_anti_burn_mode.setToolTip("번인 방지 모드 선택:\n- 모드 1: FGOA 창 내부 화면 전환\n- 모드 2: 모니터 데스크탑 전체 화면 전환 (해상도 무관)")
+        self.combo_anti_burn_mode.currentIndexChanged.connect(self._on_anti_burn_mode_changed)
+        row2_ctrl.addWidget(self.combo_anti_burn_mode)
 
         self.spin_anti_burn_min = QSpinBox()
         self.spin_anti_burn_min.setRange(1, 120)
@@ -1020,6 +1066,16 @@ class MainWindow(QMainWindow):
         self.spin_anti_burn_min.setToolTip("번인 방지 화면 전환 주기 (1~120분)")
         self.spin_anti_burn_min.valueChanged.connect(self._on_anti_burn_interval_changed)
         row2_ctrl.addWidget(self.spin_anti_burn_min)
+
+        self.btn_test_anti_burn = QPushButton("🧪 테스트")
+        self.btn_test_anti_burn.setObjectName("btn_test_anti_burn")
+        self.btn_test_anti_burn.setToolTip("선택한 번인 방지 모드의 화면 전환 효과를 즉시 1회 테스트합니다. (실행 중 클릭 시 중지)")
+        self.btn_test_anti_burn.clicked.connect(self._on_test_anti_burn)
+        row2_ctrl.addWidget(self.btn_test_anti_burn)
+
+        if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
+            self.anti_burn_overlay.sig_transition_started.connect(self._on_anti_burn_started)
+            self.anti_burn_overlay.sig_transition_finished.connect(self._on_anti_burn_finished)
 
         row2_ctrl.addStretch()
         c_layout.addLayout(row2_ctrl)
@@ -1059,6 +1115,7 @@ class MainWindow(QMainWindow):
         from ui.popup_play_bar import PopupPlayBar
         self.popup_play_bar = PopupPlayBar(self)
         self.popup_play_bar.sig_start_requested.connect(self._on_playbar_start)
+        self.popup_play_bar.sig_start_selected_requested.connect(self._on_start_selected_execution)
         self.popup_play_bar.sig_pause_requested.connect(self._on_pause_execution)
         self.popup_play_bar.sig_stop_requested.connect(self._on_stop_execution)
         self.popup_play_bar.sig_step_requested.connect(self._on_playbar_step)

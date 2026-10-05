@@ -22,6 +22,7 @@ class PopupPlayBar(QWidget):
     """
     # Signals emitted to parent / controller
     sig_start_requested = pyqtSignal(object)       # Optional[str] scenario_id
+    sig_start_selected_requested = pyqtSignal()    # Start execution from selected scenario node
     sig_pause_requested = pyqtSignal()
     sig_stop_requested = pyqtSignal()
     sig_step_requested = pyqtSignal(object)        # Optional[str] scenario_id
@@ -43,7 +44,7 @@ class PopupPlayBar(QWidget):
         self._runner_state: str = "stopped"  # "stopped", "running", "paused", "stepping"
 
         self._init_ui()
-        self.resize(320, 100)
+        self.resize(380, 100)
 
     def _init_ui(self):
         root_layout = QVBoxLayout(self)
@@ -144,6 +145,28 @@ class PopupPlayBar(QWidget):
         self.btn_play.clicked.connect(self._on_play_clicked)
         ctrl_layout.addWidget(self.btn_play, 1)
 
+        self.btn_play_selected = QPushButton("▶ 선택부터 (Shift+F5)")
+        self.btn_play_selected.setToolTip("현재 목록에서 선택된 시나리오 노드부터 이어서 실행합니다. (단축키: Shift+F5)")
+        self.btn_play_selected.setStyleSheet("""
+            QPushButton {
+                background-color: #1e3a5f;
+                color: #bae6fd;
+                font-weight: bold;
+                border: 1px solid #38bdf8;
+                padding: 6px 10px;
+            }
+            QPushButton:hover {
+                background-color: #0369a1;
+            }
+            QPushButton:disabled {
+                background-color: #0f172a;
+                color: #38bdf8;
+                border-color: #1e3a5f;
+            }
+        """)
+        self.btn_play_selected.clicked.connect(self._on_play_selected_clicked)
+        ctrl_layout.addWidget(self.btn_play_selected, 1)
+
         self.btn_pause = QPushButton("⏸ 일시 정지")
         self.btn_pause.setStyleSheet("""
             QPushButton {
@@ -226,6 +249,9 @@ class PopupPlayBar(QWidget):
     def _on_play_clicked(self):
         self.sig_start_requested.emit(None)
 
+    def _on_play_selected_clicked(self):
+        self.sig_start_selected_requested.emit()
+
     def _on_pause_clicked(self):
         self.sig_pause_requested.emit()
 
@@ -253,6 +279,8 @@ class PopupPlayBar(QWidget):
             self.btn_play.setEnabled(False)
             self.btn_play.setText("▶ 실행 중")
             self.btn_play.setToolTip("오토가 실행 중입니다.")
+            if hasattr(self, "btn_play_selected"):
+                self.btn_play_selected.setEnabled(False)
             self.btn_pause.setEnabled(True)
             self.btn_pause.setText("⏸ 일시 정지")
             self.btn_pause.setToolTip("오토 실행을 일시정지합니다.")
@@ -263,6 +291,8 @@ class PopupPlayBar(QWidget):
             self.btn_play.setEnabled(True)
             self.btn_play.setText("▶ 재개")
             self.btn_play.setToolTip("일시정지된 위치부터 실행을 재개합니다.")
+            if hasattr(self, "btn_play_selected"):
+                self.btn_play_selected.setEnabled(False)
             self.btn_pause.setEnabled(False)
             self.btn_pause.setText("⏸ 일시 정지")
             self.btn_stop.setEnabled(True)
@@ -272,6 +302,8 @@ class PopupPlayBar(QWidget):
             self.btn_play.setEnabled(True)
             self.btn_play.setText("▶ 계속")
             self.btn_play.setToolTip("연속 실행으로 전환합니다.")
+            if hasattr(self, "btn_play_selected"):
+                self.btn_play_selected.setEnabled(False)
             self.btn_pause.setEnabled(False)
             self.btn_stop.setEnabled(True)
             self.lbl_state_badge.setText("🔵 1스텝")
@@ -280,6 +312,8 @@ class PopupPlayBar(QWidget):
             self.btn_play.setEnabled(True)
             self.btn_play.setText("▶ 재생 (F5)")
             self.btn_play.setToolTip("처음부터 순차적으로 실행합니다. (F5)")
+            if hasattr(self, "btn_play_selected"):
+                self.btn_play_selected.setEnabled(True)
             self.btn_pause.setEnabled(False)
             self.btn_pause.setText("⏸ 일시 정지")
             self.btn_pause.setToolTip("실행 중일 때 일시정지합니다.")
