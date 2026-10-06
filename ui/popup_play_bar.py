@@ -79,6 +79,7 @@ class PopupPlayBar(QWidget):
     sig_stop_requested = pyqtSignal()
     sig_step_requested = pyqtSignal(object)        # Optional[str] scenario_id
     sig_select_scenario_requested = pyqtSignal(str) # scenario_id
+    sig_closed = pyqtSignal()                      # Emitted when play bar is hidden/closed
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -164,11 +165,34 @@ class PopupPlayBar(QWidget):
         hdr_layout.addStretch()
 
         # Close button
-        btn_close = QPushButton("✕")
-        btn_close.setFixedSize(22, 22)
-        btn_close.setToolTip("플레이바 닫기 (메인 윈도우에서 다시 열 수 있습니다)")
-        btn_close.clicked.connect(self.hide)
-        hdr_layout.addWidget(btn_close)
+        self.btn_close = QPushButton("✕")
+        self.btn_close.setObjectName("btn_playbar_close")
+        self.btn_close.setFixedSize(22, 22)
+        self.btn_close.setCursor(Qt.PointingHandCursor)
+        self.btn_close.setToolTip("플레이바 닫기 (메인 윈도우에서 다시 열 수 있습니다)")
+        self.btn_close.setStyleSheet("""
+            QPushButton#btn_playbar_close {
+                background-color: transparent;
+                color: #a6adc8;
+                border: none;
+                font-size: 11pt;
+                font-weight: bold;
+                padding: 0px;
+                margin: 0px;
+                text-align: center;
+            }
+            QPushButton#btn_playbar_close:hover {
+                background-color: #f38ba8;
+                color: #11111b;
+                border-radius: 4px;
+            }
+            QPushButton#btn_playbar_close:pressed {
+                background-color: #eba0ac;
+                color: #11111b;
+            }
+        """)
+        self.btn_close.clicked.connect(self.hide)
+        hdr_layout.addWidget(self.btn_close)
 
         card_layout.addLayout(hdr_layout)
 
@@ -301,6 +325,10 @@ class PopupPlayBar(QWidget):
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.sig_closed.emit()
 
     def set_target_hwnd(self, hwnd: int):
         """Updates target window handle and resets position lock if target changed."""

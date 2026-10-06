@@ -1,0 +1,36 @@
+[일시 / Timestamp]
+- 요청 시각: 2026-10-06 13:47:16 (KST)
+- 완료 시각: 2026-10-06 13:52:10 (KST)
+
+[요청 내용 / User Request]
+- 플레이바 닫기 버튼 x가 제대로 보이게 수정.
+- 플레이바는 유저가 필요할 때만 활성화 되고 기본으로 활성되지 않게 함.
+
+[결과 요약 / Summary of Results]
+1. 플레이바 닫기 버튼(x) 시인성 및 레이아웃 개선:
+   - `ui/popup_play_bar.py`:
+     - 상위 카드 프레임의 범용 QPushButton 패딩(`padding: 4px 8px`)으로 인해 22x22 닫기 버튼 내부의 텍스트 렌더링 영역이 6px 이하로 축소되어 '✕' 기호가 잘리거나 보이지 않던 문제를 해결.
+     - `self.btn_close`에 고유 ID `#btn_playbar_close` 및 전용 스타일시트 적용:
+       * `padding: 0px`, `margin: 0px`, `border: none`, `font-size: 11pt`, `font-weight: bold`, `color: #a6adc8`
+       * 마우스 호버 시 산뜻한 닫기 하이라이트(`background-color: #f38ba8`, `color: #11111b`, `border-radius: 4px`) 및 클릭 피드백 제공.
+     - `sig_closed` 시그널 및 `hideEvent` 구현: 사용자가 닫기 버튼으로 플레이바를 닫을 때 메인 윈도우 상단 툴바의 '🎮 플레이바 (F4)' 토글 버튼 상태(`setChecked(False)`)가 실시간으로 동기화되도록 연동.
+
+2. 플레이바 기본 비활성화 및 사용자 요청 시에만 활성화되도록 개선:
+   - `ui/main_window.py`:
+     - 시나리오/오토 실행(`_on_start_execution`) 시작 시 자동으로 플레이바를 팝업(`show()`)하던 코드를 제거.
+     - 프로그램 실행 시 또는 오토 실행 시 사용자가 직접 열지 않는 한 플레이바가 화면에 뜨지 않도록 기본 비활성화 유지.
+     - 사용자가 F4 단축키나 상단 툴바의 '🎮 플레이바 (F4)' 버튼을 직접 눌렀을 때만 열리며, 열려 있는 상태에서 오토가 실행되면 정상적으로 상태가 동기화됨.
+     - `closeEvent` 시 백그라운드 러너 스레드가 안전하게 종료 대기(`wait(1000)`)되도록 방어 코드 보강.
+
+3. 단위 테스트 검증:
+   - `tests/test_burn_in_mode2_and_playbar.py`에 `test_playbar_close_button_and_manual_activation_only` 테스트 케이스 추가 및 전체 15개 단위 테스트 100% 통과 확인.
+
+4. 버전 관리:
+   - `core/version.py`: `__version__ = "261006.1352"` 갱신.
+
+[영향 파일 목록 / Affected Files]
+- ui/popup_play_bar.py (수정)
+- ui/main_window.py (수정)
+- core/version.py (수정)
+- tests/test_burn_in_mode2_and_playbar.py (수정)
+- history/2026-10-06_135200_플레이바_닫기버튼_시인성개선_및_기본비활성화_수정.txt (신규 생성)

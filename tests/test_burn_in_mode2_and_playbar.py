@@ -144,6 +144,41 @@ class TestBurnInMode2AndPlayBar(unittest.TestCase):
 
         win.close()
 
+    def test_playbar_close_button_and_manual_activation_only(self):
+        """Verify playbar close button styling/visibility, sig_closed emission, and manual activation only."""
+        from ui.main_window import MainWindow
+        win = MainWindow()
+
+        # 1. By default, playbar must NOT be visible
+        self.assertFalse(win.popup_play_bar.isVisible())
+        self.assertFalse(win.btn_popup_playbar.isChecked())
+
+        # 2. Starting execution must NOT automatically show playbar
+        win._on_start_execution()
+        self.assertFalse(win.popup_play_bar.isVisible())
+        self.assertFalse(win.btn_popup_playbar.isChecked())
+        win._on_stop_execution()
+        if win.runner and win.runner.isRunning():
+            win.runner.wait(2000)
+
+        # 3. Only manual activation shows playbar
+        win._toggle_popup_playbar()
+        self.assertTrue(win.popup_play_bar.isVisible())
+        self.assertTrue(win.btn_popup_playbar.isChecked())
+
+        # 4. Verify close button exists, has clear '✕' label and zero padding
+        close_btn = getattr(win.popup_play_bar, "btn_close", None)
+        self.assertIsNotNone(close_btn)
+        self.assertEqual(close_btn.text(), "✕")
+        self.assertIn("padding: 0px", close_btn.styleSheet())
+
+        # 5. Clicking close button hides playbar and unchecks toggle button
+        close_btn.click()
+        self.assertFalse(win.popup_play_bar.isVisible())
+        self.assertFalse(win.btn_popup_playbar.isChecked())
+
+        win.close()
+
 
 if __name__ == "__main__":
     unittest.main()

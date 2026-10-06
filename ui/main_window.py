@@ -322,6 +322,12 @@ class MainWindow(QMainWindow):
             pass
 
     def closeEvent(self, event):
+        if hasattr(self, "runner") and self.runner and self.runner.isRunning():
+            try:
+                self.runner.stop()
+                self.runner.wait(1000)
+            except Exception:
+                pass
         if hasattr(self, "_config_save_timer") and self._config_save_timer:
             self._config_save_timer.stop()
         if hasattr(self, "global_hotkey") and self.global_hotkey:
@@ -1121,6 +1127,7 @@ class MainWindow(QMainWindow):
         self.popup_play_bar.sig_stop_requested.connect(self._on_stop_execution)
         self.popup_play_bar.sig_step_requested.connect(self._on_playbar_step)
         self.popup_play_bar.sig_select_scenario_requested.connect(self._on_playbar_select_scenario)
+        self.popup_play_bar.sig_closed.connect(self._on_playbar_closed)
 
         # F4 Shortcut to toggle popup play bar
         self.sc_f4 = QShortcut(QKeySequence("F4"), self)
@@ -3319,12 +3326,6 @@ class MainWindow(QMainWindow):
         self.lbl_run_status.setStyleSheet("color: #16a34a; font-weight: bold;")
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             self.popup_play_bar.set_runner_state("running", "시나리오 실행 중...")
-            if not self.popup_play_bar.isVisible():
-                self.popup_play_bar.position_relative_to_target(self.target_hwnd, self.geometry())
-                self.popup_play_bar.show()
-                self.popup_play_bar.raise_()
-                if hasattr(self, "btn_popup_playbar"):
-                    self.btn_popup_playbar.setChecked(True)
 
         self.runner.start()
 
@@ -3548,6 +3549,10 @@ class MainWindow(QMainWindow):
     # ==========================================
     # Popup Play Bar Controls & Signal Handlers
     # ==========================================
+    def _on_playbar_closed(self):
+        if hasattr(self, "btn_popup_playbar") and self.btn_popup_playbar:
+            self.btn_popup_playbar.setChecked(False)
+
     def _toggle_popup_playbar(self):
         if not hasattr(self, "popup_play_bar") or not self.popup_play_bar:
             return
