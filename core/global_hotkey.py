@@ -10,6 +10,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 
 
 # Virtual key codes
+VK_SHIFT = 0x10
 VK_F6 = 0x75
 VK_PAUSE = 0x13
 VK_ESCAPE = 0x1B
@@ -20,7 +21,8 @@ class GlobalHotkeyListener(QThread):
     Lightweight background worker thread that monitors global hotkeys.
     Fires signals when registered hotkeys are pressed system-wide.
     """
-    sig_stop_hotkey = pyqtSignal()   # Triggered on F6 or Pause/Break press
+    sig_stop_hotkey = pyqtSignal()    # Triggered on F6 (without Shift) or Pause/Break press
+    sig_pause_hotkey = pyqtSignal()   # Triggered on Shift + F6 press
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -68,7 +70,12 @@ class GlobalHotkeyListener(QThread):
 
                 if f6_is_down and not self._f6_was_pressed:
                     # Transition from not pressed to pressed (key down event)
-                    self.sig_stop_hotkey.emit()
+                    shift_state = self._user32.GetAsyncKeyState(VK_SHIFT)
+                    shift_is_down = bool(shift_state & 0x8000)
+                    if shift_is_down:
+                        self.sig_pause_hotkey.emit()
+                    else:
+                        self.sig_stop_hotkey.emit()
                 self._f6_was_pressed = f6_is_down
 
                 # Also check Pause/Break key as secondary emergency stop

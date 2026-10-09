@@ -1,0 +1,50 @@
+================================================================================
+FGOA 작업 내역 기록 (Work History Log)
+================================================================================
+
+1. [일시 / Timestamp]
+- 요청 및 완료 일시: 2026-10-08 11:15:30
+
+2. [요청 내용 / User Request]
+1. 일시정지 단축키 (Shift + F6)
+   • core/global_hotkey.py에 VK_SHIFT(0x10) 키 상태 검사를 추가하여, Shift + F6 입력 시
+   sig_pause_hotkey를 발생시켜 일시정지/재개(Pause/Resume)를 토글하도록 연결합니다. (단독 F6은 기존대로
+   즉시 정지)
+2. 반복실행 횟수 '무한반복' 상태에서 키보드 숫자 직접 입력 개선
+   • QSpinBox의 specialValueText("무한반복") 상태에서 Qt 기본 유효성 검사기로 인해 키보드 숫자 입력이
+   무시되는 문제를 해결하기 위해, 커스텀 스핀박스(validate 및 fixup, keyPressEvent)를 적용하여 어떤
+   상태에서도 키보드로 숫자를 바로 타이핑할 수 있도록 개선합니다.
+3. 반복실행 횟수 상하 증감 버튼 크기 확대
+   • QSpinBox::up-button, QSpinBox::down-button의 QSS 크기와 패딩을 넉넉하게 확장하여 마우스로 누르기
+   편하게 개선합니다.
+
+3. [결과 요약 / Summary of Results]
+(1) 일시정지 전역 단축키 (Shift + F6) 및 토글 연동:
+   - `core/global_hotkey.py`: `VK_SHIFT(0x10)` 상수 정의 및 `sig_pause_hotkey` 시그널 추가. F6 키 다운 시 `GetAsyncKeyState(VK_SHIFT)` 상태를 검사하여 Shift가 눌려있으면 `sig_pause_hotkey`, 단독이면 `sig_stop_hotkey`를 방출하도록 구현.
+   - `ui/main_window.py`: `sig_pause_hotkey` 수신 시 `_on_global_hotkey_pause`를 통해 `_on_pause_execution()`을 호출하여 일시정지/재개 토글 연동. 윈도우 내부 포커스 시 `keyPressEvent`에서도 Shift+F6을 일시정지/재개로 처리하도록 일관성 보장.
+   - UI 피드백: 메인 윈도우 `btn_pause` 텍스트("⏸ 일시정지 (Shift+F6)", "▶ 재개 (Shift+F6)") 및 툴팁, 플로팅 정지 위젯 및 팝업 플레이바 툴팁에 Shift+F6 단축키 안내 반영.
+
+(2) 반복실행 횟수 '무한반복' 상태에서 키보드 직접 타이핑 개선:
+   - `ui/custom_spinbox.py`: 모듈 분리 원칙에 따라 `CustomSpinBox` 컴포넌트 신규 개발.
+   - `validate`: `specialValueText`, 접두어, 빈 문자열, 숫자 범위 입력을 유연하게 수용하여 Qt 기본 유효성 검사기로 인한 키 입력 씹힘 문제 해결.
+   - `fixup`: 편집 완료 시 빈 값이나 부분 입력을 정규화하여 최소값 또는 유효 숫자로 변환.
+   - `keyPressEvent` & 내부 `QLineEdit` 이벤트 필터: "무한 반복 (∞)" 상태에서 0~9 숫자 키 입력 시 기존 특수 텍스트를 즉시 지우고 타이핑한 숫자로 바로 입력 시작되도록 구현. 백스페이스/Delete 시 즉시 초기화. 포커스 진입 및 마우스 클릭 시 전체 선택 제공.
+   - `ui/main_window.py`: 메인 반복 실행 횟수 스핀박스(`spin_loops`)에 `CustomSpinBox` 적용 및 최소 너비(120px) 확보.
+
+(3) 반복실행 횟수 상하 증감 버튼(Up/Down) QSS 크기 및 패딩 확대:
+   - `ui/theme.py`: 라이트 테마(`LIGHT_STYLESHEET`) 및 다크 테마(`DARK_STYLESHEET`)에 `QSpinBox::up-button`, `QSpinBox::down-button`의 너비를 `22px`, 패딩을 확장하고, 메인 반복 횟수 스핀박스(`#spin_loops`)의 경우 너비 `24px` 및 여유로운 우측 패딩을 적용하여 마우스 클릭 편의성 대폭 개선.
+
+(4) 검증 및 버전 관리:
+   - `tests/test_hotkey_pause_and_custom_spinbox.py`: 전역 단축키 시그널 방출, CustomSpinBox 키 입력 및 검증/보정 동작, QSS 스타일시트, MainWindow 연동을 검증하는 단위 테스트 12건 작성 및 전체 통과.
+   - `core/version.py`: `__version__`을 현재 시각 기준 `261008.1115`로 갱신.
+
+4. [영향 파일 목록 / Affected Files]
+- core/global_hotkey.py
+- ui/custom_spinbox.py
+- ui/main_window.py
+- ui/theme.py
+- ui/floating_stop_widget.py
+- ui/popup_play_bar.py
+- core/version.py
+- tests/test_hotkey_pause_and_custom_spinbox.py
+================================================================================

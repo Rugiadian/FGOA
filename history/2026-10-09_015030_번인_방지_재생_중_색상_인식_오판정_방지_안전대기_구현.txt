@@ -1,0 +1,34 @@
+[일시 / Timestamp]
+- 요청 시각: 2026-10-09 01:44:34
+- 완료 시각: 2026-10-09 01:50:30
+
+[요청 내용 / User Request]
+- 혹시 번인 방지 재생될 때 색상 인식조건이 실행되면 번인 방지 색상 때문에 판정이 틀려지나? 그러면 안되는데
+
+[결과 요약 / Summary of Results]
+1. 번인 방지 동작 시 색상 인식 판정 왜곡 가능성 정밀 분석
+   - 모드 2(전체 화면)에서 DesktopScreenOverlayWindow가 모니터 최상단에 반투명/불투명 오버레이로 검정/백색/무지개색을 렌더링(약 5초간)하는 동안, GDI GetPixel(GetDC(0)) 및 화면 캡처가 최상단 오버레이의 색상을 그대로 읽어 색상 인식 조건이 불일치(실패)하거나 오판정될 위험이 실제로 존재함을 확인.
+
+2. 원천 차단을 위한 다중 안전 방어 조치 구현
+   - 조치 1 (러너 레벨 스마트 대기 - _wait_for_anti_burn):
+     * WorkflowRunner에서 루프 시작 노드의 조건 평가(until_match, while_match) 및 일반 시나리오 노드의 조건 평가/재시도 검사 직전에, 번인 방지 화면 전환이 진행 중인지(is_transitioning) 감지하도록 구현.
+     * 번인 방지가 재생 중이면 조건 평가를 강행하지 않고, "🖥️ [번인 방지 대기] 번인 방지 화면 전환 진행 중... 색상 오판정 방지를 위해 잠시 대기합니다." 로그와 함께 화면 전환이 끝날 때까지 안전하게 대기한 뒤 원래 게임 화면의 색상으로 100% 정상 판정하도록 보호.
+   - 조치 2 (OS DWM 레벨 캡처 제외 - SetWindowDisplayAffinity):
+     * DesktopScreenOverlayWindow 초기화 시 Win10 2004+ API인 WDA_EXCLUDEFROMCAPTURE(0x00000011) 플래그를 설정하여 OS DWM 레벨에서 화면 캡처 시 오버레이 창이 투명하게 제외되도록 이중 방어 적용.
+   - 조치 3 (전역 활성 트랜지션 추적):
+     * AntiBurnInOverlay에 _active_instances 및 is_any_transitioning() 클래스 메서드를 추가하여 전역 어디서나 번인 방지 활성 상태를 즉시 조회 가능하도록 개선.
+
+3. 단위 테스트 작성 및 검증
+   - tests/test_anti_burn_runner_safe_wait.py 작성 및 통과 (번인 방지 재생 중 러너 안전 대기 및 전환 완료 후 조건 평가 진행 검증).
+   - 기존 test_burn_in_mode2_and_playbar.py 및 test_config_persistence_all_controls.py 테스트 전체 통과 확인.
+
+4. 버전 업데이트
+   - core/version.py: __version__ = "261009.0147"
+
+[영향 파일 목록 / Affected Files]
+- core/version.py
+- core/runner.py
+- ui/anti_burn_in_overlay.py
+- ui/main_window.py
+- tests/test_anti_burn_runner_safe_wait.py
+- history/2026-10-09_015030_번인_방지_재생_중_색상_인식_오판정_방지_안전대기_구현.txt

@@ -62,6 +62,12 @@ class DesktopScreenOverlayWindow(QWidget):
                     GWL_EXSTYLE,
                     style | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
                 )
+                # WDA_EXCLUDEFROMCAPTURE = 0x00000011 (Win10 2004+):
+                # Excludes overlay from OS screen capture / DWM grabs so underlying content remains clear
+                try:
+                    user32.SetWindowDisplayAffinity(hwnd, 0x00000011)
+                except Exception:
+                    pass
             except Exception:
                 pass
 
@@ -114,11 +120,20 @@ class AntiBurnInOverlay(QWidget):
     MODE_APP_WINDOW = 1
     MODE_DESKTOP_FULLSCREEN = 2
 
+    _active_instances: List["AntiBurnInOverlay"] = []
+
     sig_transition_started = pyqtSignal()
     sig_transition_finished = pyqtSignal()
 
+    @classmethod
+    def is_any_transitioning(cls) -> bool:
+        """Checks if any AntiBurnInOverlay instance is currently animating screen colors."""
+        return any(inst.is_transitioning() for inst in cls._active_instances if inst)
+
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        if self not in AntiBurnInOverlay._active_instances:
+            AntiBurnInOverlay._active_instances.append(self)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setFocusPolicy(Qt.NoFocus)
@@ -301,6 +316,8 @@ class AntiBurnInOverlay(QWidget):
     def cleanup(self):
         """Closes all desktop overlay windows and cleans up resources."""
         self.stop_transition()
+        if self in AntiBurnInOverlay._active_instances:
+            AntiBurnInOverlay._active_instances.remove(self)
         for win in self._desktop_windows:
             win.close()
         self._desktop_windows.clear()
