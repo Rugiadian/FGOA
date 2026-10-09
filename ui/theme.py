@@ -267,6 +267,29 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     font-size: 9pt;
 }}
 
+QSpinBox, QDoubleSpinBox {{
+    padding-right: 22px;
+}}
+
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    width: 22px;
+    padding: 1px 2px;
+}}
+
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    width: 22px;
+    padding: 1px 2px;
+}}
+
+QSpinBox#spin_loops {{
+    padding-right: 24px;
+}}
+
+QSpinBox#spin_loops::up-button, QSpinBox#spin_loops::down-button {{
+    width: 24px;
+    padding: 2px;
+}}
+
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
     border: 1px solid #2563eb;
 }}
@@ -712,6 +735,29 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     padding: 2px 6px;
     min-height: 20px;
     font-size: 9pt;
+}}
+
+QSpinBox, QDoubleSpinBox {{
+    padding-right: 22px;
+}}
+
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    width: 22px;
+    padding: 1px 2px;
+}}
+
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    width: 22px;
+    padding: 1px 2px;
+}}
+
+QSpinBox#spin_loops {{
+    padding-right: 24px;
+}}
+
+QSpinBox#spin_loops::up-button, QSpinBox#spin_loops::down-button {{
+    width: 24px;
+    padding: 2px;
 }}
 
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{

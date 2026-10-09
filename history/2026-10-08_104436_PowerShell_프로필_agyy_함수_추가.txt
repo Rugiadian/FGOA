@@ -1,0 +1,15 @@
+[일시 / Timestamp]
+2026-10-08 10:39:41 ~ 2026-10-08 10:44:40 (KST)
+
+[요청 내용 / User Request]
+Add-Content $PROFILE "`nfunction agyy { agy.exe --dangerously-skip-permissions `$args }"
+
+[결과 요약 / Summary of Results]
+- PowerShell 프로필($PROFILE) 디렉터리 존재 여부를 확인하고 상위 폴더를 자동 생성한 후 `agyy` 함수를 프로필에 등록 완료.
+- Windows PowerShell 5.1 및 PowerShell 7(pwsh) 프로필 경로 모두에 반영하여 터미널 환경에 구애받지 않고 `agyy` 명령어를 바로 실행할 수 있도록 구성.
+
+[영향 파일 목록 / Affected Files]
+- C:\Users\demo_\OneDrive\문서\WindowsPowerShell\Microsoft.PowerShell_profile.ps1
+- C:\Users\demo_\OneDrive\문서\PowerShell\Microsoft.PowerShell_profile.ps1
+- C:\Users\demo_\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1
+- C:\Users\demo_\Documents\PowerShell\Microsoft.PowerShell_profile.ps1

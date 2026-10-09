@@ -1,0 +1,41 @@
+[일시 / Timestamp]
+- 요청 시각: 2026-10-08 22:49:50
+- 완료 시각: 2026-10-08 23:12:00
+
+[요청 내용 / User Request]
+- 번인 방지가 마지막 설정을 기억하질 않음. 수정.
+- 다른 기능 중에도 그런게 있는지 검토.
+
+[결과 요약 / Summary of Results]
+1. 번인 방지 설정(모니터 번인 방지 체크 여부, 모드 1/2 선택, 전환 주기 분) 미기억 버그 원인 분석 및 해결
+   - 원인: MainWindow.__init__ 초기화 단계에서 UI 컴포넌트가 생성(_init_ui)되기 전에 _load_app_config()가 호출되어 위젯이 미존재(hasattr=False) 상태로 설정 로드가 무시되고, 이후 _init_ui()에서 기본값(False, 모드 1, 5분)으로 하드코딩 덮어쓰기됨. 또한 창 이동이나 종료 시 미체크 기본값(False)으로 config 파일이 덮어쓰여지는 구조적 문제 발생.
+   - 해결:
+     * _apply_ui_config() 메서드를 신설하여 _init_ui() 및 도크 레이아웃 초기화 직후 설정 파일(_cached_config)의 번인 방지 설정(anti_burn_enabled, anti_burn_mode, anti_burn_interval_min)을 위젯과 AntiBurnInOverlay 백엔드에 안전하게 복원(시그널 중복 발화 방지 blockSignals 적용).
+     * _save_app_config() 시 위젯이 실제 존재할 때만 config를 갱신하도록 방어 코드를 적용하여 로드된 설정값의 의도치 않은 소실을 방지.
+
+2. 다른 UI 기능 전수 검토 및 마지막 설정 영속성(Persistence) 확대 적용
+   - 조작 시각화 (chk_action_overlay):
+     * action_overlay_enabled를 config에 저장/복원하도록 추가하고 토글 시 즉시 저장 연결.
+   - 전역 플로팅 정지 (chk_floating_stop):
+     * floating_stop_enabled를 config에 저장/복원하도록 추가.
+     * 체크박스 토글 시 floating_stop 위젯의 실시간 show/hide 및 설정 저장 연동.
+     * 매크로 실행(_on_start_execution) 시 플로팅 정지 옵션 활성화 상태이면 자동으로 플로팅 정지 바를 띄우도록 연동.
+   - 코드 자동 리로드 (chk_hot_reload):
+     * hot_reload_enabled를 config에 저장/복원하고 토글 시 즉시 저장 연결.
+   - 로그 창 자동 스크롤 (chk_autoscroll):
+     * autoscroll_enabled를 config에 저장/복원하고 토글 시 즉시 저장 연결.
+   - 안티밴 다이얼로그 (_on_open_anti_ban_dialog):
+     * 설정 변경 후 확인 클릭 시 self._mark_dirty()를 호출하여 변경사항이 프로젝트 저장 안내에 정상 반영되도록 개선.
+
+3. 단위 테스트 작성 및 검증
+   - tests/test_config_persistence_all_controls.py 신규 작성 (번인 방지 및 주요 UI 토글들의 config 저장/복원 검증).
+   - 기존 번인 방지 및 geometry 관련 테스트(test_burn_in_mode2_and_playbar.py, test_folder_disabled_and_window_geometry.py, test_stop_pause_resume_and_burn_in.py) 통과 확인.
+
+4. 프로젝트 버전 업데이트
+   - core/version.py: __version__ = "261008.2307"
+
+[영향 파일 목록 / Affected Files]
+- core/version.py
+- ui/main_window.py
+- tests/test_config_persistence_all_controls.py
+- history/2026-10-08_231200_번인_방지_및_UI_컨트롤_설정_영속성_복원_개선.txt

@@ -85,11 +85,13 @@ class GlobalFloatingStopWidget(QWidget):
                 background-color: #c2410c;
             }
         """)
+        self.btn_pause.setToolTip("일시정지 / 재개 (Shift+F6)")
         self.btn_pause.clicked.connect(self._on_pause_clicked)
         c_layout.addWidget(self.btn_pause)
 
         # Big Red Emergency Stop Button
         self.btn_stop = QPushButton("⏹ 정지 (F6)")
+        self.btn_stop.setToolTip("즉시 긴급 정지 (F6)")
         self.btn_stop.setStyleSheet("""
             QPushButton {
                 background-color: #dc2626;

@@ -45,6 +45,7 @@ from ui.virtual_canvas_window import VirtualCanvasWindow
 from ui.anti_burn_in_overlay import AntiBurnInOverlay
 from core.global_hotkey import GlobalHotkeyListener
 from ui.floating_stop_widget import GlobalFloatingStopWidget
+from ui.custom_spinbox import CustomSpinBox
 from core.path_utils import to_absolute_path, to_relative_path
 from core.config import get_config_filepath
 
@@ -140,6 +141,7 @@ class MainWindow(QMainWindow):
 
         self._init_ui()
         self._init_layout_and_docks()
+        self._apply_ui_config()
         self._apply_theme()
         self._refresh_scenario_table()
         self._update_target_label(None)
@@ -166,6 +168,7 @@ class MainWindow(QMainWindow):
         """Initializes global F6 keyboard listener and always-on-top floating emergency stop widget."""
         self.global_hotkey = GlobalHotkeyListener(None)
         self.global_hotkey.sig_stop_hotkey.connect(self._on_global_hotkey_stop)
+        self.global_hotkey.sig_pause_hotkey.connect(self._on_global_hotkey_pause)
         self.global_hotkey.start()
         self.destroyed.connect(self._cleanup_global_hotkey)
 
@@ -185,6 +188,14 @@ class MainWindow(QMainWindow):
         if self.runner and self.runner.isRunning():
             self._append_log("WARN", "🛑 [전역 단축키] F6 긴급 정지가 수신되었습니다.")
             self._on_stop_execution()
+
+    def _on_global_hotkey_pause(self):
+        """Global Shift+F6 hotkey handler (toggles pause/resume system-wide)."""
+        if self.runner and self.runner.isRunning():
+            is_paused = getattr(self.runner, "_is_paused", False)
+            state_desc = "재개" if is_paused else "일시정지"
+            self._append_log("INFO", f"⏸ [전역 단축키] Shift+F6 {state_desc}가 수신되었습니다.")
+            self._on_pause_execution()
 
     def _update_window_title(self):
         """Update window title with application version and current project filename."""
@@ -213,6 +224,7 @@ class MainWindow(QMainWindow):
             try:
                 with open(cfg_file, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
+                    self._cached_config = cfg
                     self.current_theme = cfg.get("theme", "light")
                     self.current_layout_name = cfg.get("layout_name", "기본 3열 (Default)")
                     self.custom_layouts = cfg.get("custom_layouts", {})
@@ -223,19 +235,9 @@ class MainWindow(QMainWindow):
                         self.project.target_client_width = cfg.get("last_target_width", 1600)
                         self.project.target_client_height = cfg.get("last_target_height", 900)
                         self.project.target_window_title = self._last_config_target_title
-                    if hasattr(self, "chk_anti_burn") and self.chk_anti_burn:
-                        self.chk_anti_burn.setChecked(cfg.get("anti_burn_enabled", False))
-                    burn_mode = cfg.get("anti_burn_mode", 1)
-                    if hasattr(self, "combo_anti_burn_mode") and self.combo_anti_burn_mode:
-                        idx = self.combo_anti_burn_mode.findData(burn_mode)
-                        if idx >= 0:
-                            self.combo_anti_burn_mode.setCurrentIndex(idx)
-                    if hasattr(self, "spin_anti_burn_min") and self.spin_anti_burn_min:
-                        self.spin_anti_burn_min.setValue(cfg.get("anti_burn_interval_min", 5))
-                    if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
-                        self.anti_burn_overlay.set_mode(burn_mode)
-                        self.anti_burn_overlay.set_interval_minutes(cfg.get("anti_burn_interval_min", 5))
-                        self.anti_burn_overlay.set_enabled(cfg.get("anti_burn_enabled", False))
+
+                    # If UI controls are already initialized, apply them immediately
+                    self._apply_ui_config(cfg)
 
                     # Restore window geometry (exact position, size, maximized state, screen)
                     geom_hex = cfg.get("window_geometry")
@@ -264,6 +266,70 @@ class MainWindow(QMainWindow):
                             self.showMaximized()
             except Exception:
                 pass
+
+    def _apply_ui_config(self, cfg: Optional[Dict[str, Any]] = None):
+        """Applies loaded user configuration to UI widgets and overlays safely without trigger cascades."""
+        if cfg is None:
+            cfg = getattr(self, "_cached_config", None)
+        if not cfg:
+            return
+
+        # 1. Anti-burn in settings (번인 방지)
+        burn_mode = cfg.get("anti_burn_mode", 1)
+        burn_interval = cfg.get("anti_burn_interval_min", 5)
+        burn_enabled = cfg.get("anti_burn_enabled", False)
+
+        if hasattr(self, "combo_anti_burn_mode") and self.combo_anti_burn_mode:
+            idx = self.combo_anti_burn_mode.findData(burn_mode)
+            if idx >= 0:
+                self.combo_anti_burn_mode.blockSignals(True)
+                self.combo_anti_burn_mode.setCurrentIndex(idx)
+                self.combo_anti_burn_mode.blockSignals(False)
+
+        if hasattr(self, "spin_anti_burn_min") and self.spin_anti_burn_min:
+            self.spin_anti_burn_min.blockSignals(True)
+            self.spin_anti_burn_min.setValue(burn_interval)
+            self.spin_anti_burn_min.blockSignals(False)
+
+        if hasattr(self, "chk_anti_burn") and self.chk_anti_burn:
+            self.chk_anti_burn.blockSignals(True)
+            self.chk_anti_burn.setChecked(burn_enabled)
+            self.chk_anti_burn.blockSignals(False)
+
+        if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
+            self.anti_burn_overlay.set_mode(burn_mode)
+            self.anti_burn_overlay.set_interval_minutes(burn_interval)
+            self.anti_burn_overlay.set_enabled(burn_enabled)
+
+        # 2. Action Overlay (조작 시각화)
+        action_overlay_enabled = cfg.get("action_overlay_enabled", True)
+        if hasattr(self, "chk_action_overlay") and self.chk_action_overlay:
+            self.chk_action_overlay.blockSignals(True)
+            self.chk_action_overlay.setChecked(action_overlay_enabled)
+            self.chk_action_overlay.blockSignals(False)
+        if hasattr(self, "action_overlay") and self.action_overlay:
+            self.action_overlay.is_overlay_enabled = action_overlay_enabled
+
+        # 3. Global Floating Stop (전역 플로팅 정지)
+        floating_stop_enabled = cfg.get("floating_stop_enabled", False)
+        if hasattr(self, "chk_floating_stop") and self.chk_floating_stop:
+            self.chk_floating_stop.blockSignals(True)
+            self.chk_floating_stop.setChecked(floating_stop_enabled)
+            self.chk_floating_stop.blockSignals(False)
+
+        # 4. Hot Reload (코드 자동 리로드)
+        hot_reload_enabled = cfg.get("hot_reload_enabled", False)
+        if hasattr(self, "chk_hot_reload") and self.chk_hot_reload:
+            self.chk_hot_reload.blockSignals(True)
+            self.chk_hot_reload.setChecked(hot_reload_enabled)
+            self.chk_hot_reload.blockSignals(False)
+
+        # 5. Log Autoscroll (자동 스크롤)
+        autoscroll_enabled = cfg.get("autoscroll_enabled", True)
+        if hasattr(self, "chk_autoscroll") and self.chk_autoscroll:
+            self.chk_autoscroll.blockSignals(True)
+            self.chk_autoscroll.setChecked(autoscroll_enabled)
+            self.chk_autoscroll.blockSignals(False)
 
     def _save_app_config(self):
         try:
@@ -300,13 +366,29 @@ class MainWindow(QMainWindow):
                 "last_target_title": getattr(self.project, "target_window_title", "") or getattr(self, "_last_config_target_title", ""),
                 "last_target_width": getattr(self.project, "target_client_width", 1600),
                 "last_target_height": getattr(self.project, "target_client_height", 900),
-                "anti_burn_enabled": self.chk_anti_burn.isChecked() if hasattr(self, "chk_anti_burn") else False,
-                "anti_burn_mode": self.combo_anti_burn_mode.currentData() if hasattr(self, "combo_anti_burn_mode") else 1,
-                "anti_burn_interval_min": self.spin_anti_burn_min.value() if hasattr(self, "spin_anti_burn_min") else 5,
                 "layout_name": getattr(self, "current_layout_name", "기본 3열 (Default)"),
                 "custom_layouts": getattr(self, "custom_layouts", {}),
                 "last_project_path": self.current_project_path,
             })
+
+            # Save UI controls state safely (only overwrite if widget exists to avoid erasing loaded configs)
+            if hasattr(self, "chk_anti_burn") and self.chk_anti_burn:
+                cfg["anti_burn_enabled"] = self.chk_anti_burn.isChecked()
+            if hasattr(self, "combo_anti_burn_mode") and self.combo_anti_burn_mode and self.combo_anti_burn_mode.currentData() is not None:
+                cfg["anti_burn_mode"] = self.combo_anti_burn_mode.currentData()
+            if hasattr(self, "spin_anti_burn_min") and self.spin_anti_burn_min:
+                cfg["anti_burn_interval_min"] = self.spin_anti_burn_min.value()
+            if hasattr(self, "chk_action_overlay") and self.chk_action_overlay:
+                cfg["action_overlay_enabled"] = self.chk_action_overlay.isChecked()
+            if hasattr(self, "chk_floating_stop") and self.chk_floating_stop:
+                cfg["floating_stop_enabled"] = self.chk_floating_stop.isChecked()
+            if hasattr(self, "chk_hot_reload") and self.chk_hot_reload:
+                cfg["hot_reload_enabled"] = self.chk_hot_reload.isChecked()
+            if hasattr(self, "chk_autoscroll") and self.chk_autoscroll:
+                cfg["autoscroll_enabled"] = self.chk_autoscroll.isChecked()
+
+            self._cached_config = cfg
+
             if hasattr(self, "saveState"):
                 try:
                     cfg["dock_layout_state"] = self.saveState().toHex().data().decode()
@@ -600,6 +682,7 @@ class MainWindow(QMainWindow):
         self.chk_hot_reload = QCheckBox("코드 자동 리로드")
         self.chk_hot_reload.setChecked(False)
         self.chk_hot_reload.setToolTip("코드(.py) 파일 수정 저장 시 프로그램을 즉시 자동 재시작합니다.")
+        self.chk_hot_reload.toggled.connect(lambda _: self._save_app_config())
         row2_layout.addWidget(self.chk_hot_reload)
 
         btn_reload = QPushButton("🔄 리로드 (Ctrl+R)")
@@ -872,6 +955,7 @@ class MainWindow(QMainWindow):
 
         self.chk_autoscroll = QCheckBox("자동 스크롤")
         self.chk_autoscroll.setChecked(True)
+        self.chk_autoscroll.toggled.connect(lambda _: self._save_app_config())
         log_header.addWidget(self.chk_autoscroll)
 
         btn_clear_log = QPushButton("비우기")
@@ -954,8 +1038,9 @@ class MainWindow(QMainWindow):
         self.btn_run_selected.clicked.connect(self._on_start_selected_execution)
         row1_ctrl.addWidget(self.btn_run_selected)
 
-        self.btn_pause = QPushButton("⏸ 일시정지")
+        self.btn_pause = QPushButton("⏸ 일시정지 (Shift+F6)")
         self.btn_pause.setObjectName("btn_pause")
+        self.btn_pause.setToolTip("실행 중인 시나리오를 일시정지하거나 재개합니다. (단축키: Shift+F6)")
         self.btn_pause.setEnabled(False)
         self.btn_pause.clicked.connect(self._on_pause_execution)
         row1_ctrl.addWidget(self.btn_pause)
@@ -986,6 +1071,7 @@ class MainWindow(QMainWindow):
         self.chk_floating_stop = QCheckBox("🛑 전역 플로팅 정지")
         self.chk_floating_stop.setChecked(False)
         self.chk_floating_stop.setToolTip("오토 실행 시 화면 최상위에 어디서나 마우스로 원클릭 정지 가능한 빨간색 플로팅 버튼을 자동 표시합니다.")
+        self.chk_floating_stop.toggled.connect(self._on_toggle_floating_stop)
         row1_ctrl.addWidget(self.chk_floating_stop)
 
         row1_ctrl.addStretch()
@@ -1007,10 +1093,13 @@ class MainWindow(QMainWindow):
         lbl_loop_icon.setStyleSheet("font-weight: bold; font-size: 9pt;")
         row2_ctrl.addWidget(lbl_loop_icon)
 
-        self.spin_loops = QSpinBox()
+        self.spin_loops = CustomSpinBox()
+        self.spin_loops.setObjectName("spin_loops")
         self.spin_loops.setRange(0, 99999)
         self.spin_loops.setValue(self.project.loop_count)
         self.spin_loops.setSpecialValueText("무한 반복 (∞)")
+        self.spin_loops.setMinimumWidth(120)
+        self.spin_loops.setToolTip("시나리오 전체 반복 실행 횟수 (0: 무한 반복, 1 이상: 지정 횟수 반복)")
         self.spin_loops.valueChanged.connect(self._on_loop_count_changed)
         row2_ctrl.addWidget(self.spin_loops)
 
@@ -3285,7 +3374,7 @@ class MainWindow(QMainWindow):
                 self.runner.resume()
                 self._clear_paused_state()
                 self.lbl_run_status.setText("실행 중...")
-                self.btn_pause.setText("⏸ 일시정지")
+                self.btn_pause.setText("⏸ 일시정지 (Shift+F6)")
                 if hasattr(self, "popup_play_bar") and self.popup_play_bar:
                     self.popup_play_bar.set_runner_state("running", "재개되어 실행 중...")
                 return
@@ -3298,7 +3387,13 @@ class MainWindow(QMainWindow):
             start_scenario_id = self._paused_scenario_id
         self._clear_paused_state()
 
-        self.runner = WorkflowRunner(self.project, self.target_hwnd, start_scenario_id=start_scenario_id, parent=self)
+        self.runner = WorkflowRunner(
+            self.project,
+            self.target_hwnd,
+            start_scenario_id=start_scenario_id,
+            anti_burn_overlay=self.anti_burn_overlay,
+            parent=self
+        )
         self.runner.sig_log.connect(self._append_log)
         self.runner.sig_scenario_started.connect(self._on_scenario_started)
         self.runner.sig_scenario_completed.connect(self._on_scenario_completed)
@@ -3327,6 +3422,11 @@ class MainWindow(QMainWindow):
         if hasattr(self, "popup_play_bar") and self.popup_play_bar:
             self.popup_play_bar.set_runner_state("running", "시나리오 실행 중...")
 
+        if hasattr(self, "chk_floating_stop") and self.chk_floating_stop.isChecked():
+            if hasattr(self, "floating_stop") and self.floating_stop:
+                self.floating_stop.show()
+                self.floating_stop.raise_()
+
         self.runner.start()
 
     def _on_pause_execution(self):
@@ -3337,7 +3437,7 @@ class MainWindow(QMainWindow):
                     self.runner.set_next_scenario_id(self._paused_scenario_id)
                 self.runner.resume()
                 self._clear_paused_state()
-                self.btn_pause.setText("⏸ 일시정지")
+                self.btn_pause.setText("⏸ 일시정지 (Shift+F6)")
                 self.lbl_run_status.setText("실행 중...")
                 self.lbl_run_status.setStyleSheet("color: #16a34a; font-weight: bold;")
                 if hasattr(self, "popup_play_bar") and self.popup_play_bar:
@@ -3349,7 +3449,7 @@ class MainWindow(QMainWindow):
                 self.runner.pause()
                 paused_id = getattr(self.runner, "current_scenario_id", None) or getattr(self, "_last_running_scenario_id", None)
                 self._set_paused_state(paused_id)
-                self.btn_pause.setText("▶ 재개")
+                self.btn_pause.setText("▶ 재개 (Shift+F6)")
                 self.lbl_run_status.setText("일시정지됨")
                 self.lbl_run_status.setStyleSheet("color: #ea580c; font-weight: bold;")
                 if hasattr(self, "popup_play_bar") and self.popup_play_bar:
@@ -3368,7 +3468,7 @@ class MainWindow(QMainWindow):
             self.btn_run_selected.setEnabled(True)
         self.btn_pause.setEnabled(False)
         self.btn_stop.setEnabled(False)
-        self.btn_pause.setText("⏸ 일시정지")
+        self.btn_pause.setText("⏸ 일시정지 (Shift+F6)")
         self.lbl_run_status.setText("정지됨")
         self.lbl_run_status.setStyleSheet("color: #dc2626; font-weight: bold;")
         self._highlight_running_row_header(None)
@@ -3476,6 +3576,16 @@ class MainWindow(QMainWindow):
             self.action_overlay.is_overlay_enabled = checked
             if not checked:
                 self.action_overlay.clear_action()
+        self._save_app_config()
+
+    def _on_toggle_floating_stop(self, checked: bool):
+        if hasattr(self, "floating_stop") and self.floating_stop:
+            if self.runner and self.runner.isRunning() and checked:
+                self.floating_stop.show()
+                self.floating_stop.raise_()
+            elif not checked:
+                self.floating_stop.hide()
+        self._save_app_config()
 
     def _on_scenario_started(self, scenario_id: str):
         self._last_running_scenario_id = scenario_id
@@ -3507,7 +3617,7 @@ class MainWindow(QMainWindow):
             self.btn_run_selected.setEnabled(True)
         self.btn_pause.setEnabled(False)
         self.btn_stop.setEnabled(False)
-        self.btn_pause.setText("⏸ 일시정지")
+        self.btn_pause.setText("⏸ 일시정지 (Shift+F6)")
         self.lbl_run_status.setText(f"완료 ({reason})")
         self.lbl_run_status.setStyleSheet("font-weight: bold;")
         self._highlight_running_row_header(None)
@@ -3842,6 +3952,7 @@ class MainWindow(QMainWindow):
     def _on_open_anti_ban_dialog(self):
         dlg = AntiBanDialog(self.project, parent=self)
         if dlg.exec_() == QDialog.Accepted:
+            self._mark_dirty()
             state_str = "활성화" if self.project.anti_ban_enabled else "비활성화"
             cur_off = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0)))
             w_px = getattr(self.project, "anti_ban_coord_weak", 5)
@@ -3915,7 +4026,11 @@ class MainWindow(QMainWindow):
                     self._on_pause_execution()
             event.accept()
         elif event.key() == Qt.Key_F6:
-            self._on_stop_execution()
+            if event.modifiers() & Qt.ShiftModifier:
+                if self.runner and self.runner.isRunning():
+                    self._on_pause_execution()
+            else:
+                self._on_stop_execution()
             event.accept()
         elif event.key() == Qt.Key_F7:
             self._on_step_execution()

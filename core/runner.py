@@ -28,17 +28,38 @@ class WorkflowRunner(QThread):
     sig_step_completed = pyqtSignal(int)  # next_scenario_index
     sig_finished = pyqtSignal(str)  # reason
 
-    def __init__(self, project: Project, hwnd: int, start_scenario_id: Optional[str] = None, parent=None):
+    def __init__(self, project: Project, hwnd: int, start_scenario_id: Optional[str] = None, anti_burn_overlay=None, parent=None):
         super().__init__(parent)
         self.project = project
         self.hwnd = hwnd
         self.start_scenario_id = start_scenario_id
+        self.anti_burn_overlay = anti_burn_overlay or getattr(parent, "anti_burn_overlay", None)
         self._next_scenario_id: Optional[str] = None
         self.current_scenario_id: Optional[str] = None
 
         self._is_running = False
         self._is_paused = False
         self._step_mode = False  # If True, runs one step then pauses
+
+    def _wait_for_anti_burn(self):
+        """
+        Safely holds condition evaluation while anti-burn screen transition is actively playing.
+        Prevents temporary overlay colors (black, white, rainbow) from skewing color detection.
+        """
+        overlay = getattr(self, "anti_burn_overlay", None)
+        if not overlay and self.parent():
+            overlay = getattr(self.parent(), "anti_burn_overlay", None)
+
+        from ui.anti_burn_in_overlay import AntiBurnInOverlay
+        is_trans = (overlay and overlay.is_transitioning()) or AntiBurnInOverlay.is_any_transitioning()
+
+        if is_trans and self._is_running:
+            self.sig_log.emit("INFO", "🖥️ [번인 방지 대기] 번인 방지 화면 전환 진행 중... 색상 오판정 방지를 위해 잠시 대기합니다.")
+            while self._is_running and (
+                (overlay and overlay.is_transitioning()) or AntiBurnInOverlay.is_any_transitioning()
+            ):
+                if not self.sleep_interruptible(0.05):
+                    break
 
     def sleep_interruptible(self, seconds: float) -> bool:
         """Sleeps in small chunks (20ms) checking self._is_running. Returns True if completed, False if interrupted."""
@@ -47,8 +68,15 @@ class WorkflowRunner(QThread):
         if hasattr(time.sleep, "assert_called") or hasattr(time.sleep, "mock_calls"):
             time.sleep(seconds)
             return self._is_running
+        from PyQt5.QtCore import QThread
+        from PyQt5.QtWidgets import QApplication
+        app = QApplication.instance()
+        is_main = app and (QThread.currentThread() == app.thread())
+
         end_time = time.time() + seconds
         while time.time() < end_time and self._is_running:
+            if is_main and app:
+                app.processEvents()
             rem = end_time - time.time()
             time.sleep(min(0.02, max(0.001, rem)))
         return self._is_running
@@ -189,6 +217,7 @@ class WorkflowRunner(QThread):
                     # 2. Check screen recognition condition (until_match / while_match)
                     eff_cond = scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition
                     if scen.loop_mode in ("until_match", "while_match") and eff_cond and eff_cond.points:
+                        self._wait_for_anti_burn()
                         matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
                         if scen.loop_mode == "until_match" and matched:
                             end_idx = self.project.find_matching_loop_end(current_index)
@@ -252,6 +281,7 @@ class WorkflowRunner(QThread):
                 point_results = []
 
                 while attempt < max_attempts and self._is_running:
+                    self._wait_for_anti_burn()
                     matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
                     if matched:
                         break
