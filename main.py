@@ -12,7 +12,7 @@ sys.dont_write_bytecode = True
 
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPalette, QColor
+from PyQt5.QtGui import QPalette, QColor, QIcon
 from core.logger import install_crash_handler
 from ui.main_window import MainWindow
 
@@ -44,10 +44,25 @@ def main():
 
     from core.version import __version__
 
+    # Windows 작업 표시줄 전용 AppUserModelID 등록 (독립 아이콘 및 그룹화 보장)
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("rugiadian.fgoa.autotool")
+        except Exception:
+            pass
+
     app = QApplication(sys.argv)
     app.setApplicationName("FGOA")
     app.setApplicationVersion(__version__)
     app.setOrganizationName("Rugiadian")
+
+    # 작업 표시줄 및 전체 창 공통 아이콘 설정
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui", "assets", "app_icon.ico")
+    if os.path.exists(icon_path):
+        app_icon = QIcon(icon_path)
+        app.setWindowIcon(app_icon)
+    else:
+        app_icon = None
 
     # Use Fusion style to prevent Windows OS Dark Mode DWM surface from leaking black backgrounds
     app.setStyle("Fusion")
@@ -64,6 +79,8 @@ def main():
     app.setPalette(base_palette)
 
     window = MainWindow()
+    if app_icon:
+        window.setWindowIcon(app_icon)
     window.show()
 
     sys.exit(app.exec_())
