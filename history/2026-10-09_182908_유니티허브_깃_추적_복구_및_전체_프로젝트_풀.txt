@@ -1,0 +1,39 @@
+[일시 / Timestamp]
+- 요청 시각: 2026-10-09 18:18
+- 완료 시각: 2026-10-09 18:29
+
+[요청 내용 / User Request]
+1. 접근 가능한 + 깃에 연결된 프로젝트들 모두 풀 받아줘.
+2. 유니티 허브에서 깃을 추적을 못하고 있음. 해결 바람.
+
+[결과 요약 / Summary of Results]
+1. 유니티 허브(Unity Hub) Git 추적 불가 원인 분석 및 해결:
+   - 원인 1: 시스템 PATH에 `git.exe` 바이너리 부재 (GitHub Desktop의 `git.cmd`만 PATH에 등록되어 있어, Unity Hub Electron 프로세스에서 `execFile('git')` 호출 실패로 "Git is not installed or not available in PATH" 발생 및 VCS 브랜치 조회 비활성화).
+   - 원인 2: Unity Hub 설정 파일(`source-control-disconnected.json`)에 GitHub 및 GitLab이 연결 해제(차단) 상태로 등록되어 있음.
+   - 원인 3: Git LFS 바이너리 부재.
+   - 조치:
+     - GitHub Desktop 내장 Git 바이너리를 가리키는 디렉터리 정션 `C:\Users\demo_\AppData\Local\GitHubDesktop\current-git` 생성.
+     - 사용자 환경변수 `PATH`에 `C:\Users\demo_\AppData\Local\GitHubDesktop\current-git\cmd` 영구 등록 및 환경 브로드캐스트(`WM_SETTINGCHANGE`) 완료.
+     - `git-lfs.exe` 하드링크를 `cmd` 디렉터리에 추가하여 Git LFS 지원 활성화.
+     - `%APPDATA%\UnityHub\source-control-disconnected.json`의 차단 목록 초기화 (`{"providers":[]}`).
+     - Unity Hub 재시작 후 로그에서 Git 바이너리 누락 오류가 완전히 해소됨을 검증.
+
+2. 전체 Git 프로젝트 Pull 진행 결과:
+   - [Pull 완료 / 최신 상태]:
+     - G:\Git\AntiGravityMeter (Already up to date)
+     - G:\Git\CapToPath (Already up to date)
+     - G:\Git\FGOA (Already up to date)
+   - [로컬 전용]:
+     - G:\Git\FGOC (원격 저장소 Remote 미설정)
+   - [인증 필요 (비공개 저장소)]:
+     - G:\Git\FGOC\posera (외부 비공개 저장소)
+     - G:\Git\RD-InputTool, G:\Git\RD-InputTool-alpha, G:\Git\RD-VideoCut, G:\Git\Tanoshii C, G:\Unity-Git\Tanoshii B (Rugiadian 비공개 저장소: Windows 자격 증명 관리자의 GitHub PAT 만료 상태로 CLI 비대화형 풀 실패)
+     - G:\Unity-Git\SD-Unity-chan-Haon-Custom 2020 등 (haonstore 비공개 저장소: 자격 증명 만료)
+
+[영향 파일 목록 / Affected Files]
+- C:\Users\demo_\AppData\Roaming\UnityHub\source-control-disconnected.json
+- C:\Users\demo_\AppData\Roaming\UnityHub\source-control-disconnected.json.bak
+- C:\Users\demo_\AppData\Local\GitHubDesktop\current-git (디렉터리 정션)
+- C:\Users\demo_\AppData\Local\GitHubDesktop\current-git\cmd\git-lfs.exe (하드링크)
+- HKCU\Environment (Path 레지스트리 키)
+- history\2026-10-09_182908_유니티허브_깃_추적_복구_및_전체_프로젝트_풀.txt

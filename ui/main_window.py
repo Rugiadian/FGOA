@@ -762,6 +762,11 @@ class MainWindow(QMainWindow):
         row1_flow_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         row1_flow = FlowLayout(row1_flow_widget, margin=0, spacing=4)
 
+        btn_new_scen = QPushButton("📄 새 시나리오")
+        btn_new_scen.setToolTip("노드가 하나도 없는 완전히 빈 새 시나리오 프로젝트를 생성합니다. (Ctrl+N)")
+        btn_new_scen.clicked.connect(self._on_new_scenario_project)
+        row1_flow.addWidget(btn_new_scen)
+
         btn_add = QPushButton("➕ 추가")
         btn_add.clicked.connect(self._on_add_scenario)
         row1_flow.addWidget(btn_add)
@@ -869,6 +874,7 @@ class MainWindow(QMainWindow):
         self.tbl_scenarios = DraggableScenarioTableWidget()
         self.tbl_scenarios.setColumnCount(7)
         self.tbl_scenarios.sig_row_reordered.connect(self._on_scenario_row_reordered)
+        self.tbl_scenarios.sig_delete_requested.connect(self._on_delete_scenario)
         self.tbl_scenarios.setHorizontalHeaderLabels([
             "스냅샷", "고유 ID", "활성", "시나리오 이름", "인식조건 모듈", "액션시퀀스 모듈", "분기"
         ])
@@ -906,7 +912,7 @@ class MainWindow(QMainWindow):
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetClosable
         )
         self.dock_scenarios.setWidget(self.tab_scenario_manager)
-        self.dock_scenarios.setMinimumWidth(200)
+        self.dock_scenarios.setMinimumWidth(280)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_scenarios)
 
         # ==========================================
@@ -1230,6 +1236,9 @@ class MainWindow(QMainWindow):
 
         self.sc_proj_save = QShortcut(QKeySequence("Ctrl+S"), self)
         self.sc_proj_save.activated.connect(self._on_save_project)
+
+        self.sc_proj_new = QShortcut(QKeySequence("Ctrl+N"), self)
+        self.sc_proj_new.activated.connect(self._on_new_scenario_project)
 
         # Global Undo / Redo Shortcuts
         self.sc_undo = QShortcut(QKeySequence("Ctrl+Z"), self)
@@ -1642,6 +1651,14 @@ class MainWindow(QMainWindow):
         child_disabled_color = QColor("#94a3b8" if self.current_theme == "light" else "#64748b")
         child_disabled_bg = QColor("#f8fafc" if self.current_theme == "light" else "#0b0f19")
 
+        # Distinct child member background for nodes inside folders
+        is_folder_child = bool(folder_info and folder_info.get("is_child", False))
+        child_tint_bg = None
+        if is_folder_child and not is_folder:
+            child_bg_str = folder_info.get("bg_light" if self.current_theme == "light" else "bg_dark")
+            if child_bg_str:
+                child_tint_bg = QColor(child_bg_str)
+
         if is_folder:
             if folder_is_disabled:
                 folder_bg = QColor("#f1f5f9" if self.current_theme == "light" else "#1e293b")
@@ -1990,6 +2007,18 @@ class MainWindow(QMainWindow):
             it_branch.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.tbl_scenarios.setItem(row, 6, it_branch)
 
+        # Distinct cell background tint for nodes inside groups/folders
+        if not is_folder and child_tint_bg:
+            for col_idx in (1, 3, 4, 5, 6):
+                it = self.tbl_scenarios.item(row, col_idx)
+                if it:
+                    it.setBackground(child_tint_bg)
+            it_0 = self.tbl_scenarios.item(row, 0)
+            if it_0:
+                it_0.setBackground(child_tint_bg)
+            if chk_widget:
+                chk_widget.setStyleSheet(f"background-color: {child_tint_bg.name()};")
+
     def _get_jump_display(self, target_id: str) -> str:
         if not target_id:
             return "(미지정)"
@@ -2327,6 +2356,8 @@ class MainWindow(QMainWindow):
             is_fld_start = getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start"))
             is_fld_end = getattr(scen, "is_folder_end", scen.node_type == "folder_end")
             if is_fld_start:
+                act_add_inside = menu.addAction("➕ 이 폴더 안에 새 시나리오 추가")
+                act_add_inside.triggered.connect(lambda checked, r=curr_row: self._on_add_scenario(custom_insert_idx=r + 1))
                 toggle_txt = "📂 폴더 펼치기" if getattr(scen, "is_collapsed", False) else "📁 폴더 접기"
                 act_toggle = menu.addAction(toggle_txt)
                 act_toggle.triggered.connect(lambda checked, s=scen: self._toggle_folder_collapse(s))
@@ -2346,6 +2377,8 @@ class MainWindow(QMainWindow):
                 act_move_dn.triggered.connect(self._on_move_down)
                 menu.addSeparator()
             elif is_fld_end:
+                act_add_inside_end = menu.addAction("➕ 이 폴더 끝에 새 시나리오 추가")
+                act_add_inside_end.triggered.connect(lambda checked, r=curr_row: self._on_add_scenario(custom_insert_idx=r))
                 en_txt = "👁️ 폴더 활성화" if not scen.enabled else "🚫 폴더 비활성화"
                 act_en = menu.addAction(en_txt)
                 act_en.triggered.connect(lambda checked, s=scen: self._toggle_folder_enabled(s))
@@ -2663,15 +2696,30 @@ class MainWindow(QMainWindow):
     # ==========================================
     # Toolbar Actions
     # ==========================================
-    def _on_add_scenario(self):
+    def _on_add_scenario(self, custom_insert_idx: Optional[int] = None):
         new_scen_num = self.project.get_next_scenario_number()
         selected_rows = sorted([r.row() for r in self.tbl_scenarios.selectionModel().selectedRows()])
         if not selected_rows and self.tbl_scenarios.selectionModel().hasSelection():
             selected_rows = sorted(list(set(idx.row() for idx in self.tbl_scenarios.selectedIndexes())))
 
-        if selected_rows:
+        if custom_insert_idx is not None:
+            insert_idx = custom_insert_idx
+        elif selected_rows:
             target_row = selected_rows[-1]
-            insert_idx = target_row + 1
+            target_scen = self.project.scenarios[target_row] if target_row < len(self.project.scenarios) else None
+            
+            # If target is folder_start: insert immediately inside folder after start, and expand!
+            if target_scen and getattr(target_scen, "is_folder_start", target_scen.node_type in ("folder", "folder_start")):
+                insert_idx = target_row + 1
+                target_scen.is_collapsed = False
+            # If target is folder_end: insert immediately inside folder before end, and expand parent folder!
+            elif target_scen and getattr(target_scen, "is_folder_end", target_scen.node_type == "folder_end"):
+                insert_idx = target_row
+                start_idx = self.project.find_matching_folder_start(target_row)
+                if start_idx is not None and start_idx < len(self.project.scenarios):
+                    self.project.scenarios[start_idx].is_collapsed = False
+            else:
+                insert_idx = target_row + 1
         else:
             insert_idx = len(self.project.scenarios)
 
@@ -2726,6 +2774,7 @@ class MainWindow(QMainWindow):
                 scenario_number=fld_num,
                 name=f"그룹 폴더 {fld_num}",
                 node_type="folder_start",
+                is_collapsed=False,
                 enabled=True
             )
             end_num = self.project.get_next_scenario_number()
@@ -2747,20 +2796,19 @@ class MainWindow(QMainWindow):
         else:
             insert_idx = len(self.project.scenarios)
             if selected_rows:
-                insert_idx = selected_rows[0] + 1
+                target_row = selected_rows[0]
+                target_scen = self.project.scenarios[target_row] if target_row < len(self.project.scenarios) else None
+                if target_scen and getattr(target_scen, "is_folder_end", target_scen.node_type == "folder_end"):
+                    insert_idx = target_row
+                else:
+                    insert_idx = target_row + 1
 
-            self._push_scenario_undo_state(f"폴더 블록 #{fld_num} 추가")
+            self._push_scenario_undo_state(f"폴더 블록 #{fld_num} 짝 추가")
             start_scen = Scenario(
                 scenario_number=fld_num,
                 name=f"그룹 폴더 {fld_num}",
                 node_type="folder_start",
-                enabled=True
-            )
-            child_num = self.project.get_next_scenario_number()
-            child_scen = Scenario(
-                scenario_number=child_num,
-                name=f"폴더 항목 1",
-                node_type="normal",
+                is_collapsed=False,
                 enabled=True
             )
             end_num = self.project.get_next_scenario_number()
@@ -2773,11 +2821,12 @@ class MainWindow(QMainWindow):
             )
             start_scen.folder_target_id = end_scen.id
 
-            self.project.scenarios[insert_idx:insert_idx] = [start_scen, child_scen, end_scen]
+            # 사용자 요구사항: 폴더 생성 시 짝(Start, End)만 깔끔하게 쌍으로 생성
+            self.project.scenarios[insert_idx:insert_idx] = [start_scen, end_scen]
             self.project.renumber_steps()
             self._refresh_scenario_table()
             self.tbl_scenarios.selectRow(insert_idx)
-            self.status_bar.showMessage(f"📁 새 그룹 폴더 's{start_scen.scenario_number}' 블록이 추가되었습니다.", 3000)
+            self.status_bar.showMessage(f"📁 새 그룹 폴더 's{start_scen.scenario_number}' 짝이 추가되었습니다.", 3000)
 
     def _toggle_folder_collapse(self, scen: Scenario):
         """Toggle collapse/expand state of a folder node."""
@@ -2883,55 +2932,82 @@ class MainWindow(QMainWindow):
         rows = self.tbl_scenarios.selectionModel().selectedRows()
         if not rows:
             return
-        row = rows[0].row()
-        scen = self.project.scenarios[row]
-        is_fld_start = getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start"))
-        is_fld_end = getattr(scen, "is_folder_end", scen.node_type == "folder_end")
 
-        if is_fld_start or is_fld_end:
-            b_start, b_end = self._get_block_range(row)
-            if b_end > b_start:
-                msg_box = QMessageBox(self)
-                msg_box.setWindowTitle("폴더 삭제 확인")
-                msg_box.setText(f"📁 그룹 폴더 [{self.project.scenarios[b_start].name}] 삭제 방식 선택")
-                msg_box.setInformativeText("폴더와 내부 시나리오를 모두 삭제하시겠습니까, 아니면 폴더만 해제(내용물 유지)하시겠습니까?")
-                btn_all = msg_box.addButton("전체 삭제 (하위 포함)", QMessageBox.YesRole)
-                btn_group_only = msg_box.addButton("폴더만 해제 (내용물 유지)", QMessageBox.NoRole)
-                btn_cancel = msg_box.addButton("취소", QMessageBox.RejectRole)
-                msg_box.exec_()
+        selected_indices = sorted(list(set(r.row() for r in rows if 0 <= r.row() < len(self.project.scenarios))))
+        if not selected_indices:
+            return
 
-                clicked = msg_box.clickedButton()
-                if clicked == btn_all:
-                    self._push_scenario_undo_state(f"폴더 '{self.project.scenarios[b_start].name}' 전체 삭제")
-                    del self.project.scenarios[b_start : b_end + 1]
-                    self.project.renumber_steps()
-                    self._refresh_scenario_table()
-                    new_sel = min(b_start, len(self.project.scenarios) - 1)
-                    if new_sel >= 0:
-                        self.tbl_scenarios.selectRow(new_sel)
-                    return
-                elif clicked == btn_group_only:
-                    self._push_scenario_undo_state(f"폴더 '{self.project.scenarios[b_start].name}' 그룹 해제")
-                    del self.project.scenarios[b_end]
-                    del self.project.scenarios[b_start]
-                    self.project.renumber_steps()
-                    self._refresh_scenario_table()
-                    new_sel = min(b_start, len(self.project.scenarios) - 1)
-                    if new_sel >= 0:
-                        self.tbl_scenarios.selectRow(new_sel)
-                    return
-                else:
-                    return
+        if len(selected_indices) == 1:
+            row = selected_indices[0]
+            scen = self.project.scenarios[row]
+            is_fld_start = getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start"))
+            is_fld_end = getattr(scen, "is_folder_end", scen.node_type == "folder_end")
 
-        res = QMessageBox.question(self, "삭제 확인", f"시나리오 고유 s{scen.scenario_number} (실행 #{scen.step_number}) [{scen.name}]를 삭제하시겠습니까?")
-        if res == QMessageBox.Yes:
-            self._push_scenario_undo_state(f"시나리오 s{scen.scenario_number} 삭제")
-            del self.project.scenarios[row]
-            self.project.renumber_steps()
-            self._refresh_scenario_table()
-            new_sel = min(row, len(self.project.scenarios) - 1)
-            if new_sel >= 0:
-                self.tbl_scenarios.selectRow(new_sel)
+            if is_fld_start or is_fld_end:
+                b_start, b_end = self._get_block_range(row)
+                if b_end > b_start:
+                    msg_box = QMessageBox(self)
+                    msg_box.setWindowTitle("폴더 삭제 확인")
+                    msg_box.setText(f"📁 그룹 폴더 [{self.project.scenarios[b_start].name}] 삭제 방식 선택")
+                    msg_box.setInformativeText("폴더와 내부 시나리오를 모두 삭제하시겠습니까, 아니면 폴더만 해제(내용물 유지)하시겠습니까?")
+                    btn_all = msg_box.addButton("전체 삭제 (하위 포함)", QMessageBox.YesRole)
+                    btn_group_only = msg_box.addButton("폴더만 해제 (내용물 유지)", QMessageBox.NoRole)
+                    btn_cancel = msg_box.addButton("취소", QMessageBox.RejectRole)
+                    msg_box.exec_()
+
+                    clicked = msg_box.clickedButton()
+                    if clicked == btn_all:
+                        self._push_scenario_undo_state(f"폴더 '{self.project.scenarios[b_start].name}' 전체 삭제")
+                        del self.project.scenarios[b_start : b_end + 1]
+                        self.project.renumber_steps()
+                        self._refresh_scenario_table()
+                        new_sel = min(b_start, len(self.project.scenarios) - 1)
+                        if new_sel >= 0:
+                            self.tbl_scenarios.selectRow(new_sel)
+                        return
+                    elif clicked == btn_group_only:
+                        self._push_scenario_undo_state(f"폴더 '{self.project.scenarios[b_start].name}' 그룹 해제")
+                        del self.project.scenarios[b_end]
+                        del self.project.scenarios[b_start]
+                        self.project.renumber_steps()
+                        self._refresh_scenario_table()
+                        new_sel = min(b_start, len(self.project.scenarios) - 1)
+                        if new_sel >= 0:
+                            self.tbl_scenarios.selectRow(new_sel)
+                        return
+                    else:
+                        return
+
+            res = QMessageBox.question(self, "삭제 확인", f"시나리오 고유 s{scen.scenario_number} (실행 #{scen.step_number}) [{scen.name}]를 삭제하시겠습니까?")
+            if res == QMessageBox.Yes:
+                self._push_scenario_undo_state(f"시나리오 s{scen.scenario_number} 삭제")
+                del self.project.scenarios[row]
+                self.project.renumber_steps()
+                self._refresh_scenario_table()
+                new_sel = min(row, len(self.project.scenarios) - 1)
+                if new_sel >= 0:
+                    self.tbl_scenarios.selectRow(new_sel)
+        else:
+            # Multi-selection deletion
+            count = len(selected_indices)
+            res = QMessageBox.question(
+                self,
+                "다중 노드 삭제 확인",
+                f"선택한 {count}개의 시나리오 노드를 모두 삭제하시겠습니까?\n(폴더 또는 루프 경계 노드가 포함되어 있을 수 있습니다.)",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if res == QMessageBox.Yes:
+                self._push_scenario_undo_state(f"시나리오 {count}개 일괄 삭제")
+                for r in reversed(selected_indices):
+                    if 0 <= r < len(self.project.scenarios):
+                        del self.project.scenarios[r]
+                self.project.renumber_steps()
+                self._refresh_scenario_table()
+                first_r = selected_indices[0]
+                new_sel = min(first_r, len(self.project.scenarios) - 1)
+                if new_sel >= 0:
+                    self.tbl_scenarios.selectRow(new_sel)
 
     def _on_move_up(self):
         rows = self.tbl_scenarios.selectionModel().selectedRows()
@@ -2984,7 +3060,7 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"{unit_str} '{block[0].name}' 아래로 이동 완료", 2000)
 
     def _on_scenario_row_reordered(self, from_row: int, to_row: int):
-        """Reorders scenarios in the project via drag-and-drop."""
+        """Reorders scenarios in the project via drag-and-drop, including inserting into empty folders."""
         if not self.project or not self.project.scenarios or from_row == to_row:
             return
         scens = self.project.scenarios
@@ -2994,14 +3070,36 @@ class MainWindow(QMainWindow):
         if b_start <= to_row <= b_end:
             return
 
+        target_scen = scens[to_row]
+        is_target_fld_start = getattr(target_scen, "is_folder_start", target_scen.node_type in ("folder", "folder_start"))
+        is_target_fld_end = getattr(target_scen, "is_folder_end", target_scen.node_type == "folder_end")
+
         self._push_scenario_undo_state(f"시나리오 s{scens[b_start].scenario_number} 드래그 이동")
         block = scens[b_start : b_end + 1]
         block_len = len(block)
         del scens[b_start : b_end + 1]
-        if to_row > b_start:
-            target_idx = max(0, to_row - block_len + 1)
+
+        try:
+            curr_target_idx = scens.index(target_scen)
+        except ValueError:
+            curr_target_idx = to_row if to_row <= len(scens) else len(scens)
+
+        if is_target_fld_start:
+            # Folder Start에 드롭 시: 폴더 내부(Folder Start 바로 뒤)로 삽입 & 폴더 자동 펼침
+            target_idx = curr_target_idx + 1
+            target_scen.is_collapsed = False
+        elif is_target_fld_end:
+            # Folder End에 드롭 시: 폴더 내부(Folder End 바로 앞)로 삽입 & 상위 폴더 자동 펼침
+            target_idx = curr_target_idx
+            parent_start_idx = self.project.find_matching_folder_start(curr_target_idx)
+            if parent_start_idx is not None and parent_start_idx < len(scens):
+                scens[parent_start_idx].is_collapsed = False
         else:
-            target_idx = to_row
+            if to_row > b_start:
+                target_idx = max(0, to_row - block_len + 1)
+            else:
+                target_idx = to_row
+
         scens[target_idx:target_idx] = block
         self.project.renumber_steps()
         self._refresh_scenario_table()
@@ -3917,8 +4015,46 @@ class MainWindow(QMainWindow):
         self.project.anti_ban_coord_strong = val
 
     # ==========================================
-    # Save & Open Project
+    # Project Management (New / Save / Open)
     # ==========================================
+    def _on_new_scenario_project(self):
+        """시나리오가 하나도 없는 완전히 빈 새 시나리오 프로젝트 생성 (Ctrl+N)"""
+        if self.project and self.project.scenarios:
+            reply = QMessageBox.question(
+                self,
+                "새 시나리오 프로젝트",
+                "현재 프로젝트를 닫고 완전히 비어 있는 새 시나리오 프로젝트를 생성하시겠습니까?\n(저장하지 않은 변경사항은 사라집니다)",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        self.project = Project(name="새 시나리오", scenarios=[])
+        self.current_project_path = None
+        if hasattr(self, "_scenario_undo_stack"):
+            self._scenario_undo_stack.clear()
+        if hasattr(self, "_scenario_redo_stack"):
+            self._scenario_redo_stack.clear()
+
+        self._update_window_title()
+        if hasattr(self, "spin_loops"):
+            self.spin_loops.setValue(self.project.loop_count)
+        if hasattr(self, "spin_loop_delay"):
+            self.spin_loop_delay.setValue(self.project.loop_delay_seconds)
+        if hasattr(self, "chk_anti_ban"):
+            self.chk_anti_ban.setChecked(self.project.anti_ban_enabled)
+
+        self._refresh_scenario_table()
+        if hasattr(self, "modules_widget") and self.modules_widget:
+            self.modules_widget.set_project(self.project, self.target_hwnd)
+        if hasattr(self, "inspector") and self.inspector:
+            self.inspector.set_project(self.project)
+            self.inspector.set_scenario(None)
+
+        self.status_bar.showMessage("📄 빈 새 시나리오 프로젝트가 생성되었습니다. (시나리오 0개)", 3000)
+        self._append_log("INFO", "📄 완전히 비어 있는 새 시나리오 프로젝트를 생성했습니다.")
+
     def _on_save_project(self):
         """불러들인 파일에 바로 저장하고, 경로가 없으면 다른 이름으로 저장 수행"""
         if self.current_project_path:

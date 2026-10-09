@@ -105,6 +105,7 @@ class ScenarioItemDelegate(QStyledItemDelegate):
 class DraggableScenarioTableWidget(QTableWidget):
     """QTableWidget supporting safe mouse drag-and-drop scenario row reordering without item loss."""
     sig_row_reordered = pyqtSignal(int, int)  # (from_row, to_row)
+    sig_delete_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -117,10 +118,17 @@ class DraggableScenarioTableWidget(QTableWidget):
         self.viewport().setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.horizontalHeader().setMinimumSectionSize(20)
         self._drag_start_pos = None
         self._drag_start_row = -1
+        self._user_column_widths = {}
+        self._is_adjusting_widths = False
+        self.horizontalHeader().sectionResized.connect(self._on_section_resized)
+
+    def _on_section_resized(self, logicalIndex: int, oldSize: int, newSize: int):
+        if not self._is_adjusting_widths:
+            self._user_column_widths[logicalIndex] = newSize
 
     def set_highlight_row(self, row: int):
         """Highlights the specified row in the vertical header."""
@@ -135,31 +143,52 @@ class DraggableScenarioTableWidget(QTableWidget):
         self.adjust_column_widths()
 
     def adjust_column_widths(self):
-        """Dynamically adjusts column widths in proportion to the table viewport width."""
+        """Dynamically adjusts column widths in proportion to table viewport, preserving user-resized widths."""
         w = self.viewport().width()
         if w <= 0:
             return
 
-        # Fixed-width compact columns:
-        # 0: 스냅샷 (48px), 1: 고유 ID (s1, s2...) (48px), 2: 활성 (38px)
-        fixed_sum = 48 + 48 + 38
-        rem = max(320, w - fixed_sum)
+        self._is_adjusting_widths = True
+        try:
+            header = self.horizontalHeader()
+            # Fixed-width compact columns:
+            # 0: 스냅샷 (48px), 1: 고유 ID (48px), 2: 활성 (38px)
+            w0 = self._user_column_widths.get(0, 48)
+            w1 = self._user_column_widths.get(1, 48)
+            w2 = self._user_column_widths.get(2, 38)
+            header.resizeSection(0, w0)
+            header.resizeSection(1, w1)
+            header.resizeSection(2, w2)
 
-        # Distribute remaining width proportionally:
-        # 3: 시나리오 이름 (28%), 4: 인식조건 모듈 (26%), 5: 액션시퀀스 모듈 (26%), 6: 분기 (20%)
-        w_name = max(80, int(rem * 0.28))
-        w_cond = max(85, int(rem * 0.26))
-        w_act = max(85, int(rem * 0.26))
-        w_branch = max(65, rem - w_name - w_cond - w_act)
+            fixed_sum = w0 + w1 + w2
+            rem = max(320, w - fixed_sum)
 
-        header = self.horizontalHeader()
-        header.resizeSection(0, 48)
-        header.resizeSection(1, 48)
-        header.resizeSection(2, 38)
-        header.resizeSection(3, w_name)
-        header.resizeSection(4, w_cond)
-        header.resizeSection(5, w_act)
-        header.resizeSection(6, w_branch)
+            # If user customized column 3 (시나리오 이름), preserve user width!
+            if 3 in self._user_column_widths:
+                w_name = max(80, self._user_column_widths[3])
+                rem_after_name = max(180, rem - w_name)
+                w_cond = self._user_column_widths.get(4, max(85, int(rem_after_name * 0.36)))
+                w_act = self._user_column_widths.get(5, max(85, int(rem_after_name * 0.36)))
+                w_branch = self._user_column_widths.get(6, max(65, rem_after_name - w_cond - w_act))
+            else:
+                w_name = max(80, int(rem * 0.28))
+                w_cond = self._user_column_widths.get(4, max(85, int(rem * 0.26)))
+                w_act = self._user_column_widths.get(5, max(85, int(rem * 0.26)))
+                w_branch = self._user_column_widths.get(6, max(65, rem - w_name - w_cond - w_act))
+
+            header.resizeSection(3, w_name)
+            header.resizeSection(4, w_cond)
+            header.resizeSection(5, w_act)
+            header.resizeSection(6, w_branch)
+        finally:
+            self._is_adjusting_widths = False
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Delete:
+            self.sig_delete_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

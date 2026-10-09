@@ -686,12 +686,12 @@ class Project:
         Returns mapping from scenario index to folder info dict.
         """
         palette_list = [
-            {"light": "#d97706", "dark": "#fbbf24", "bg_light": "#fef3c7", "bg_dark": "#451a03", "name": "앰버"},
-            {"light": "#0284c7", "dark": "#38bdf8", "bg_light": "#e0f2fe", "bg_dark": "#082f49", "name": "스카이블루"},
-            {"light": "#059669", "dark": "#34d399", "bg_light": "#d1fae5", "bg_dark": "#064e3b", "name": "에메랄드"},
-            {"light": "#7c3aed", "dark": "#a78bfa", "bg_light": "#ede9fe", "bg_dark": "#3b0764", "name": "바이올렛"},
-            {"light": "#db2777", "dark": "#f472b6", "bg_light": "#fce7f3", "bg_dark": "#500724", "name": "로즈"},
-            {"light": "#475569", "dark": "#94a3b8", "bg_light": "#f1f5f9", "bg_dark": "#1e293b", "name": "슬레이트"},
+            {"light": "#d97706", "dark": "#fbbf24", "bg_light": "#fef3c7", "bg_dark": "#451a03", "child_bg_light": "#fffbeb", "child_bg_dark": "#231203", "name": "앰버"},
+            {"light": "#0284c7", "dark": "#38bdf8", "bg_light": "#e0f2fe", "bg_dark": "#082f49", "child_bg_light": "#f0f9ff", "child_bg_dark": "#051b2a", "name": "스카이블루"},
+            {"light": "#059669", "dark": "#34d399", "bg_light": "#d1fae5", "bg_dark": "#064e3b", "child_bg_light": "#ecfdf5", "child_bg_dark": "#042318", "name": "에메랄드"},
+            {"light": "#7c3aed", "dark": "#a78bfa", "bg_light": "#ede9fe", "bg_dark": "#3b0764", "child_bg_light": "#f5f3ff", "child_bg_dark": "#1f0433", "name": "바이올렛"},
+            {"light": "#db2777", "dark": "#f472b6", "bg_light": "#fce7f3", "bg_dark": "#500724", "child_bg_light": "#fff1f2", "child_bg_dark": "#260311", "name": "로즈"},
+            {"light": "#475569", "dark": "#94a3b8", "bg_light": "#f1f5f9", "bg_dark": "#1e293b", "child_bg_light": "#f8fafc", "child_bg_dark": "#111827", "name": "슬레이트"},
         ]
         info_map = {}
         stack = []  # List of (index, scenario, pair_counter)
@@ -719,6 +719,8 @@ class Project:
                         "color_dark": pal["dark"],
                         "bg_light": pal["bg_light"],
                         "bg_dark": pal["bg_dark"],
+                        "child_bg_light": pal["child_bg_light"],
+                        "child_bg_dark": pal["child_bg_dark"],
                         "warning": None
                     }
                     info_map[idx] = {
@@ -732,8 +734,24 @@ class Project:
                         "color_dark": pal["dark"],
                         "bg_light": pal["bg_light"],
                         "bg_dark": pal["bg_dark"],
+                        "child_bg_light": pal["child_bg_light"],
+                        "child_bg_dark": pal["child_bg_dark"],
                         "warning": None
                     }
+                    # Assign folder tint background to member nodes inside this folder
+                    for child_idx in range(start_idx + 1, idx):
+                        if child_idx not in info_map:
+                            info_map[child_idx] = {
+                                "is_folder": False,
+                                "is_child": True,
+                                "pair_number": p_num,
+                                "parent_folder_start": start_idx,
+                                "parent_folder_end": idx,
+                                "color_light": pal["light"],
+                                "color_dark": pal["dark"],
+                                "bg_light": pal["child_bg_light"],
+                                "bg_dark": pal["child_bg_dark"],
+                            }
                 else:
                     info_map[idx] = {
                         "is_folder": True,

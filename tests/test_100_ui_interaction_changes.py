@@ -694,12 +694,12 @@ class Test100UIInteractionChanges(unittest.TestCase):
         self.win.runner = runner_mock
         self.win._on_pause_execution()
         runner_mock.pause.assert_called_once()
-        self.assertEqual(self.win.btn_pause.text(), "▶ 재개")
+        self.assertIn("재개", self.win.btn_pause.text())
 
         runner_mock._is_paused = True
         self.win._on_pause_execution()
         runner_mock.resume.assert_called_once()
-        self.assertEqual(self.win.btn_pause.text(), "⏸ 일시정지")
+        self.assertIn("일시정지", self.win.btn_pause.text())
 
     def test_79_stop_execution_resets_buttons(self):
         """[Test 79] Verify stopping execution stops runner cleanly."""

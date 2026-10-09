@@ -1,0 +1,46 @@
+[일시 / Timestamp]
+2026-10-09 21:20:00 ~ 2026-10-09 21:46:34
+
+[요청 내용 / User Request]
+1. 노드를 여러개 선택해서 삭제 하는것도 가능하게.
+2. 시나리오 창 레이아웃을 늘려서 작업하는데 간간히 갑자기 인스팩터가 넓어지면 시나리오 창이 좁아짐. 종종 발생. 해결.
+3. 시나리오 이름 열의 너비를 늘려도 다시 좁게 돌아옴.
+4. 시나리오가 하나도 없는 새 시나리오 만들기 기능 추가.
+5. 폴더 생성할 땐 짝을 같이 생성. 폴더 안에 있는 노드들은 폴더끼리 셀 색을 다르게 해서 알아보기 쉽게.
+6. 폴더 노드 안에 노드가 비어 있으면 다른 노드가 추가가 안됨. 고칠것.
+
+[결과 요약 / Summary of Results]
+1. 노드 다중 선택 및 일괄 삭제 지원:
+   - DraggableScenarioTableWidget 기본 선택 모드를 ExtendedSelection으로 전환.
+   - 키보드 Delete 키 이벤트(sig_delete_requested) 연결 및 MainWindow._on_delete_scenario()에 다중 선택 감지(len > 1) 로직 구현.
+   - 다중 노드 선택 시 전용 확인 팝업("선택한 N개의 시나리오 노드를 모두 삭제하시겠습니까?") 출력 후 역순 일괄 삭제 및 단계 번호 재정렬/언두 스택 기록.
+2. 인스펙터 급팽창으로 인한 시나리오 창 축소 방지:
+   - InspectorWidget 내 긴 시나리오 이름을 담는 분기/점프 콤보박스들(combo_on_match, combo_jump_match, combo_on_mismatch, combo_jump_mismatch, combo_retry_fail_action, combo_retry_fail_jump)에 AdjustToMinimumContentsLengthWithIcon, minimumContentsLength(8), minimumWidth(70) 적용.
+   - InspectorWidget.minimumSizeHint()를 오버라이드하여 QSize(220, 100) 이하로 제한, 부모 도크 스플리터 강제 밀림 원천 차단.
+   - dock_scenarios 최소 너비를 280px로 보장.
+3. 시나리오 이름 열 너비 수동 조절값 보존:
+   - DraggableScenarioTableWidget에 _user_column_widths 딕셔너리 및 header.sectionResized 시그널 핸들러 연동.
+   - adjust_column_widths() 실행 시 사용자가 마우스로 수동 조절한 열 3(시나리오 이름) 너비를 보존하도록 개선.
+4. 시나리오 0개 빈 새 프로젝트 생성 기능 추가:
+   - 툴바 Row 1에 '📄 새 시나리오' 버튼 및 Ctrl+N 단축키(sc_proj_new) 등록.
+   - MainWindow._on_new_scenario_project() 메서드 구현 (저장 확인 팝업, Project(name="새 시나리오", scenarios=[]) 빈 프로젝트 생성, 인스펙터 리셋, 언두/리두 스택 클리어).
+5. 폴더 짝 단독 생성 및 폴더별 자식 노드 셀 배경색(틴트) 구분:
+   - MainWindow._on_add_folder(): 1개 이하 선택 시 더미 노드 없이 [Folder Start, Folder End] 짝만 생성.
+   - core/models.py analyze_folders(): 6종 테마별 파스텔 틴트(child_bg_light, child_bg_dark) 정의 및 폴더 내 자식 노드에 매핑.
+   - MainWindow._update_table_row(): 폴더 내부 자식 노드들의 셀 배경 및 체크박스 배경에 해당 폴더의 틴트 색상 적용.
+6. 빈 폴더 내 노드 추가 및 드래그 앤 드롭 개선:
+   - MainWindow._on_add_scenario(): Folder Start 선택 시 start 바로 뒤 삽입 및 is_collapsed=False 자동 펼침, Folder End 선택 시 end 바로 앞 삽입 및 부모 폴더 자동 펼침.
+   - 시나리오 테이블 우클릭 컨텍스트 메뉴에 '이 폴더 안에 새 시나리오 추가' 및 '이 폴더 끝에 새 시나리오 추가' 액션 제공.
+   - MainWindow._on_scenario_row_reordered(): 빈 폴더의 Folder Start로 드래그 시 폴더 내부(start 바로 뒤)로 진입시키고 폴더 자동 펼침, Folder End로 드래그 시 end 바로 앞 진입 및 자동 펼침 처리.
+7. 테스트 및 검증:
+   - tests/test_multi_select_delete_and_folder_features.py 신규 작성 (6개 케이스 전체 통과).
+   - 기존 회귀 테스트 버그 픽스 및 전체 단위 테스트(1335개) 전체 통과(OK, skipped=1) 검증 완료.
+
+[영향 파일 목록 / Affected Files]
+- core/models.py
+- ui/inspector_widget.py
+- ui/main_window.py
+- ui/scenario_table_widget.py
+- tests/test_multi_select_delete_and_folder_features.py
+- tests/test_100_ui_interaction_changes.py
+- history/2026-10-09_214634_노드_다중선택_삭제_및_시나리오_폴더_UI_개선.txt

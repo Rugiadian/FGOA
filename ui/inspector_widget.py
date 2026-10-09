@@ -21,7 +21,7 @@ from PyQt5.QtWidgets import (
     QStyledItemDelegate, QAbstractSpinBox, QInputDialog, QSizePolicy, QDialog
 )
 from PyQt5.QtGui import QColor, QFont, QPixmap, QKeySequence, QDrag, QCursor
-from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QPoint
+from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QSize
 
 from core.models import Scenario, Project, Condition, ColorPoint, Action, ActionSequence
 from core.path_utils import to_absolute_path, to_relative_path
@@ -62,6 +62,10 @@ class InspectorWidget(QWidget):
         self._init_ui()
         self._init_shortcuts()
         self.hide()
+
+    def minimumSizeHint(self) -> QSize:
+        """Allow parent dock to stay compact and prevent inspector from pushing scenario list."""
+        return QSize(220, 100)
 
     def set_project(self, project: Project):
         self.project = project
@@ -662,6 +666,14 @@ class InspectorWidget(QWidget):
         self.combo_retry_fail_jump = QComboBox()
         self.combo_retry_fail_jump.currentIndexChanged.connect(self._on_field_changed)
         rf_layout.addWidget(self.combo_retry_fail_jump, 1)
+
+        # Prevent combos with long scenario names from excessively expanding inspector dock
+        for c in (self.combo_on_match, self.combo_jump_match, self.combo_on_mismatch,
+                  self.combo_jump_mismatch, self.combo_retry_fail_action, self.combo_retry_fail_jump):
+            c.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            c.setMinimumContentsLength(8)
+            c.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            c.setMinimumWidth(70)
 
         layout.addWidget(self.row_retry_fail)
 

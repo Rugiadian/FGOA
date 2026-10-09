@@ -1,0 +1,27 @@
+[일시 / Timestamp]
+- 요청 시각: 2026-10-09 20:38
+- 완료 시각: 2026-10-09 20:42
+
+[요청 내용 / User Request]
+윈도우 시작 메뉴에 등록할 수 잇는 형태로 해줘
+
+[결과 요약 / Summary of Results]
+1. FGOA 윈도우 시작 메뉴 바로가기(.lnk) 즉시 등록 완료:
+   - 등록 위치: %APPDATA%\Microsoft\Windows\Start Menu\Programs\FGOA.lnk
+   - 실행 대상: pythonw.exe (콘솔 창 없이 GUI 바로 실행)
+   - 인자(Arguments): "G:\Git\FGOA\main.py"
+   - 작업 디렉터리(WorkingDirectory): "G:\Git\FGOA"
+   - 아이콘(Icon): ui\assets\app_icon.ico
+   - 설명(Description): FGOA - Fate/Grand Order Automation
+
+2. 재등록 및 제거용 원클릭 도구 스크립트 작성:
+   - `create_shortcut.ps1`: 현재 실행 경로 및 Python 환경을 자동 탐색하여 시작 메뉴 바로가기를 동적으로 생성하는 스크립트
+   - `register_start_menu.bat`: 탐색기에서 더블클릭 한 번으로 시작 메뉴에 등록하는 배치 스크립트
+   - `unregister_start_menu.bat`: 시작 메뉴에서 등록된 바로가기를 깔끔하게 삭제하는 배치 스크립트
+
+[영향 파일 목록 / Affected Files]
+- G:\Git\FGOA\create_shortcut.ps1
+- G:\Git\FGOA\register_start_menu.bat
+- G:\Git\FGOA\unregister_start_menu.bat
+- %APPDATA%\Microsoft\Windows\Start Menu\Programs\FGOA.lnk
+- G:\Git\FGOA\history\2026-10-09_204206_윈도우_시작_메뉴_바로가기_등록_기능_구현.txt
