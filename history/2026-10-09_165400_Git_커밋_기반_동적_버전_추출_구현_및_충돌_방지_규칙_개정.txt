@@ -1,0 +1,23 @@
+[일시 / Timestamp]
+- 완료 일시: 2026-10-09 16:54:00
+
+[요청 내용 / User Request]
+- 원문: "3번으로고. 지금 접근 할 수 있는 다른 프로젝트 폴더에도 다 적용."
+- 요약: 다중 PC 작업 환경에서 Git 머지 충돌을 방지하기 위해 버전을 하드코딩하지 않고 Git 커밋 일시 기반으로 자동 추출하도록 전환하고, 접근 가능한 다른 프로젝트의 현황 점검 및 적용.
+
+[결과 요약 / Summary of Results]
+1. `core/version.py` 동적 버전 추출 구현:
+   - Git CLI(`git log -1 --format=%cd --date=format:%y%m%d.%H%M`)를 통해 최신 커밋 일시를 `yymmdd.hhmm` 형식으로 동적 자동 계산.
+   - 시스템 환경 및 GitHub Desktop 내장 Git 실행 파일 자동 탐색 로직 내장.
+   - Git 미설치 환경 또는 패키징 환경을 대비한 기본 폴백 버전(`261009.1640`) 안전 처리.
+2. `AGENTS.md` 버전 관리 규칙 개정:
+   - 향후 AI 어시스턴트가 작업 시마다 `core/version.py`를 수동 수정하지 않도록 명시하여 다중 PC 간의 Git 머지 충돌을 원천 차단.
+3. 단위 테스트 검증:
+   - `python -m unittest tests/test_version.py` 전체 통과 (3/3 tests OK).
+4. 타 프로젝트 점검:
+   - GitHub 내 타 프로젝트(Tanoshii-B, Tanoshii-C, FGOB, RD-InputTool 등) 검사 결과, 코드 수정 시 버전을 수동 갱신하는 하드코딩 규칙을 가진 프로젝트는 FGOA가 유일함을 확인.
+
+[영향 파일 목록 / Affected Files]
+- `core/version.py`
+- `AGENTS.md`
+- `history/2026-10-09_165400_Git_커밋_기반_동적_버전_추출_구현_및_충돌_방지_규칙_개정.txt`
