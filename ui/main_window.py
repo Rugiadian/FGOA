@@ -331,6 +331,11 @@ class MainWindow(QMainWindow):
             self.chk_autoscroll.setChecked(autoscroll_enabled)
             self.chk_autoscroll.blockSignals(False)
 
+        # 6. Scenario Table Column Visibility (시나리오 테이블 열 표시 여부)
+        cols_vis = cfg.get("scenario_columns_visible")
+        if isinstance(cols_vis, dict) and hasattr(self, "tbl_scenarios") and self.tbl_scenarios:
+            self.tbl_scenarios.set_column_visibility_state(cols_vis)
+
     def _save_app_config(self):
         try:
             cfg_file = get_config_filepath()
@@ -386,6 +391,8 @@ class MainWindow(QMainWindow):
                 cfg["hot_reload_enabled"] = self.chk_hot_reload.isChecked()
             if hasattr(self, "chk_autoscroll") and self.chk_autoscroll:
                 cfg["autoscroll_enabled"] = self.chk_autoscroll.isChecked()
+            if hasattr(self, "tbl_scenarios") and self.tbl_scenarios:
+                cfg["scenario_columns_visible"] = self.tbl_scenarios.get_column_visibility_state()
 
             self._cached_config = cfg
 
@@ -866,6 +873,12 @@ class MainWindow(QMainWindow):
         row2_reorder_layout.addWidget(self.btn_redo_scenario)
 
         row2_reorder_layout.addStretch()
+
+        # Column visibility button with dropdown menu
+        self.btn_col_visibility = QPushButton("👁️ 열 보기 ▼")
+        self.btn_col_visibility.setToolTip("시나리오 목록의 표시할 열(인식조건, 액션 시퀀스, 분기)을 선택합니다.")
+        row2_reorder_layout.addWidget(self.btn_col_visibility)
+
         tb_v_layout.addWidget(row2_reorder_bar)
 
         l_layout.addWidget(tb_container)
@@ -885,6 +898,16 @@ class MainWindow(QMainWindow):
             header.setSectionResizeMode(col_idx, QHeaderView.Interactive)
         self.tbl_scenarios.adjust_column_widths()
         self.tbl_scenarios.verticalHeader().setDefaultSectionSize(26)
+
+        # Connect column visibility menu and auto-save
+        self.btn_col_visibility.setMenu(self.tbl_scenarios.create_column_visibility_menu(self.btn_col_visibility))
+        self.tbl_scenarios.sig_column_visibility_changed.connect(lambda col, vis: self._save_app_config())
+
+        # Restore cached column visibility if present
+        if hasattr(self, "_cached_config") and self._cached_config:
+            cols_vis = self._cached_config.get("scenario_columns_visible")
+            if isinstance(cols_vis, dict):
+                self.tbl_scenarios.set_column_visibility_state(cols_vis)
 
         self.tbl_scenarios.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tbl_scenarios.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -2421,6 +2444,9 @@ class MainWindow(QMainWindow):
         act_redo = menu.addAction("▶️ 다시 실행 (Ctrl+Y)")
         act_redo.triggered.connect(self._redo_scenario)
         act_redo.setEnabled(bool(self.scenario_redo_stack))
+        menu.addSeparator()
+        menu_view_cols = self.tbl_scenarios.create_column_visibility_menu(menu, title="👁️ 열 표시 / 숨기기")
+        menu.addMenu(menu_view_cols)
         menu.exec_(self.tbl_scenarios.viewport().mapToGlobal(pos))
 
     def _toggle_folder_enabled(self, scen: Scenario):

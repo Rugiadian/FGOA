@@ -1,0 +1,27 @@
+[일시 / Timestamp]
+2026-10-10 00:39:53 ~ 2026-10-10 00:51:00
+
+[요청 내용 / User Request]
+시나리오 흐름 창 표에서 인식조건, 액션 시퀀스, 분기 열을 뷰/하이드 가능하게.
+
+[결과 요약 / Summary of Results]
+1. 시나리오 흐름 창 표(DraggableScenarioTableWidget) 열 표시/숨김(View/Hide) 지원:
+   - 대상 열: 인식조건 모듈(인덱스 4), 액션시퀀스 모듈(인덱스 5), 분기(인덱스 6)
+   - `set_column_visible(col, visible)`, `is_column_visible(col)`, `show_all_columns()` 메서드 및 `sig_column_visibility_changed` 시그널 추가.
+   - 열 숨김/표시 상태에 맞춰 남은 가용 너비를 시나리오 이름(열 3) 및 표시된 열들에 자연스럽게 비례 배분하는 반응형 너비 계산(`adjust_column_widths`) 적용. (열을 숨길 시 시나리오 이름 영역이 테이블 전체 너비를 시원하게 채움)
+2. 다각도 제어 UI 연동:
+   - 테이블 가로 헤더(Horizontal Header) 우클릭 시 컬럼 표시/숨김 체크박스 컨텍스트 메뉴 팝업
+   - 테이블 행 우클릭 메뉴(`_on_scenario_context_menu`)에 '👁️ 열 표시 / 숨기기' 서브메뉴 추가
+   - 시나리오 툴바(Row 2)에 '👁️ 열 보기 ▼' 드롭다운 메뉴 버튼 추가
+   - 체크박스 토글 및 '👁️ 모든 열 표시' 액션 일괄 지원
+3. 사용자 설정 저장 및 복원(Config Persistence):
+   - 머신별 설정 파일(`fgoa_config_*.json`)에 열 가시성 상태(`scenario_columns_visible`) 자동 저장 및 앱 시작 시 자동 복원.
+4. 단위 테스트 작성 및 검증:
+   - `tests/test_scenario_table_column_visibility.py` 작성 및 6개 테스트 통과 완료.
+   - 기존 시나리오 테이블 관련 테스트(`test_scenario_table_flow_and_uid.py` 등) 전원 통과 확인.
+
+[영향 파일 목록 / Affected Files]
+- ui/scenario_table_widget.py
+- ui/main_window.py
+- tests/test_scenario_table_column_visibility.py
+- history/2026-10-10_005100_시나리오_흐름_열_표시_숨김_기능.txt

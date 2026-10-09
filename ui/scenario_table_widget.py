@@ -4,10 +4,27 @@ Scenario Table Widget and Custom Vertical Header for FGOA.
 """
 from PyQt5.QtWidgets import (
     QTableWidget, QHeaderView, QAbstractItemView, QApplication,
-    QStyledItemDelegate, QStyleOptionViewItem, QStyle
+    QStyledItemDelegate, QStyleOptionViewItem, QStyle, QMenu, QAction
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QMimeData
 from PyQt5.QtGui import QColor, QDrag, QPainter
+
+
+# Column index constants
+COL_SNAPSHOT = 0
+COL_ID = 1
+COL_ENABLED = 2
+COL_NAME = 3
+COL_CONDITION = 4
+COL_ACTION = 5
+COL_BRANCH = 6
+
+# Columns that can be toggled by the user: (col_index, display_label)
+TOGGLEABLE_COLUMNS = [
+    (COL_CONDITION, "인식조건 모듈"),
+    (COL_ACTION, "액션시퀀스 모듈"),
+    (COL_BRANCH, "분기"),
+]
 
 
 class ScenarioVerticalHeader(QHeaderView):
@@ -106,6 +123,7 @@ class DraggableScenarioTableWidget(QTableWidget):
     """QTableWidget supporting safe mouse drag-and-drop scenario row reordering without item loss."""
     sig_row_reordered = pyqtSignal(int, int)  # (from_row, to_row)
     sig_delete_requested = pyqtSignal()
+    sig_column_visibility_changed = pyqtSignal(int, bool)  # (col_idx, is_visible)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -126,9 +144,101 @@ class DraggableScenarioTableWidget(QTableWidget):
         self._is_adjusting_widths = False
         self.horizontalHeader().sectionResized.connect(self._on_section_resized)
 
+        # Horizontal header context menu for column visibility
+        self.horizontalHeader().setContextMenuPolicy(Qt.CustomContextMenu)
+        self.horizontalHeader().customContextMenuRequested.connect(self._on_header_context_menu)
+
     def _on_section_resized(self, logicalIndex: int, oldSize: int, newSize: int):
         if not self._is_adjusting_widths:
             self._user_column_widths[logicalIndex] = newSize
+
+    def _on_header_context_menu(self, pos):
+        """Shows column visibility context menu when right-clicking the horizontal header."""
+        menu = self.create_column_visibility_menu(self)
+        menu.exec_(self.horizontalHeader().viewport().mapToGlobal(pos))
+
+    def create_column_visibility_menu(self, parent=None, title: str = "👁️ 열 표시 / 숨기기") -> QMenu:
+        """Creates a QMenu with checkable actions to toggle scenario table columns."""
+        menu = QMenu(title, parent or self)
+        actions_by_col = {}
+
+        for col_idx, col_name in TOGGLEABLE_COLUMNS:
+            action = QAction(col_name, menu)
+            action.setCheckable(True)
+            action.setChecked(not self.isColumnHidden(col_idx))
+            action.setData(col_idx)
+            action.toggled.connect(lambda checked, c=col_idx: self.set_column_visible(c, checked))
+            menu.addAction(action)
+            actions_by_col[col_idx] = action
+
+        menu.addSeparator()
+        act_show_all = QAction("👁️ 모든 열 표시", menu)
+        act_show_all.triggered.connect(self.show_all_columns)
+        menu.addAction(act_show_all)
+
+        def sync_checked():
+            for c_idx, act in actions_by_col.items():
+                act.blockSignals(True)
+                act.setChecked(not self.isColumnHidden(c_idx))
+                act.blockSignals(False)
+
+        menu.aboutToShow.connect(sync_checked)
+        return menu
+
+    def set_column_visible(self, col: int, visible: bool):
+        """Sets visibility for the specified column and recalculates table widths."""
+        self.setColumnHidden(col, not visible)
+        self.adjust_column_widths()
+        self.sig_column_visibility_changed.emit(col, visible)
+
+    def is_column_visible(self, col: int) -> bool:
+        """Returns True if the specified column is currently visible."""
+        return not self.isColumnHidden(col)
+
+    def show_all_columns(self):
+        """Shows all toggleable columns and recalculates widths."""
+        for col_idx, _ in TOGGLEABLE_COLUMNS:
+            self.setColumnHidden(col_idx, False)
+            self.sig_column_visibility_changed.emit(col_idx, True)
+        self.adjust_column_widths()
+
+    def get_column_visibility_state(self) -> dict:
+        """Returns a dict mapping col index and friendly name -> visibility for persistence."""
+        name_map = {
+            COL_CONDITION: "condition",
+            COL_ACTION: "action",
+            COL_BRANCH: "branch",
+        }
+        res = {}
+        for col_idx, _ in TOGGLEABLE_COLUMNS:
+            is_vis = not self.isColumnHidden(col_idx)
+            res[str(col_idx)] = is_vis
+            name = name_map.get(col_idx)
+            if name:
+                res[name] = is_vis
+        return res
+
+    def set_column_visibility_state(self, state: dict):
+        """Restores column visibility from a saved state dict."""
+        if not isinstance(state, dict):
+            return
+        name_map = {
+            "condition": COL_CONDITION,
+            "action": COL_ACTION,
+            "branch": COL_BRANCH,
+        }
+        for col_idx, _ in TOGGLEABLE_COLUMNS:
+            is_vis = None
+            if str(col_idx) in state:
+                is_vis = bool(state[str(col_idx)])
+            else:
+                for name, c in name_map.items():
+                    if c == col_idx and name in state:
+                        is_vis = bool(state[name])
+                        break
+            if is_vis is not None:
+                self.setColumnHidden(col_idx, not is_vis)
+        self.adjust_column_widths()
 
     def set_highlight_row(self, row: int):
         """Highlights the specified row in the vertical header."""
@@ -153,33 +263,71 @@ class DraggableScenarioTableWidget(QTableWidget):
             header = self.horizontalHeader()
             # Fixed-width compact columns:
             # 0: 스냅샷 (48px), 1: 고유 ID (48px), 2: 활성 (38px)
-            w0 = self._user_column_widths.get(0, 48)
-            w1 = self._user_column_widths.get(1, 48)
-            w2 = self._user_column_widths.get(2, 38)
-            header.resizeSection(0, w0)
-            header.resizeSection(1, w1)
-            header.resizeSection(2, w2)
+            w0 = self._user_column_widths.get(0, 48) if not self.isColumnHidden(0) else 0
+            w1 = self._user_column_widths.get(1, 48) if not self.isColumnHidden(1) else 0
+            w2 = self._user_column_widths.get(2, 38) if not self.isColumnHidden(2) else 0
+
+            if not self.isColumnHidden(0):
+                header.resizeSection(0, w0)
+            if not self.isColumnHidden(1):
+                header.resizeSection(1, w1)
+            if not self.isColumnHidden(2):
+                header.resizeSection(2, w2)
 
             fixed_sum = w0 + w1 + w2
-            rem = max(320, w - fixed_sum)
+            rem = max(100, w - fixed_sum)
 
-            # If user customized column 3 (시나리오 이름), preserve user width!
-            if 3 in self._user_column_widths:
-                w_name = max(80, self._user_column_widths[3])
-                rem_after_name = max(180, rem - w_name)
-                w_cond = self._user_column_widths.get(4, max(85, int(rem_after_name * 0.36)))
-                w_act = self._user_column_widths.get(5, max(85, int(rem_after_name * 0.36)))
-                w_branch = self._user_column_widths.get(6, max(65, rem_after_name - w_cond - w_act))
+            # Dynamic columns: 3: name, 4: cond, 5: act, 6: branch
+            base_weights = {
+                3: 0.32,
+                4: 0.26,
+                5: 0.26,
+                6: 0.16,
+            }
+            min_widths = {3: 80, 4: 75, 5: 75, 6: 55}
+
+            vis_dyn_cols = [c for c in [3, 4, 5, 6] if not self.isColumnHidden(c)]
+            if not vis_dyn_cols:
+                return
+
+            if len(vis_dyn_cols) == 1:
+                header.resizeSection(vis_dyn_cols[0], max(min_widths.get(vis_dyn_cols[0], 80), rem))
+                return
+
+            # Check for user-customized widths among currently visible dynamic columns
+            user_assigned = {c: self._user_column_widths[c] for c in vis_dyn_cols if c in self._user_column_widths}
+            unassigned_cols = [c for c in vis_dyn_cols if c not in self._user_column_widths]
+
+            if not unassigned_cols:
+                # All visible columns were manually resized by user
+                for c in vis_dyn_cols:
+                    header.resizeSection(c, max(min_widths.get(c, 50), user_assigned[c]))
+            elif user_assigned:
+                # Some columns resized by user; distribute remaining width to unassigned ones
+                used_by_user = sum(user_assigned.values())
+                unassigned_rem = max(len(unassigned_cols) * 60, rem - used_by_user)
+                weight_sum = sum(base_weights[c] for c in unassigned_cols)
+                allocated_total = 0
+                for i, c in enumerate(unassigned_cols):
+                    if i == len(unassigned_cols) - 1:
+                        c_w = max(min_widths.get(c, 50), unassigned_rem - allocated_total)
+                    else:
+                        c_w = max(min_widths.get(c, 50), int(unassigned_rem * (base_weights[c] / weight_sum)))
+                        allocated_total += c_w
+                    header.resizeSection(c, c_w)
+                for c, u_w in user_assigned.items():
+                    header.resizeSection(c, max(min_widths.get(c, 50), u_w))
             else:
-                w_name = max(80, int(rem * 0.28))
-                w_cond = self._user_column_widths.get(4, max(85, int(rem * 0.26)))
-                w_act = self._user_column_widths.get(5, max(85, int(rem * 0.26)))
-                w_branch = self._user_column_widths.get(6, max(65, rem - w_name - w_cond - w_act))
-
-            header.resizeSection(3, w_name)
-            header.resizeSection(4, w_cond)
-            header.resizeSection(5, w_act)
-            header.resizeSection(6, w_branch)
+                # No user resizing; proportionally distribute rem among all visible dynamic columns
+                weight_sum = sum(base_weights[c] for c in vis_dyn_cols)
+                allocated_total = 0
+                for i, c in enumerate(vis_dyn_cols):
+                    if i == len(vis_dyn_cols) - 1:
+                        c_w = max(min_widths.get(c, 50), rem - allocated_total)
+                    else:
+                        c_w = max(min_widths.get(c, 50), int(rem * (base_weights[c] / weight_sum)))
+                        allocated_total += c_w
+                    header.resizeSection(c, c_w)
         finally:
             self._is_adjusting_widths = False
 
