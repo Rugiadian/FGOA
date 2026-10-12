@@ -1,0 +1,42 @@
+[일시 / Timestamp]
+- 요청 일시: 2026-10-10 04:04:11 / 2026-10-10 04:09:08
+- 완료 일시: 2026-10-10 04:13:00
+
+[요청 내용 / User Request]
+1. 번인 방지 시퀀스를 흑 백 레인보우에서 '서서히 완전한 블랙에서 서서히 돌아오는 것'으로 변경 (백, 레인보우 단계 제거)
+2. '블랙' 상태에 머무는 시간 조절 옵션 추가 (분 단위)
+3. 블랙 상태에 머무는 시간이 5분일 때, 색상인식 판정도 대기되도록 대응
+4. 번인 긴급탈출 단축키(F12) 추가
+
+[결과 요약 / Summary of Results]
+1. 번인 방지 오버레이 시퀀스 개편 (ui/anti_burn_in_overlay.py):
+   - 백색(White) 및 레인보우(Rainbow) 스펙트럼 관련 렌더링/로직 완전 제거
+   - 완전한 블랙(Alpha 0 -> 255)으로 부드럽게 페이드인 -> 설정된 분(Minutes) 단위 유지 -> 투명으로 부드럽게 페이드아웃 사이클로 단순화 및 최적화
+   - set_hold_minutes(), get_hold_minutes(), get_remaining_hold_seconds() 추가
+   - AntiBurnInOverlay.escape_all() 클래스메서드 및 위젯 레벨 F12 keyPressEvent 추가
+2. 워크플로우 러너 색상 인식 대기 강화 (core/runner.py):
+   - _wait_for_anti_burn()에서 블랙 상태 머무는 동안(5분 등 장시간) 안전하게 조건 판정을 대기
+   - 30초마다 남은 시간 안내 로그를 출력하여 매크로 상태 인지성 향상
+   - 화면 복귀 완료 시 시나리오 재개 안내 로그 출력
+3. UI 및 설정 연동 (ui/main_window.py):
+   - 번인 방지 컨트롤 바에 블랙 유지 시간 조절 QSpinBox (spin_anti_burn_hold_min, 1~120분 단위) 추가
+   - 기존 '분' 단위를 '분 주기', '분 유지'로 직관적 세분화
+   - 앱 설정 저장/불러오기(anti_burn_hold_min) 연동
+   - F12 단축키 감지 시 _on_anti_burn_emergency_escape 핸들러를 통한 즉시 해제 및 경고 로그 출력
+   - 번인 체크박스 및 테스트 버튼 툴팁에 '(긴급탈출: F12)' 명시
+4. 전역 핫키 리스너 F12 추가 (core/global_hotkey.py):
+   - VK_F12 (0x7B) 및 sig_anti_burn_escape pyqtSignal 추가
+   - 백그라운드 스레드에서 Windows GetAsyncKeyState(VK_F12) 감지 연동 (창 비활성 상태에서도 즉시 긴급 탈출 가능)
+5. 단위 테스트 업데이트 및 신규 작성:
+   - tests/test_anti_burn_runner_safe_wait.py (순수 블랙 도달, 유지 시간 진행, escape_all 및 F12 키 테스트)
+   - tests/test_hotkey_pause_and_custom_spinbox.py (F12 전역 핫키 신호 발화 테스트)
+   - 24개 관련 단위 테스트 전체 통과 확인
+
+[영향 파일 목록 / Affected Files]
+- ui/anti_burn_in_overlay.py
+- core/runner.py
+- ui/main_window.py
+- core/global_hotkey.py
+- tests/test_anti_burn_runner_safe_wait.py
+- tests/test_hotkey_pause_and_custom_spinbox.py
+- history/2026-10-10_041300_번인_방지_순수_블랙_전환_및_유지시간_F12긴급탈출_구현.txt

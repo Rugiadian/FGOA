@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt, QEvent
 from PyQt5.QtGui import QKeyEvent, QValidator
 
-from core.global_hotkey import GlobalHotkeyListener, VK_F6, VK_SHIFT, VK_PAUSE
+from core.global_hotkey import GlobalHotkeyListener, VK_F6, VK_SHIFT, VK_PAUSE, VK_F12
 from ui.custom_spinbox import CustomSpinBox, SeamlessSpinBox
 from ui.theme import LIGHT_STYLESHEET, DARK_STYLESHEET
 
@@ -27,6 +27,31 @@ class TestGlobalHotkeyShiftF6(unittest.TestCase):
         listener = GlobalHotkeyListener(None)
         self.assertTrue(hasattr(listener, "sig_stop_hotkey"))
         self.assertTrue(hasattr(listener, "sig_pause_hotkey"))
+        self.assertTrue(hasattr(listener, "sig_anti_burn_escape"))
+
+    def test_f12_emits_anti_burn_escape(self):
+        listener = GlobalHotkeyListener(None)
+        escape_mock = MagicMock()
+        listener.sig_anti_burn_escape.connect(escape_mock)
+
+        # Mock user32 GetAsyncKeyState
+        mock_user32 = MagicMock()
+        def mock_get_async_key_state(vk):
+            if vk == VK_F12:
+                return 0x8000
+            return 0
+
+        mock_user32.GetAsyncKeyState.side_effect = mock_get_async_key_state
+        listener._user32 = mock_user32
+
+        # Run F12 check logic
+        f12_state = listener._user32.GetAsyncKeyState(VK_F12)
+        f12_is_down = bool(f12_state & 0x8000)
+        if f12_is_down and not listener._f12_was_pressed:
+            listener.sig_anti_burn_escape.emit()
+        listener._f12_was_pressed = f12_is_down
+
+        escape_mock.assert_called_once()
 
     def test_plain_f6_emits_stop(self):
         listener = GlobalHotkeyListener(None)

@@ -1,7 +1,7 @@
 """
 Anti-Burn-In Overlay Widget for FGOA.
-Periodically and gradually transitions the screen across Black ~ White ~ Rainbow
-gradient spectrum to prevent monitor/display burn-in without interfering with operations.
+Periodically and gradually transitions the screen into complete black and smoothly returns
+to prevent monitor/display burn-in without interfering with operations.
 
 Supports two modes:
 - Mode 1 (MODE_APP_WINDOW): Applies overlay only to the FGOA application window.
@@ -9,10 +9,98 @@ Supports two modes:
   (regardless of display resolution or multi-monitor topology).
 """
 import sys
+import time
 from typing import List, Optional
 from PyQt5.QtWidgets import QWidget, QApplication
-from PyQt5.QtGui import QPainter, QColor, QLinearGradient
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QRect
+from PyQt5.QtGui import QPainter, QColor, QFont, QFontMetrics, QPainterPath, QPen
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QRect, QRectF
+
+
+class FloatingTextTracker:
+    """
+    Tracks floating 2D badge position with bounce reflection inside a given bounding rect.
+    Renders high-visibility screen guard badge to prevent burn-in and clearly notify user.
+    """
+    def __init__(self, text: str = "스크린 가드 중. 긴급탈출 f12"):
+        self.text = text
+        self.x = 80.0
+        self.y = 80.0
+        self.vx = 3.0
+        self.vy = 2.2
+        self.initialized = False
+
+    def reset(self, width: int, height: int):
+        self.x = max(40.0, float(width) * 0.25)
+        self.y = max(60.0, float(height) * 0.25)
+        self.vx = 3.0
+        self.vy = 2.2
+        self.initialized = True
+
+    def update(self, width: int, height: int, box_w: float, box_h: float):
+        if width <= 0 or height <= 0:
+            return
+        if not self.initialized:
+            self.reset(width, height)
+
+        self.x += self.vx
+        self.y += self.vy
+
+        min_x = 20.0
+        max_x = max(min_x, float(width) - box_w - 20.0)
+        min_y = 20.0
+        max_y = max(min_y, float(height) - box_h - 20.0)
+
+        if self.x <= min_x:
+            self.x = min_x
+            self.vx = abs(self.vx)
+        elif self.x >= max_x:
+            self.x = max_x
+            self.vx = -abs(self.vx)
+
+        if self.y <= min_y:
+            self.y = min_y
+            self.vy = abs(self.vy)
+        elif self.y >= max_y:
+            self.y = max_y
+            self.vy = -abs(self.vy)
+
+    def draw(self, painter: QPainter, width: int, height: int, alpha: int):
+        if alpha <= 0 or width <= 0 or height <= 0:
+            return
+        font = QFont("Malgun Gothic", 18)
+        font.setBold(True)
+        fm = QFontMetrics(font)
+        tw = fm.horizontalAdvance(self.text) if hasattr(fm, "horizontalAdvance") else fm.width(self.text)
+        th = fm.height()
+
+        pad_x = 24.0
+        pad_y = 12.0
+        box_w = float(tw) + pad_x * 2.0
+        box_h = float(th) + pad_y * 2.0
+
+        self.update(width, height, box_w, box_h)
+
+        # Enable Antialiasing for crisp badge rendering
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        # 1. Floating Badge Background Container
+        badge_rect = QRectF(self.x, self.y, box_w, box_h)
+        bg_alpha = min(235, max(120, int(alpha * 0.92)))
+        border_alpha = min(255, max(150, alpha))
+        painter.setBrush(QColor(18, 22, 32, bg_alpha))
+        painter.setPen(QPen(QColor(90, 150, 240, border_alpha), 2.0))
+        painter.drawRoundedRect(badge_rect, 10.0, 10.0)
+
+        # 2. Crisp, pure-white text using QPainterPath (bypasses ClearType alpha loss on Windows DWM)
+        path = QPainterPath()
+        text_x = self.x + pad_x
+        text_y = self.y + pad_y + float(fm.ascent())
+        path.addText(text_x, text_y, font, self.text)
+
+        text_alpha = min(255, max(180, alpha))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(255, 255, 255, text_alpha))
+        painter.drawPath(path)
 
 
 class DesktopScreenOverlayWindow(QWidget):
@@ -41,6 +129,7 @@ class DesktopScreenOverlayWindow(QWidget):
         self._alpha = 0
         self._rainbow_hue = 0.0
         self._rainbow_sat = 0
+        self._floating_tracker = FloatingTextTracker("스크린 가드 중. 긴급탈출 f12")
 
         self._apply_win32_clickthrough()
 
@@ -71,14 +160,14 @@ class DesktopScreenOverlayWindow(QWidget):
             except Exception:
                 pass
 
-    def update_render_state(self, stage: int, color: QColor, alpha: int, hue: float, sat: int):
+    def update_render_state(self, stage: int, color: Optional[QColor] = None, alpha: int = 0, hue: float = 0.0, sat: int = 0, **kwargs):
         self._stage = stage
-        self._color = color
+        self._color = color if color is not None else QColor(0, 0, 0)
         self._alpha = alpha
         self._rainbow_hue = hue
         self._rainbow_sat = sat
 
-        if alpha > 0 and stage > 0:
+        if stage > 0:
             if not self.isVisible():
                 self.show()
                 self.raise_()
@@ -89,29 +178,27 @@ class DesktopScreenOverlayWindow(QWidget):
                 self.hide()
 
     def paintEvent(self, event):
-        if self._alpha <= 0:
+        if self._stage == 0 and self._alpha <= 0:
             return
         painter = QPainter(self)
-        if self._stage in (5, 6):
-            w = max(1, self.width())
-            h = max(1, self.height())
-            gradient = QLinearGradient(0, 0, w, h)
-            stops = [0.0, 0.16, 0.33, 0.50, 0.66, 0.83, 1.0]
-            for i, pos in enumerate(stops):
-                hue = int((self._rainbow_hue + i * 60) % 360)
-                col = QColor.fromHsv(hue, self._rainbow_sat, 250, self._alpha)
-                gradient.setColorAt(pos, col)
-            painter.fillRect(self.rect(), gradient)
-        else:
-            c = QColor(self._color)
-            c.setAlpha(self._alpha)
-            painter.fillRect(self.rect(), c)
+        if self._alpha > 0:
+            painter.fillRect(self.rect(), QColor(0, 0, 0, self._alpha))
+        if self._stage > 0:
+            self._floating_tracker.draw(painter, self.width(), self.height(), max(180, self._alpha))
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_F12:
+            AntiBurnInOverlay.escape_all()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class AntiBurnInOverlay(QWidget):
     """
-    Transparent overlay controller that performs a smooth Black -> White -> Rainbow
+    Transparent overlay controller that performs a smooth Black fade-in, hold, and fade-out
     color transition to prevent monitor/display burn-in.
+
 
     Supports:
     - Mode 1: App window overlay (parent-bounded)
@@ -130,6 +217,19 @@ class AntiBurnInOverlay(QWidget):
         """Checks if any AntiBurnInOverlay instance is currently animating screen colors."""
         return any(inst.is_transitioning() for inst in cls._active_instances if inst)
 
+    @classmethod
+    def escape_all(cls) -> bool:
+        """
+        Emergency escape: immediately stops and hides all active anti-burn overlay instances.
+        Returns True if any transitioning overlay was aborted, False otherwise.
+        """
+        aborted = False
+        for inst in list(cls._active_instances):
+            if inst and inst.is_transitioning():
+                inst.stop_transition()
+                aborted = True
+        return aborted
+
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         if self not in AntiBurnInOverlay._active_instances:
@@ -144,11 +244,15 @@ class AntiBurnInOverlay(QWidget):
 
         self._color = QColor(0, 0, 0)
         self._alpha = 0  # 0 to 255
-        self._stage = 0  # 0: idle, 1: fade-in black, 2: hold black, 3: lerp to white, 4: hold white, 5: bloom & cycle rainbow, 6: fade-out rainbow
+        self._stage = 0  # 0: idle, 1: fade-in black, 2: hold black, 3: fade-out black
         self._hold_ticks = 0
         self._lerp_step = 0
         self._rainbow_hue = 0.0
         self._rainbow_sat = 0
+
+        self._hold_minutes = 1.0  # Duration in minutes to stay in complete black
+        self._hold_start_time = 0.0
+        self._floating_tracker = FloatingTextTracker("스크린 가드 중. 긴급탈출 f12")
 
         # Animation step timer (~30 FPS, 33ms)
         self._anim_timer = QTimer(self)
@@ -227,6 +331,21 @@ class AntiBurnInOverlay(QWidget):
     def get_interval_minutes(self) -> int:
         return self._interval_minutes
 
+    def set_hold_minutes(self, minutes: float):
+        """Sets the duration in minutes to remain in pure black state."""
+        self._hold_minutes = max(0.0, float(minutes))
+
+    def get_hold_minutes(self) -> float:
+        return self._hold_minutes
+
+    def get_remaining_hold_seconds(self) -> float:
+        """Returns remaining seconds in pure black hold state (Stage 2)."""
+        if self._stage == 2 and self._hold_start_time > 0:
+            elapsed = time.time() - self._hold_start_time
+            rem = (self._hold_minutes * 60.0) - elapsed
+            return max(0.0, rem)
+        return 0.0
+
     def _ensure_desktop_windows(self):
         """Creates or aligns DesktopScreenOverlayWindow instances for all display screens."""
         app = QApplication.instance()
@@ -278,17 +397,19 @@ class AntiBurnInOverlay(QWidget):
             self._ensure_desktop_windows()
 
     def start_transition(self):
-        """Starts the gradual Black -> White -> Rainbow spectrum transition."""
+        """Starts the gradual fade-in to pure Black, hold, and fade-out transition."""
         self.update_geometry()
         self._stage = 1
         self._color = QColor(0, 0, 0)
         self._alpha = 0
+        self._hold_start_time = 0.0
         self._hold_ticks = 0
         self._lerp_step = 0
         self._rainbow_hue = 0.0
         self._rainbow_sat = 0
 
         if self._mode == self.MODE_APP_WINDOW:
+            self._floating_tracker.reset(self.width(), self.height())
             for win in self._desktop_windows:
                 win.hide()
             self.show()
@@ -297,7 +418,8 @@ class AntiBurnInOverlay(QWidget):
             self.hide()
             self._ensure_desktop_windows()
             for win in self._desktop_windows:
-                win.update_render_state(self._stage, self._color, self._alpha, self._rainbow_hue, self._rainbow_sat)
+                win._floating_tracker.reset(win.width(), win.height())
+                win.update_render_state(self._stage, self._color, self._alpha, 0.0, 0)
 
         self._anim_timer.start()
         self.sig_transition_started.emit()
@@ -307,6 +429,7 @@ class AntiBurnInOverlay(QWidget):
         self._anim_timer.stop()
         self._stage = 0
         self._alpha = 0
+        self._hold_start_time = 0.0
         self.hide()
         for win in self._desktop_windows:
             win.update_render_state(0, self._color, 0, 0.0, 0)
@@ -323,61 +446,30 @@ class AntiBurnInOverlay(QWidget):
         self._desktop_windows.clear()
 
     def _on_anim_step(self):
-        fade_step = 6  # ~1.1s for 200 alpha at 33ms/step
-        max_black_alpha = 210
-        max_white_alpha = 195
+        fade_step = 6  # ~1.4s for 255 alpha at 33ms/step
+        max_black_alpha = 255
 
         if self._stage == 1:
-            # 1. Fade in Black (흑색 페이드인)
+            # 1. Fade-in pure Black (완전한 블랙으로 서서히 페이드인)
             self._color = QColor(0, 0, 0)
             self._alpha = min(max_black_alpha, self._alpha + fade_step)
             if self._alpha >= max_black_alpha:
+                self._alpha = max_black_alpha
                 self._stage = 2
-                self._hold_ticks = 12  # ~0.4s
+                self._hold_start_time = time.time()
 
         elif self._stage == 2:
-            # 2. Hold Black (흑색 유지)
-            self._hold_ticks -= 1
-            if self._hold_ticks <= 0:
+            # 2. Hold pure Black (설정된 분 단위 시간 동안 완전한 블랙 상태 유지)
+            self._alpha = max_black_alpha
+            elapsed = time.time() - self._hold_start_time
+            if elapsed >= (self._hold_minutes * 60.0):
                 self._stage = 3
-                self._lerp_step = 0
 
         elif self._stage == 3:
-            # 3. Smooth Lerp Black -> White (흑 ~ 백 그라데이션 전환)
-            self._lerp_step += 1
-            total_lerp = 25  # ~0.8s
-            ratio = min(1.0, self._lerp_step / total_lerp)
-            gray = int(255 * ratio)
-            self._color = QColor(gray, gray, gray)
-            self._alpha = int(max_black_alpha + (max_white_alpha - max_black_alpha) * ratio)
-            if ratio >= 1.0:
-                self._stage = 4
-                self._hold_ticks = 12  # ~0.4s
-
-        elif self._stage == 4:
-            # 4. Hold White (백색 유지)
-            self._color = QColor(255, 255, 255)
-            self._hold_ticks -= 1
-            if self._hold_ticks <= 0:
-                self._stage = 5
-                self._hold_ticks = 50  # ~1.65s rainbow cycling
-                self._rainbow_hue = 0.0
-                self._rainbow_sat = 0
-
-        elif self._stage == 5:
-            # 5. Bloom from White into flowing Rainbow spectrum gradient (무지개색 스펙트럼 회전)
-            self._hold_ticks -= 1
-            # Smoothly ramp saturation from 0 (white) to 225 (vivid rainbow) over first 12 ticks
-            self._rainbow_sat = min(225, self._rainbow_sat + 18)
-            self._rainbow_hue = (self._rainbow_hue + 7.0) % 360.0
-            if self._hold_ticks <= 0:
-                self._stage = 6
-
-        elif self._stage == 6:
-            # 6. Fade out Rainbow to normal UI (무지개색 페이드아웃)
-            self._rainbow_hue = (self._rainbow_hue + 5.0) % 360.0
+            # 3. Fade-out from Black (서서히 원래 화면으로 복귀)
             self._alpha = max(0, self._alpha - fade_step)
             if self._alpha <= 0:
+                self._alpha = 0
                 self.stop_transition()
                 return
 
@@ -385,27 +477,20 @@ class AntiBurnInOverlay(QWidget):
             self.update()
         elif self._mode == self.MODE_DESKTOP_FULLSCREEN:
             for win in self._desktop_windows:
-                win.update_render_state(self._stage, self._color, self._alpha, self._rainbow_hue, self._rainbow_sat)
+                win.update_render_state(self._stage, self._color, self._alpha, 0.0, 0)
 
     def paintEvent(self, event):
-        if self._alpha <= 0 or self._mode != self.MODE_APP_WINDOW:
+        if (self._stage == 0 and self._alpha <= 0) or self._mode != self.MODE_APP_WINDOW:
             return
         painter = QPainter(self)
+        if self._alpha > 0:
+            painter.fillRect(self.rect(), QColor(0, 0, 0, self._alpha))
+        if self._stage > 0:
+            self._floating_tracker.draw(painter, self.width(), self.height(), max(180, self._alpha))
 
-        if self._stage in (5, 6):
-            # Rainbow gradient mode (무지개색 스펙트럼 대각선 그라데이션)
-            w = max(1, self.width())
-            h = max(1, self.height())
-            gradient = QLinearGradient(0, 0, w, h)
-            # 7 spectral stops across 360 degrees HSV
-            stops = [0.0, 0.16, 0.33, 0.50, 0.66, 0.83, 1.0]
-            for i, pos in enumerate(stops):
-                hue = int((self._rainbow_hue + i * 60) % 360)
-                col = QColor.fromHsv(hue, self._rainbow_sat, 250, self._alpha)
-                gradient.setColorAt(pos, col)
-            painter.fillRect(self.rect(), gradient)
-        else:
-            # Solid color mode (Black, Black-to-White lerp, White)
-            c = QColor(self._color)
-            c.setAlpha(self._alpha)
-            painter.fillRect(self.rect(), c)
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_F12:
+            self.stop_transition()
+            event.accept()
+            return
+        super().keyPressEvent(event)

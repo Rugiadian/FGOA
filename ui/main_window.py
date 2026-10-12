@@ -169,6 +169,7 @@ class MainWindow(QMainWindow):
         self.global_hotkey = GlobalHotkeyListener(None)
         self.global_hotkey.sig_stop_hotkey.connect(self._on_global_hotkey_stop)
         self.global_hotkey.sig_pause_hotkey.connect(self._on_global_hotkey_pause)
+        self.global_hotkey.sig_anti_burn_escape.connect(self._on_anti_burn_emergency_escape)
         self.global_hotkey.start()
         self.destroyed.connect(self._cleanup_global_hotkey)
 
@@ -196,6 +197,12 @@ class MainWindow(QMainWindow):
             state_desc = "재개" if is_paused else "일시정지"
             self._append_log("INFO", f"⏸ [전역 단축키] Shift+F6 {state_desc}가 수신되었습니다.")
             self._on_pause_execution()
+
+    def _on_anti_burn_emergency_escape(self):
+        """Global F12 emergency escape handler: immediately aborts anti-burn overlay."""
+        aborted = AntiBurnInOverlay.escape_all()
+        if aborted:
+            self._append_log("WARN", "🚨 [번인 긴급탈출] F12 단축키가 감지되어 번인 방지 화면이 즉시 강제 해제되었습니다.")
 
     def _update_window_title(self):
         """Update window title with application version and current project filename."""
@@ -277,6 +284,7 @@ class MainWindow(QMainWindow):
         # 1. Anti-burn in settings (번인 방지)
         burn_mode = cfg.get("anti_burn_mode", 1)
         burn_interval = cfg.get("anti_burn_interval_min", 5)
+        burn_hold = cfg.get("anti_burn_hold_min", 1)
         burn_enabled = cfg.get("anti_burn_enabled", False)
 
         if hasattr(self, "combo_anti_burn_mode") and self.combo_anti_burn_mode:
@@ -291,6 +299,11 @@ class MainWindow(QMainWindow):
             self.spin_anti_burn_min.setValue(burn_interval)
             self.spin_anti_burn_min.blockSignals(False)
 
+        if hasattr(self, "spin_anti_burn_hold_min") and self.spin_anti_burn_hold_min:
+            self.spin_anti_burn_hold_min.blockSignals(True)
+            self.spin_anti_burn_hold_min.setValue(burn_hold)
+            self.spin_anti_burn_hold_min.blockSignals(False)
+
         if hasattr(self, "chk_anti_burn") and self.chk_anti_burn:
             self.chk_anti_burn.blockSignals(True)
             self.chk_anti_burn.setChecked(burn_enabled)
@@ -299,6 +312,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
             self.anti_burn_overlay.set_mode(burn_mode)
             self.anti_burn_overlay.set_interval_minutes(burn_interval)
+            self.anti_burn_overlay.set_hold_minutes(burn_hold)
             self.anti_burn_overlay.set_enabled(burn_enabled)
 
         # 2. Action Overlay (조작 시각화)
@@ -383,6 +397,8 @@ class MainWindow(QMainWindow):
                 cfg["anti_burn_mode"] = self.combo_anti_burn_mode.currentData()
             if hasattr(self, "spin_anti_burn_min") and self.spin_anti_burn_min:
                 cfg["anti_burn_interval_min"] = self.spin_anti_burn_min.value()
+            if hasattr(self, "spin_anti_burn_hold_min") and self.spin_anti_burn_hold_min:
+                cfg["anti_burn_hold_min"] = self.spin_anti_burn_hold_min.value()
             if hasattr(self, "chk_action_overlay") and self.chk_action_overlay:
                 cfg["action_overlay_enabled"] = self.chk_action_overlay.isChecked()
             if hasattr(self, "chk_floating_stop") and self.chk_floating_stop:
@@ -469,10 +485,11 @@ class MainWindow(QMainWindow):
             self.anti_burn_overlay.set_enabled(checked)
             self._save_app_config()
             mins = self.spin_anti_burn_min.value() if hasattr(self, "spin_anti_burn_min") else 5
+            hold_mins = self.spin_anti_burn_hold_min.value() if hasattr(self, "spin_anti_burn_hold_min") else 1
             mode = self.anti_burn_overlay.get_mode()
             mode_name = "앱 창" if mode == 1 else "데스크탑 전체 화면"
             if checked:
-                self._append_log("INFO", f"🖥️ [모니터 번인 방지] 모드 {mode}({mode_name}) {mins}분 주기로 화면 전환 활성화 (조작 간섭 없음)")
+                self._append_log("INFO", f"🖥️ [모니터 번인 방지] 모드 {mode}({mode_name}) {mins}분 주기 / {hold_mins}분 블랙 유지 화면 전환 활성화 (조작 간섭 없음)")
             else:
                 self._append_log("INFO", "🖥️ [모니터 번인 방지] 비활성화됨")
 
@@ -495,7 +512,8 @@ class MainWindow(QMainWindow):
         else:
             mode = self.anti_burn_overlay.get_mode()
             mode_name = "모드 1 (앱 창)" if mode == 1 else "모드 2 (데스크탑 전체 화면)"
-            self._append_log("INFO", f"🖥️ [모니터 번인 방지] {mode_name} 화면 전환 효과 테스트 시작 (조작 간섭 없음)")
+            hold_mins = self.spin_anti_burn_hold_min.value() if hasattr(self, "spin_anti_burn_hold_min") else 1
+            self._append_log("INFO", f"🖥️ [모니터 번인 방지] {mode_name} 블랙 화면 전환 효과 테스트 시작 ({hold_mins}분 유지, 조작 간섭 없음)")
             self.anti_burn_overlay.start_transition()
 
     def _on_anti_burn_started(self):
@@ -509,6 +527,11 @@ class MainWindow(QMainWindow):
     def _on_anti_burn_interval_changed(self, val: int):
         if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
             self.anti_burn_overlay.set_interval_minutes(val)
+            self._save_app_config()
+
+    def _on_anti_burn_hold_changed(self, val: int):
+        if hasattr(self, "anti_burn_overlay") and self.anti_burn_overlay:
+            self.anti_burn_overlay.set_hold_minutes(val)
             self._save_app_config()
 
     def __del__(self):
@@ -1172,7 +1195,7 @@ class MainWindow(QMainWindow):
         # Monitor Burn-in Prevention
         self.chk_anti_burn = QCheckBox("🖥️ 번인 방지")
         self.chk_anti_burn.setChecked(False)
-        self.chk_anti_burn.setToolTip("지정한 n분 주기마다 화면을 서서히 전환하여 모니터 번인을 방지합니다. (조작 간섭 전혀 없음)")
+        self.chk_anti_burn.setToolTip("지정한 n분 주기마다 화면을 서서히 블랙으로 전환하여 모니터 번인을 방지합니다. (조작 간섭 없음, 긴급탈출: F12)")
         self.chk_anti_burn.toggled.connect(self._on_toggle_anti_burn)
         row2_ctrl.addWidget(self.chk_anti_burn)
 
@@ -1186,14 +1209,22 @@ class MainWindow(QMainWindow):
         self.spin_anti_burn_min = QSpinBox()
         self.spin_anti_burn_min.setRange(1, 120)
         self.spin_anti_burn_min.setValue(5)
-        self.spin_anti_burn_min.setSuffix("분")
+        self.spin_anti_burn_min.setSuffix("분 주기")
         self.spin_anti_burn_min.setToolTip("번인 방지 화면 전환 주기 (1~120분)")
         self.spin_anti_burn_min.valueChanged.connect(self._on_anti_burn_interval_changed)
         row2_ctrl.addWidget(self.spin_anti_burn_min)
 
+        self.spin_anti_burn_hold_min = QSpinBox()
+        self.spin_anti_burn_hold_min.setRange(1, 120)
+        self.spin_anti_burn_hold_min.setValue(1)
+        self.spin_anti_burn_hold_min.setSuffix("분 유지")
+        self.spin_anti_burn_hold_min.setToolTip("블랙 상태로 머무는 시간 (1~120분 단위)")
+        self.spin_anti_burn_hold_min.valueChanged.connect(self._on_anti_burn_hold_changed)
+        row2_ctrl.addWidget(self.spin_anti_burn_hold_min)
+
         self.btn_test_anti_burn = QPushButton("🧪 테스트")
         self.btn_test_anti_burn.setObjectName("btn_test_anti_burn")
-        self.btn_test_anti_burn.setToolTip("선택한 번인 방지 모드의 화면 전환 효과를 즉시 1회 테스트합니다. (실행 중 클릭 시 중지)")
+        self.btn_test_anti_burn.setToolTip("선택한 번인 방지 모드의 화면 전환 효과를 즉시 1회 테스트합니다. (실행 중 클릭 시 중지, 긴급탈출: F12)")
         self.btn_test_anti_burn.clicked.connect(self._on_test_anti_burn)
         row2_ctrl.addWidget(self.btn_test_anti_burn)
 

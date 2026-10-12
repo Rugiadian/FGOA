@@ -1,0 +1,24 @@
+[일시 / Timestamp]
+- 요청 일시: 2026-10-10 04:14:45
+- 완료 일시: 2026-10-10 04:17:30
+
+[요청 내용 / User Request]
+블랙 유지 상태일때 '스크린 가드 중. 긴급탈출 f12' 이라는 글씨가 떠다니게 해줘. 커스터마이징 기능 필요 없음.
+
+[결과 요약 / Summary of Results]
+1. FloatingTextTracker 구현 (ui/anti_burn_in_overlay.py):
+   - 텍스트 자체의 번인도 방지할 수 있도록 화면 경계에서 부드럽게 반사(Bounce)하며 지속적으로 움직이는 2D 플로팅 물리 계산 클래스 구현
+   - 텍스트 내용: "스크린 가드 중. 긴급탈출 f12"
+   - 어두운 배경 위에서 눈부심 없이 선명하게 보이도록 부드러운 그림자와 소프트 화이트(QColor(220, 220, 220, 190)) 스타일 적용
+2. 오버레이 위젯 연동 (ui/anti_burn_in_overlay.py):
+   - DesktopScreenOverlayWindow (모드 2 전체화면) 및 AntiBurnInOverlay (모드 1 앱창) paintEvent에 연동
+   - 블랙 유지 단계(_stage == 2)일 때만 화면 위를 천천히 떠다니며 렌더링되도록 구현
+   - start_transition() 시 화면 해상도/크기에 맞춰 위치 자동 리셋
+3. 단위 테스트 작성 및 검증 (tests/test_anti_burn_runner_safe_wait.py):
+   - test_floating_screen_guard_text 추가: 텍스트 내용 확인, 위치 이동, 경계면 반사 바운스 검증
+   - 전체 관련 단위 테스트 25개 전원 통과 확인
+
+[영향 파일 목록 / Affected Files]
+- ui/anti_burn_in_overlay.py
+- tests/test_anti_burn_runner_safe_wait.py
+- history/2026-10-10_041730_블랙_유지_상태_스크린가드_떠다니는_글씨_구현.txt

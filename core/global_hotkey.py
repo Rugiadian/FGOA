@@ -12,6 +12,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 # Virtual key codes
 VK_SHIFT = 0x10
 VK_F6 = 0x75
+VK_F12 = 0x7B
 VK_PAUSE = 0x13
 VK_ESCAPE = 0x1B
 
@@ -21,8 +22,9 @@ class GlobalHotkeyListener(QThread):
     Lightweight background worker thread that monitors global hotkeys.
     Fires signals when registered hotkeys are pressed system-wide.
     """
-    sig_stop_hotkey = pyqtSignal()    # Triggered on F6 (without Shift) or Pause/Break press
-    sig_pause_hotkey = pyqtSignal()   # Triggered on Shift + F6 press
+    sig_stop_hotkey = pyqtSignal()         # Triggered on F6 (without Shift) or Pause/Break press
+    sig_pause_hotkey = pyqtSignal()        # Triggered on Shift + F6 press
+    sig_anti_burn_escape = pyqtSignal()    # Triggered on F12 press (Emergency burn-in escape)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -35,6 +37,7 @@ class GlobalHotkeyListener(QThread):
 
         self._f6_was_pressed = False
         self._pause_was_pressed = False
+        self._f12_was_pressed = False
         import atexit
         atexit.register(self.stop_listening)
 
@@ -85,6 +88,14 @@ class GlobalHotkeyListener(QThread):
                 if pause_is_down and not self._pause_was_pressed:
                     self.sig_stop_hotkey.emit()
                 self._pause_was_pressed = pause_is_down
+
+                # Check F12 key state (Burn-in Emergency Escape)
+                f12_state = self._user32.GetAsyncKeyState(VK_F12)
+                f12_is_down = bool(f12_state & 0x8000)
+
+                if f12_is_down and not self._f12_was_pressed:
+                    self.sig_anti_burn_escape.emit()
+                self._f12_was_pressed = f12_is_down
 
             except Exception:
                 pass

@@ -78,12 +78,109 @@ class TestAntiBurnRunnerSafeWait(unittest.TestCase):
         overlay.cleanup()
         parent.close()
 
+    def test_pure_black_alpha_reaches_255(self):
+        """Verify that fade-in reaches pure black (alpha 255) and holds."""
+        parent = QWidget()
+        overlay = AntiBurnInOverlay(parent)
+        overlay.set_hold_minutes(0.1)
+        overlay.start_transition()
+        self.assertEqual(overlay._stage, 1)
+
+        # Step animation until stage 2 (hold black)
+        for _ in range(50):
+            overlay._on_anim_step()
+            if overlay._stage == 2:
+                break
+
+        self.assertEqual(overlay._stage, 2)
+        self.assertEqual(overlay._alpha, 255)
+        self.assertGreater(overlay.get_remaining_hold_seconds(), 0)
+
+        overlay.stop_transition()
+        overlay.cleanup()
+        parent.close()
+
+    def test_black_hold_duration_and_remaining_time(self):
+        """Verify that hold duration progresses and transitions back to idle."""
+        import time
+        parent = QWidget()
+        overlay = AntiBurnInOverlay(parent)
+        # Set a very short hold duration (0.001 min ~ 0.06s)
+        overlay.set_hold_minutes(0.001)
+        overlay.start_transition()
+
+        # Step into stage 2
+        for _ in range(50):
+            overlay._on_anim_step()
+            if overlay._stage == 2:
+                break
+        self.assertEqual(overlay._stage, 2)
+
+        # Wait for hold duration to elapse
+        time.sleep(0.12)
+        overlay._on_anim_step()
+        self.assertEqual(overlay._stage, 3)
+
+        # Step until fade-out completes
+        for _ in range(60):
+            overlay._on_anim_step()
+            if not overlay.is_transitioning():
+                break
+
+        self.assertFalse(overlay.is_transitioning())
+        self.assertEqual(overlay._alpha, 0)
+        overlay.cleanup()
+        parent.close()
+
+
     def test_desktop_screen_overlay_window_initialization(self):
         """Verify DesktopScreenOverlayWindow initializes with click-through and without errors."""
         win = DesktopScreenOverlayWindow()
         self.assertIsNotNone(win)
-        win.close()
+    def test_anti_burn_escape_all_and_f12_key(self):
+        """Verify AntiBurnInOverlay.escape_all() and F12 instantly terminate transitions."""
+        from PyQt5.QtGui import QKeyEvent
+        from PyQt5.QtCore import QEvent, Qt
+
+        parent = QWidget()
+        overlay = AntiBurnInOverlay(parent)
+        overlay.start_transition()
+        self.assertTrue(overlay.is_transitioning())
+
+        # Test escape_all classmethod
+        res = AntiBurnInOverlay.escape_all()
+        self.assertTrue(res)
+        self.assertFalse(overlay.is_transitioning())
+
+        # Test F12 key press event
+        overlay.start_transition()
+        self.assertTrue(overlay.is_transitioning())
+        key_event = QKeyEvent(QEvent.KeyPress, Qt.Key_F12, Qt.NoModifier)
+        overlay.keyPressEvent(key_event)
+        self.assertFalse(overlay.is_transitioning())
+
+        overlay.cleanup()
+        parent.close()
+
+    def test_floating_screen_guard_text(self):
+        """Verify FloatingTextTracker moves and bounces inside bounds."""
+        from ui.anti_burn_in_overlay import FloatingTextTracker
+        tracker = FloatingTextTracker("스크린 가드 중. 긴급탈출 f12")
+        self.assertEqual(tracker.text, "스크린 가드 중. 긴급탈출 f12")
+
+        tracker.reset(800, 600)
+        init_x, init_y = tracker.x, tracker.y
+        tracker.update(800, 600, 200, 30)
+        self.assertNotEqual(tracker.x, init_x)
+        self.assertNotEqual(tracker.y, init_y)
+
+        # Force near right boundary and verify bounce
+        tracker.x = 790.0
+        tracker.vx = 2.0
+        tracker.update(800, 600, 200, 30)
+        self.assertLess(tracker.vx, 0)
 
 
 if __name__ == "__main__":
     unittest.main()
+

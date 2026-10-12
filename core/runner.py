@@ -44,7 +44,7 @@ class WorkflowRunner(QThread):
     def _wait_for_anti_burn(self):
         """
         Safely holds condition evaluation while anti-burn screen transition is actively playing.
-        Prevents temporary overlay colors (black, white, rainbow) from skewing color detection.
+        Prevents temporary overlay colors (black) from skewing color detection.
         """
         overlay = getattr(self, "anti_burn_overlay", None)
         if not overlay and self.parent():
@@ -54,12 +54,27 @@ class WorkflowRunner(QThread):
         is_trans = (overlay and overlay.is_transitioning()) or AntiBurnInOverlay.is_any_transitioning()
 
         if is_trans and self._is_running:
-            self.sig_log.emit("INFO", "🖥️ [번인 방지 대기] 번인 방지 화면 전환 진행 중... 색상 오판정 방지를 위해 잠시 대기합니다.")
+            self.sig_log.emit("INFO", "🖥️ [번인 방지 대기] 번인 방지 블랙 화면 전환 진행 중... 색상 오판정 방지를 위해 대기합니다.")
+            last_log_time = time.time()
             while self._is_running and (
                 (overlay and overlay.is_transitioning()) or AntiBurnInOverlay.is_any_transitioning()
             ):
-                if not self.sleep_interruptible(0.05):
+                if not self.sleep_interruptible(0.1):
                     break
+                now = time.time()
+                if now - last_log_time >= 30.0:
+                    last_log_time = now
+                    rem_sec = 0.0
+                    if overlay and hasattr(overlay, "get_remaining_hold_seconds"):
+                        rem_sec = overlay.get_remaining_hold_seconds()
+                    if rem_sec > 0:
+                        mins = int(rem_sec // 60)
+                        secs = int(rem_sec % 60)
+                        self.sig_log.emit("INFO", f"🖥️ [번인 방지 대기] 블랙 유지 중 (남은 시간: 약 {mins}분 {secs:02d}초)...")
+                    else:
+                        self.sig_log.emit("INFO", "🖥️ [번인 방지 대기] 번인 방지 화면 복귀 대기 중...")
+            if self._is_running:
+                self.sig_log.emit("INFO", "🖥️ [번인 방지 종료] 화면 복귀 완료. 조건 평가를 재개합니다.")
 
     def sleep_interruptible(self, seconds: float) -> bool:
         """Sleeps in small chunks (20ms) checking self._is_running. Returns True if completed, False if interrupted."""
