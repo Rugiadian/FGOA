@@ -1,0 +1,20 @@
+[일시 / Timestamp]
+- 요청 시각: 2026-10-12 23:25:13
+- 완료 시각: 2026-10-12 23:28:00
+
+[요청 내용 / User Request]
+각 프로젝트 폴더 내의 작업은 각 폴더 내에서만 읽고 쓰게 제한 할것. 이걸 항상 적용하는 명령으로 등록해둘것.
+
+[결과 요약 / Summary of Results]
+1. 글로벌 상시 적용 규칙(Global Rules) 등록:
+   - Antigravity 전역 플러그인 경로(`~/.gemini/config/plugins/project-boundary/`)에 `plugin.json` 및 `rules/AGENTS.md`를 생성하여 등록했습니다.
+   - 이를 통해 향후 어떤 프로젝트 디렉터리에서 작업하더라도 모든 프로젝트에 공통으로 '프로젝트 작업 범위 격리(Workspace Isolation & Boundary Containment)' 규칙이 항상 자동 로드되도록 구성했습니다.
+2. 현재 프로젝트(FGOA) 규칙(`AGENTS.md`) 갱신:
+   - `G:\Git\FGOA\AGENTS.md`에 '## 4. 프로젝트 작업 범위 격리 규칙 (Workspace Isolation & Project Boundary Rule)' 섹션을 추가했습니다.
+   - 프로젝트 내부 격리 원칙, 외부 경로 임의 접근 금지, 명령어 실행 시 작업 디렉터리(`Cwd`) 프로젝트 내부 한정 원칙을 명시했습니다.
+
+[영향 파일 목록 / Affected Files]
+- C:\Users\demo_\.gemini\config\plugins\project-boundary\plugin.json (생성)
+- C:\Users\demo_\.gemini\config\plugins\project-boundary\rules\AGENTS.md (생성)
+- G:\Git\FGOA\AGENTS.md (수정)
+- history/2026-10-12_232800_프로젝트_작업_범위_격리_및_읽기_쓰기_제한_규칙_등록.txt (생성)
