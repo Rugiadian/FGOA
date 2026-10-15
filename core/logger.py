@@ -111,19 +111,26 @@ def log_crash(exc_type, exc_value, exc_tb) -> str:
         f"{'='*70}\n"
     )
 
-    try:
-        with open(CRASH_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(report)
-            f.flush()
-    except Exception:
-        pass
+    # Avoid polluting disk logs with intentional synthetic errors generated during unit tests
+    is_test_runner = (
+        "tests\\" in tb_str or
+        "tests/" in tb_str or
+        (bool(sys.argv) and "unittest" in sys.argv[0].lower())
+    )
+    if not is_test_runner:
+        try:
+            with open(CRASH_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(report)
+                f.flush()
+        except Exception:
+            pass
 
-    try:
-        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(f"\n[CRASH] {now_str} - {exc_type.__name__}: {exc_value}\n{tb_str}\n")
-            f.flush()
-    except Exception:
-        pass
+        try:
+            with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(f"\n[CRASH] {now_str} - {exc_type.__name__}: {exc_value}\n{tb_str}\n")
+                f.flush()
+        except Exception:
+            pass
 
     return report
 

@@ -5,7 +5,7 @@ ignores direct numeric keyboard input due to Qt's default QValidator.
 """
 import re
 from typing import Tuple, Optional
-from PyQt5.QtWidgets import QSpinBox
+from PyQt5.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox
 from PyQt5.QtCore import Qt, QEvent, QTimer
 from PyQt5.QtGui import QValidator, QKeyEvent
 
@@ -137,6 +137,35 @@ class CustomSpinBox(QSpinBox):
         if val == self.minimum() and self.specialValueText():
             return self.specialValueText()
         return str(val)
+
+    def wheelEvent(self, event):
+        """Ignore mouse wheel events so parent scroll areas can scroll without modifying value."""
+        event.ignore()
+
+
+class NoWheelComboBox(QComboBox):
+    """
+    QComboBox that ignores mouse wheel events.
+    Prevents unintentional option changes when scrolling parent scroll areas.
+    """
+    def wheelEvent(self, event):
+        event.ignore()
+
+
+class NoWheelSpinBox(CustomSpinBox):
+    """
+    Enhanced QSpinBox that ignores mouse wheel events.
+    """
+    def wheelEvent(self, event):
+        event.ignore()
+
+
+class NoWheelDoubleSpinBox(QDoubleSpinBox):
+    """
+    QDoubleSpinBox that ignores mouse wheel events.
+    """
+    def wheelEvent(self, event):
+        event.ignore()
 
 
 # Alias for convenience

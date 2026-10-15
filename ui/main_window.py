@@ -212,6 +212,12 @@ class MainWindow(QMainWindow):
             title = f"{title} [{proj_name}]"
         self.setWindowTitle(title)
 
+    def _mark_dirty(self):
+        """Marks the current project or inspector as modified and updates state."""
+        if hasattr(self, "inspector") and self.inspector:
+            self.inspector._mark_dirty()
+        self._update_window_title()
+
     def _check_reload_state(self) -> bool:
         """Restore project state if reloading after code modification."""
         if os.path.exists(TEMP_RELOAD_FILE):

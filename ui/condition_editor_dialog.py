@@ -25,6 +25,7 @@ from ui.widgets.color_badge import ColorChipWidget, WarningBadge
 from core.path_utils import get_references_dir, to_relative_path, to_absolute_path
 from ui.reference_gallery_dialog import ReferenceGalleryDialog
 from ui.qt_image_utils import qimage_to_pil
+from ui.custom_spinbox import NoWheelComboBox, NoWheelSpinBox
 
 
 class ConditionEditorDialog(QDialog):
@@ -191,7 +192,7 @@ class ConditionEditorDialog(QDialog):
         logic_row.setContentsMargins(2, 0, 2, 4)
         lbl_logic = QLabel("일치 규칙:")
         lbl_logic.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
-        self.combo_logic = QComboBox()
+        self.combo_logic = NoWheelComboBox()
         self.combo_logic.addItem("모든 포인트 일치 (AND)", "AND")
         self.combo_logic.addItem("하나라도 일치 (OR)", "OR")
         curr_logic = getattr(self.condition, "logic_operator", "AND") or "AND"
@@ -330,14 +331,14 @@ class ConditionEditorDialog(QDialog):
             self.tbl_points.setCellWidget(row, 2, badge)
 
             # 4. Tolerance SpinBox
-            spin_tol = QSpinBox()
+            spin_tol = NoWheelSpinBox()
             spin_tol.setRange(0, 255)
             spin_tol.setValue(pt.tolerance)
             spin_tol.valueChanged.connect(lambda val, p=pt: self._on_point_tolerance_changed(p, val))
             self.tbl_points.setCellWidget(row, 3, spin_tol)
 
             # 5. Match Mode ComboBox
-            combo_match = QComboBox()
+            combo_match = NoWheelComboBox()
             combo_match.addItems(["일치", "불일치"])
             combo_match.setCurrentIndex(0 if pt.match_mode == "match" else 1)
             combo_match.currentIndexChanged.connect(lambda idx, p=pt: self._on_point_match_mode_changed(p, idx))

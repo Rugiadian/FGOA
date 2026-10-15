@@ -35,6 +35,7 @@ from ui.action_editor_dialog import SingleActionDialog
 # Modular components extracted for token optimization & clean architecture
 from ui.inspector_action_table import DraggableActionsTableWidget, ActionColumnDelegate
 from ui.clickable_thumbnail import ClickableThumbnailLabel
+from ui.custom_spinbox import NoWheelComboBox, NoWheelSpinBox, NoWheelDoubleSpinBox
 
 
 class InspectorWidget(QWidget):
@@ -351,7 +352,7 @@ class InspectorWidget(QWidget):
         lbl_uid_title.setStyleSheet("font-weight: bold; font-size: 8.5pt; color: #7c3aed;")
         top_row.addWidget(lbl_uid_title)
 
-        self.spin_scen_num = QSpinBox()
+        self.spin_scen_num = NoWheelSpinBox()
         self.spin_scen_num.setRange(1, 99999)
         self.spin_scen_num.setPrefix("s")
         self.spin_scen_num.setValue(1)
@@ -395,7 +396,7 @@ class InspectorWidget(QWidget):
         lbl_nt.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
         node_row.addWidget(lbl_nt)
 
-        self.combo_node_type = QComboBox()
+        self.combo_node_type = NoWheelComboBox()
         self.combo_node_type.addItem("📄 일반 시나리오 (조건/액션)", "normal")
         self.combo_node_type.addItem("📁 그룹 폴더 시작 (Folder Start)", "folder_start")
         self.combo_node_type.addItem("📁 그룹 폴더 종료 (Folder End)", "folder_end")
@@ -411,7 +412,7 @@ class InspectorWidget(QWidget):
         l_sub.setSpacing(6)
 
         l_sub.addWidget(QLabel("루프 제어:"))
-        self.combo_loop_mode = QComboBox()
+        self.combo_loop_mode = NoWheelComboBox()
         self.combo_loop_mode.addItem("지정 횟수 반복 (Count)", "count")
         self.combo_loop_mode.addItem("조건 일치 시 탈출 (Break Until Match)", "until_match")
         self.combo_loop_mode.addItem("조건 일치 동안 반복 (While Match)", "while_match")
@@ -421,7 +422,7 @@ class InspectorWidget(QWidget):
 
         self.lbl_loop_cnt = QLabel("반복:")
         l_sub.addWidget(self.lbl_loop_cnt)
-        self.spin_loop_cnt = QSpinBox()
+        self.spin_loop_cnt = NoWheelSpinBox()
         self.spin_loop_cnt.setRange(1, 99999)
         self.spin_loop_cnt.setValue(5)
         self.spin_loop_cnt.setSuffix(" 회")
@@ -479,7 +480,7 @@ class InspectorWidget(QWidget):
         lbl_cond.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
         cond_bar.addWidget(lbl_cond)
 
-        self.combo_condition = QComboBox()
+        self.combo_condition = NoWheelComboBox()
         self.combo_condition.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.combo_condition.currentIndexChanged.connect(self._on_condition_combo_changed)
         cond_bar.addWidget(self.combo_condition, 1)
@@ -520,7 +521,7 @@ class InspectorWidget(QWidget):
         lbl_rule.setStyleSheet("font-size: 8.5pt;")
         top_row.addWidget(lbl_rule)
 
-        self.combo_cond_logic = QComboBox()
+        self.combo_cond_logic = NoWheelComboBox()
         self.combo_cond_logic.addItem("모든 포인트 일치 (AND)", "AND")
         self.combo_cond_logic.addItem("하나라도 일치 (OR)", "OR")
         self.combo_cond_logic.currentIndexChanged.connect(self._on_field_changed)
@@ -612,14 +613,14 @@ class InspectorWidget(QWidget):
         lbl_match.setFixedWidth(120)
         m_layout.addWidget(lbl_match)
 
-        self.combo_on_match = QComboBox()
+        self.combo_on_match = NoWheelComboBox()
         self.combo_on_match.addItem("액션 실행 후 다음 단계", "execute")
         self.combo_on_match.addItem("다른 시나리오로 점프 (Jump)", "jump")
         self.combo_on_match.addItem("오토 즉시 정지 (Stop)", "stop")
         self.combo_on_match.currentIndexChanged.connect(self._on_match_branch_changed)
         m_layout.addWidget(self.combo_on_match, 1)
 
-        self.combo_jump_match = QComboBox()
+        self.combo_jump_match = NoWheelComboBox()
         self.combo_jump_match.currentIndexChanged.connect(self._on_field_changed)
         m_layout.addWidget(self.combo_jump_match, 1)
         layout.addLayout(m_layout)
@@ -632,7 +633,7 @@ class InspectorWidget(QWidget):
         lbl_mismatch.setFixedWidth(120)
         mm_layout.addWidget(lbl_mismatch)
 
-        self.combo_on_mismatch = QComboBox()
+        self.combo_on_mismatch = NoWheelComboBox()
         self.combo_on_mismatch.addItem("다음 시나리오로 진행", "next")
         self.combo_on_mismatch.addItem("다른 시나리오로 점프 (Jump)", "jump")
         self.combo_on_mismatch.addItem("대기 후 조건 재시도 (Retry)", "retry")
@@ -640,7 +641,7 @@ class InspectorWidget(QWidget):
         self.combo_on_mismatch.currentIndexChanged.connect(self._on_mismatch_branch_changed)
         mm_layout.addWidget(self.combo_on_mismatch, 1)
 
-        self.combo_jump_mismatch = QComboBox()
+        self.combo_jump_mismatch = NoWheelComboBox()
         self.combo_jump_mismatch.currentIndexChanged.connect(self._on_field_changed)
         mm_layout.addWidget(self.combo_jump_mismatch, 1)
         layout.addLayout(mm_layout)
@@ -656,14 +657,14 @@ class InspectorWidget(QWidget):
         self.lbl_retry_fail.setFixedWidth(135)
         rf_layout.addWidget(self.lbl_retry_fail)
 
-        self.combo_retry_fail_action = QComboBox()
+        self.combo_retry_fail_action = NoWheelComboBox()
         self.combo_retry_fail_action.addItem("오토 즉시 정지 (Stop)", "stop")
         self.combo_retry_fail_action.addItem("다른 시나리오로 점프 (Jump)", "jump")
         self.combo_retry_fail_action.addItem("다음 시나리오로 진행 (Next)", "next")
         self.combo_retry_fail_action.currentIndexChanged.connect(self._on_retry_fail_action_changed)
         rf_layout.addWidget(self.combo_retry_fail_action, 1)
 
-        self.combo_retry_fail_jump = QComboBox()
+        self.combo_retry_fail_jump = NoWheelComboBox()
         self.combo_retry_fail_jump.currentIndexChanged.connect(self._on_field_changed)
         rf_layout.addWidget(self.combo_retry_fail_jump, 1)
 
@@ -682,7 +683,7 @@ class InspectorWidget(QWidget):
         opt_layout.setSpacing(6)
         self.lbl_retry_cnt = QLabel("재시도:")
         self.lbl_retry_cnt.setStyleSheet("font-size: 8.5pt;")
-        self.spin_retries = QSpinBox()
+        self.spin_retries = NoWheelSpinBox()
         self.spin_retries.setRange(1, 999)
         self.spin_retries.setValue(5)
         self.spin_retries.setSuffix(" 회")
@@ -690,7 +691,7 @@ class InspectorWidget(QWidget):
 
         self.lbl_retry_sec = QLabel("간격:")
         self.lbl_retry_sec.setStyleSheet("font-size: 8.5pt;")
-        self.spin_retry_sec = QDoubleSpinBox()
+        self.spin_retry_sec = NoWheelDoubleSpinBox()
         self.spin_retry_sec.setRange(0.1, 60.0)
         self.spin_retry_sec.setValue(1.0)
         self.spin_retry_sec.setSingleStep(0.2)
@@ -707,7 +708,7 @@ class InspectorWidget(QWidget):
         lbl_delay = QLabel("완료 후 대기:")
         lbl_delay.setStyleSheet("font-size: 8.5pt;")
         opt_layout.addWidget(lbl_delay)
-        self.spin_post_delay = QDoubleSpinBox()
+        self.spin_post_delay = NoWheelDoubleSpinBox()
         self.spin_post_delay.setRange(0.0, 60.0)
         self.spin_post_delay.setValue(0.0)
         self.spin_post_delay.setSingleStep(0.5)
@@ -736,7 +737,7 @@ class InspectorWidget(QWidget):
         lbl_seq.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
         seq_bar.addWidget(lbl_seq)
 
-        self.combo_sequence = QComboBox()
+        self.combo_sequence = NoWheelComboBox()
         self.combo_sequence.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.combo_sequence.currentIndexChanged.connect(self._on_sequence_combo_changed)
         seq_bar.addWidget(self.combo_sequence, 1)
@@ -1419,14 +1420,14 @@ class InspectorWidget(QWidget):
             self.tbl_points.setCellWidget(row, 2, cell_w)
 
             # 3. Tolerance SpinBox (Inline edit)
-            spin_tol = QSpinBox()
+            spin_tol = NoWheelSpinBox()
             spin_tol.setRange(0, 255)
             spin_tol.setValue(pt.tolerance)
             spin_tol.valueChanged.connect(lambda val, p=pt: self._on_point_tolerance_changed(p, val))
             self.tbl_points.setCellWidget(row, 3, spin_tol)
 
             # 4. Mode Combo (Inline edit)
-            combo_m = QComboBox()
+            combo_m = NoWheelComboBox()
             combo_m.addItem("일치 (Match)", "match")
             combo_m.addItem("불일치 (Invert)", "not_match")
             combo_m.setCurrentIndex(1 if pt.match_mode == "not_match" else 0)
