@@ -43,6 +43,7 @@ from ui.action_overlay import ActionOverlayWindow
 from ui.anti_ban_dialog import AntiBanDialog
 from ui.virtual_canvas_window import VirtualCanvasWindow
 from ui.anti_burn_in_overlay import AntiBurnInOverlay
+from ui.custom_spinbox import NoWheelComboBox, NoWheelSpinBox
 from core.global_hotkey import GlobalHotkeyListener
 from ui.floating_stop_widget import GlobalFloatingStopWidget
 from ui.custom_spinbox import CustomSpinBox
@@ -696,7 +697,7 @@ class MainWindow(QMainWindow):
 
         # Unity-style Dynamic Layout Selector
         row2_layout.addWidget(QLabel("📐 레이아웃:"))
-        self.combo_layout = QComboBox()
+        self.combo_layout = NoWheelComboBox()
         self.combo_layout.setObjectName("combo_layout")
         self.combo_layout.setMinimumWidth(135)
         self.combo_layout.setToolTip("유니티 스타일 유동적 레이아웃 전환 (기본/와이드/세로/탭/인스펙터 전면 등)")
@@ -1205,14 +1206,14 @@ class MainWindow(QMainWindow):
         self.chk_anti_burn.toggled.connect(self._on_toggle_anti_burn)
         row2_ctrl.addWidget(self.chk_anti_burn)
 
-        self.combo_anti_burn_mode = QComboBox()
+        self.combo_anti_burn_mode = NoWheelComboBox()
         self.combo_anti_burn_mode.addItem("모드 1: 앱 창", 1)
         self.combo_anti_burn_mode.addItem("모드 2: 전체 화면 (데스크탑)", 2)
         self.combo_anti_burn_mode.setToolTip("번인 방지 모드 선택:\n- 모드 1: FGOA 창 내부 화면 전환\n- 모드 2: 모니터 데스크탑 전체 화면 전환 (해상도 무관)")
         self.combo_anti_burn_mode.currentIndexChanged.connect(self._on_anti_burn_mode_changed)
         row2_ctrl.addWidget(self.combo_anti_burn_mode)
 
-        self.spin_anti_burn_min = QSpinBox()
+        self.spin_anti_burn_min = NoWheelSpinBox()
         self.spin_anti_burn_min.setRange(1, 120)
         self.spin_anti_burn_min.setValue(5)
         self.spin_anti_burn_min.setSuffix("분 주기")
@@ -1220,7 +1221,7 @@ class MainWindow(QMainWindow):
         self.spin_anti_burn_min.valueChanged.connect(self._on_anti_burn_interval_changed)
         row2_ctrl.addWidget(self.spin_anti_burn_min)
 
-        self.spin_anti_burn_hold_min = QSpinBox()
+        self.spin_anti_burn_hold_min = NoWheelSpinBox()
         self.spin_anti_burn_hold_min.setRange(1, 120)
         self.spin_anti_burn_hold_min.setValue(1)
         self.spin_anti_burn_hold_min.setSuffix("분 유지")

@@ -5,7 +5,7 @@ ignores direct numeric keyboard input due to Qt's default QValidator.
 """
 import re
 from typing import Tuple, Optional
-from PyQt5.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox
+from PyQt5.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox, QAbstractScrollArea
 from PyQt5.QtCore import Qt, QEvent, QTimer
 from PyQt5.QtGui import QValidator, QKeyEvent
 
@@ -27,6 +27,9 @@ class CustomSpinBox(QSpinBox):
             if event.type() == QEvent.KeyPress:
                 if self._handle_key_input(event):
                     return True
+            elif event.type() == QEvent.Wheel:
+                forward_wheel_event_to_scroll_area(self, event)
+                return True
             elif event.type() == QEvent.FocusIn:
                 if self.specialValueText() and self.value() == self.minimum():
                     QTimer.singleShot(0, self.lineEdit().selectAll)
@@ -139,33 +142,72 @@ class CustomSpinBox(QSpinBox):
         return str(val)
 
     def wheelEvent(self, event):
-        """Ignore mouse wheel events so parent scroll areas can scroll without modifying value."""
-        event.ignore()
+        """Forward mouse wheel events so parent scroll areas can scroll without modifying value."""
+        forward_wheel_event_to_scroll_area(self, event)
+
+
+def forward_wheel_event_to_scroll_area(widget, event):
+    """
+    Forwards mouse wheel events up to the nearest ancestor QAbstractScrollArea
+    so that scrolling down/up scrolls the page/view instead of modifying the widget's value.
+    """
+    p = widget.parent()
+    while p:
+        if isinstance(p, QAbstractScrollArea):
+            p.wheelEvent(event)
+            return
+        p = p.parent()
+    event.ignore()
 
 
 class NoWheelComboBox(QComboBox):
     """
-    QComboBox that ignores mouse wheel events.
+    QComboBox that ignores mouse wheel events and forwards them to parent scroll areas.
     Prevents unintentional option changes when scrolling parent scroll areas.
     """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.StrongFocus)
+        le = self.lineEdit()
+        if le:
+            le.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if obj == self.lineEdit() and event.type() == QEvent.Wheel:
+            forward_wheel_event_to_scroll_area(self, event)
+            return True
+        return super().eventFilter(obj, event)
+
     def wheelEvent(self, event):
-        event.ignore()
+        forward_wheel_event_to_scroll_area(self, event)
 
 
 class NoWheelSpinBox(CustomSpinBox):
     """
-    Enhanced QSpinBox that ignores mouse wheel events.
+    Enhanced QSpinBox that ignores mouse wheel events and forwards to parent scroll area.
     """
     def wheelEvent(self, event):
-        event.ignore()
+        forward_wheel_event_to_scroll_area(self, event)
 
 
 class NoWheelDoubleSpinBox(QDoubleSpinBox):
     """
-    QDoubleSpinBox that ignores mouse wheel events.
+    QDoubleSpinBox that ignores mouse wheel events and forwards to parent scroll area.
     """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        le = self.lineEdit()
+        if le:
+            le.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if obj == self.lineEdit() and event.type() == QEvent.Wheel:
+            forward_wheel_event_to_scroll_area(self, event)
+            return True
+        return super().eventFilter(obj, event)
+
     def wheelEvent(self, event):
-        event.ignore()
+        forward_wheel_event_to_scroll_area(self, event)
 
 
 # Alias for convenience

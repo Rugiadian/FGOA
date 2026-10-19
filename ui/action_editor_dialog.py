@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from core.models import Action
 from core.input_controller import InputController
+from ui.custom_spinbox import NoWheelComboBox, NoWheelSpinBox, NoWheelDoubleSpinBox
 
 
 class SingleActionDialog(QDialog):
@@ -104,19 +105,19 @@ class SingleActionDialog(QDialog):
         # 1. Mouse Click fields
         self.grp_click = QGroupBox("마우스 클릭 설정")
         l_click = QFormLayout(self.grp_click)
-        self.combo_btn = QComboBox()
+        self.combo_btn = NoWheelComboBox()
         self.combo_btn.addItems(["좌클릭 (Left)", "우클릭 (Right)", "휠클릭 (Middle)"])
         self.combo_btn.setCurrentIndex({"left": 0, "right": 1, "middle": 2}.get(self.action.mouse_button, 0))
 
-        self.combo_click_type = QComboBox()
+        self.combo_click_type = NoWheelComboBox()
         self.combo_click_type.addItems(["단일 클릭 (Single)", "더블 클릭 (Double)"])
         self.combo_click_type.setCurrentIndex(1 if self.action.click_type == "double" else 0)
 
         coord_layout = QHBoxLayout()
-        self.spin_x = QSpinBox()
+        self.spin_x = NoWheelSpinBox()
         self.spin_x.setRange(-9999, 9999)
         self.spin_x.setValue(self.action.x)
-        self.spin_y = QSpinBox()
+        self.spin_y = NoWheelSpinBox()
         self.spin_y.setRange(-9999, 9999)
         self.spin_y.setValue(self.action.y)
         coord_layout.addWidget(QLabel("X:"))
@@ -129,7 +130,7 @@ class SingleActionDialog(QDialog):
         btn_pick_click.clicked.connect(lambda: self._on_pick_coordinates_from_image(drag_mode=False))
         coord_layout.addWidget(btn_pick_click)
 
-        self.spin_repeat = QSpinBox()
+        self.spin_repeat = NoWheelSpinBox()
         self.spin_repeat.setRange(1, 100)
         self.spin_repeat.setValue(self.action.repeat_count)
 
@@ -142,10 +143,10 @@ class SingleActionDialog(QDialog):
         # 2. Mouse Drag fields
         self.grp_drag = QGroupBox("드래그 앤 드롭 설정")
         l_drag = QFormLayout(self.grp_drag)
-        self.spin_end_x = QSpinBox()
+        self.spin_end_x = NoWheelSpinBox()
         self.spin_end_x.setRange(-9999, 9999)
         self.spin_end_x.setValue(self.action.end_x)
-        self.spin_end_y = QSpinBox()
+        self.spin_end_y = NoWheelSpinBox()
         self.spin_end_y.setRange(-9999, 9999)
         self.spin_end_y.setValue(self.action.end_y)
         end_layout = QHBoxLayout()
@@ -159,7 +160,7 @@ class SingleActionDialog(QDialog):
         btn_pick_drag.clicked.connect(lambda: self._on_pick_coordinates_from_image(drag_mode=True))
         end_layout.addWidget(btn_pick_drag)
 
-        self.spin_drag_duration = QSpinBox()
+        self.spin_drag_duration = NoWheelSpinBox()
         self.spin_drag_duration.setRange(50, 10000)
         self.spin_drag_duration.setValue(self.action.drag_duration_ms)
         self.spin_drag_duration.setSuffix(" ms")
@@ -172,7 +173,7 @@ class SingleActionDialog(QDialog):
         self.grp_key = QGroupBox("키보드 입력 설정")
         l_key = QFormLayout(self.grp_key)
         self.txt_key = QLineEdit(self.action.key)
-        self.combo_modifiers = QComboBox()
+        self.combo_modifiers = NoWheelComboBox()
         self.combo_modifiers.addItems(["(없음)", "Ctrl", "Alt", "Shift", "Ctrl + Alt", "Ctrl + Shift"])
         if "Ctrl" in self.action.modifiers and "Alt" in self.action.modifiers:
             self.combo_modifiers.setCurrentIndex(4)
@@ -214,7 +215,7 @@ class SingleActionDialog(QDialog):
         btn_sub_05s.clicked.connect(lambda: self._adjust_delay(-0.5))
         delay_btn_layout.addWidget(btn_sub_05s)
 
-        self.spin_delay = QDoubleSpinBox()
+        self.spin_delay = NoWheelDoubleSpinBox()
         self.spin_delay.setRange(0.0, 3600.0)
         self.spin_delay.setSingleStep(0.1)
         self.spin_delay.setDecimals(2)
@@ -263,7 +264,7 @@ class SingleActionDialog(QDialog):
         # 8. Coordinate anti-ban options (for mouse_click & mouse_drag)
         self.grp_coord_antiban = QGroupBox("🎯 안티밴: 좌표 설정")
         l_cab = QFormLayout(self.grp_coord_antiban)
-        self.combo_coord_antiban = QComboBox()
+        self.combo_coord_antiban = NoWheelComboBox()
         self.combo_coord_antiban.addItem("오프셋 약 (기본값)", "weak")
         self.combo_coord_antiban.addItem("오프셋 강", "strong")
         self.combo_coord_antiban.addItem("해제 (좌표 고정)", "none")

@@ -22,6 +22,7 @@ from core.window_manager import WindowManager
 from core.path_utils import get_references_dir, to_relative_path, to_absolute_path
 from ui.coordinate_picker_dialog import CoordinatePickerDialog
 from ui.qt_image_utils import pil_to_qpixmap
+from ui.custom_spinbox import NoWheelComboBox
 
 
 REFS_DIR = get_references_dir()
@@ -76,7 +77,7 @@ class ReferenceGalleryDialog(QDialog):
         tb_layout.addSpacing(16)
 
         tb_layout.addWidget(QLabel("사용 구분:"))
-        self.combo_filter = QComboBox()
+        self.combo_filter = NoWheelComboBox()
         self.combo_filter.addItem("모든 이미지", "all")
         self.combo_filter.addItem("🟢 사용 중인 이미지만", "used")
         self.combo_filter.addItem("⚪ 미사용 이미지만", "unused")
@@ -86,7 +87,7 @@ class ReferenceGalleryDialog(QDialog):
         tb_layout.addSpacing(12)
 
         tb_layout.addWidget(QLabel("📐 해상도별 분류:"))
-        self.combo_resolution = QComboBox()
+        self.combo_resolution = NoWheelComboBox()
         self.combo_resolution.addItem("전체 해상도 보기", "all")
         self.combo_resolution.currentIndexChanged.connect(self._apply_filter)
         tb_layout.addWidget(self.combo_resolution)
@@ -191,6 +192,16 @@ class ReferenceGalleryDialog(QDialog):
         main_layout.addWidget(splitter, 1)
 
     @classmethod
+    def _get_file_timestamp(cls, path: str) -> float:
+        try:
+            st = os.stat(path)
+            # On Windows, st_ctime is creation time, st_mtime is modification time.
+            # Taking max ensures newly created or imported/modified images appear first.
+            return max(getattr(st, "st_ctime", 0.0), getattr(st, "st_mtime", 0.0))
+        except Exception:
+            return 0.0
+
+    @classmethod
     def get_all_gallery_entries(cls, project: Project) -> List[Dict[str, Any]]:
         """Collect all reference images and compute usage across scenarios and modules."""
         paths = set()
@@ -231,8 +242,15 @@ class ReferenceGalleryDialog(QDialog):
                     paths.add(os.path.normpath(abs_p))
 
         entries = []
-        for p in sorted(paths):
+        # Sort paths by creation/modification timestamp descending (최근 생성 순)
+        sorted_paths = sorted(
+            paths,
+            key=lambda p: (cls._get_file_timestamp(p), os.path.basename(p)),
+            reverse=True
+        )
+        for p in sorted_paths:
             usages = cls.compute_image_usages(p, project)
+            ts = cls._get_file_timestamp(p)
             try:
                 stat = os.stat(p)
                 size_kb = stat.st_size / 1024
@@ -249,7 +267,8 @@ class ReferenceGalleryDialog(QDialog):
                 "height": h,
                 "size_kb": size_kb,
                 "usages": usages,
-                "is_used": len(usages) > 0
+                "is_used": len(usages) > 0,
+                "timestamp": ts,
             })
         return entries
 
@@ -423,13 +442,25 @@ class ReferenceGalleryDialog(QDialog):
                 f"[{entry['width']}×{entry['height']}] {entry['filename']}\n{status_tag} | {entry['size_kb']:.1f} KB"
             )
             item.setData(Qt.UserRole, entry)
-            item.setToolTip(
-                f"파일명: {entry['filename']}\n"
-                f"디바이스 해상도: {entry['width']}×{entry['height']}\n"
-                f"용량: {entry['size_kb']:.1f} KB\n"
-                f"사용 현황: {'사용 중 (' + str(len(entry['usages'])) + '곳)' if entry['is_used'] else '미사용'}\n"
+
+            ts = entry.get("timestamp", 0)
+            date_str = ""
+            if ts:
+                import datetime
+                date_str = datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+            tooltip_lines = [
+                f"파일명: {entry['filename']}",
+                f"디바이스 해상도: {entry['width']}×{entry['height']}",
+                f"용량: {entry['size_kb']:.1f} KB",
+            ]
+            if date_str:
+                tooltip_lines.append(f"생성 일시: {date_str}")
+            tooltip_lines.extend([
+                f"사용 현황: {'사용 중 (' + str(len(entry['usages'])) + '곳)' if entry['is_used'] else '미사용'}",
                 f"경로: {entry['path']}"
-            )
+            ])
+            item.setToolTip("\n".join(tooltip_lines))
 
             # Thumbnail Icon
             try:

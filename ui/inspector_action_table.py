@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QMimeData
 from PyQt5.QtGui import QDrag
+from ui.custom_spinbox import NoWheelComboBox, NoWheelDoubleSpinBox
 
 
 class DraggableActionsTableWidget(QTableWidget):
@@ -101,7 +102,7 @@ class ActionColumnDelegate(QStyledItemDelegate):
 
         if col == 3:  # 오프셋
             if act.action_type in ("mouse_click", "mouse_drag"):
-                combo = QComboBox(parent)
+                combo = NoWheelComboBox(parent)
                 combo.addItem("약", "weak")
                 combo.addItem("강", "strong")
                 combo.addItem("해제", "none")
@@ -110,7 +111,7 @@ class ActionColumnDelegate(QStyledItemDelegate):
             return None  # 비마우스 액션은 편집 불가
 
         elif col == 4:  # 대기 시간: 화살표 숨김 (NoButtons)
-            spin = QDoubleSpinBox(parent)
+            spin = NoWheelDoubleSpinBox(parent)
             spin.setRange(0.0, 3600.0)
             spin.setDecimals(1)
             spin.setSingleStep(0.1)

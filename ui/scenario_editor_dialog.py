@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
 from core.models import Scenario, Project
 from ui.condition_editor_dialog import ConditionEditorDialog
 from ui.action_editor_dialog import ActionEditorDialog
+from ui.custom_spinbox import NoWheelComboBox, NoWheelSpinBox, NoWheelDoubleSpinBox
 
 
 class ScenarioEditorDialog(QDialog):
@@ -55,27 +56,27 @@ class ScenarioEditorDialog(QDialog):
         l_branch = QFormLayout(grp_branch)
 
         # On Match
-        self.combo_on_match = QComboBox()
+        self.combo_on_match = NoWheelComboBox()
         self.combo_on_match.addItem("액션 실행 후 다음 단계 (Execute)", "execute")
         self.combo_on_match.addItem("다른 시나리오로 점프 (Jump)", "jump")
         self.combo_on_match.addItem("실행 정지 (Stop)", "stop")
         self.combo_on_match.currentIndexChanged.connect(self._on_branch_mode_changed)
 
-        self.combo_target_match = QComboBox()
+        self.combo_target_match = NoWheelComboBox()
         self._populate_scenario_targets(self.combo_target_match)
 
         l_branch.addRow("조건 일치 시:", self.combo_on_match)
         self.row_target_match = l_branch.addRow("일치 점프 대상:", self.combo_target_match)
 
         # On Mismatch
-        self.combo_on_mismatch = QComboBox()
+        self.combo_on_mismatch = NoWheelComboBox()
         self.combo_on_mismatch.addItem("다음 시나리오로 진행 (Next)", "next")
         self.combo_on_mismatch.addItem("다른 시나리오로 점프 (Jump)", "jump")
         self.combo_on_mismatch.addItem("실행 정지 (Stop)", "stop")
         self.combo_on_mismatch.addItem("대기 후 조건 재시도 (Retry)", "retry")
         self.combo_on_mismatch.currentIndexChanged.connect(self._on_branch_mode_changed)
 
-        self.combo_target_mismatch = QComboBox()
+        self.combo_target_mismatch = NoWheelComboBox()
         self._populate_scenario_targets(self.combo_target_mismatch)
 
         l_branch.addRow("조건 불일치 시:", self.combo_on_mismatch)
@@ -83,9 +84,9 @@ class ScenarioEditorDialog(QDialog):
 
         # Retry settings
         retry_box = QHBoxLayout()
-        self.spin_retries = QSpinBox()
+        self.spin_retries = NoWheelSpinBox()
         self.spin_retries.setRange(1, 100)
-        self.spin_retry_sec = QDoubleSpinBox()
+        self.spin_retry_sec = NoWheelDoubleSpinBox()
         self.spin_retry_sec.setRange(0.1, 60.0)
         self.spin_retry_sec.setSingleStep(0.5)
         self.spin_retry_sec.setSuffix(" 초")
