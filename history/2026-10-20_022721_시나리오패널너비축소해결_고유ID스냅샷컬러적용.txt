@@ -1,0 +1,21 @@
+[2026-10-20 02:27:21 작업 요약]
+작업 내용:
+1. 시나리오 패널 너비를 늘렸을 때 잠시 후 자동으로 강제 축소(협소화)되던 현상 해결
+   - 근본 원인:
+     - `InspectorWidget.condition_panel` 및 `action_panel` 내부 위젯(노드 타입 행의 수평 컨트롤 나열, 헤더 카드의 위치 등)으로 인해 `minimumSizeHint()`가 788px에 달하여, 전체 윈도우 너비(1420px)에서 시나리오 패널(280px)을 늘릴 때 QMainWindow의 Dock 레이아웃 엔진이 최소 크기를 초과하여 시나리오 도크를 강제로 밀어내며 축소시키던 문제였습니다.
+   - 조치 사항:
+     - `ResponsiveDockPanel(QWidget)`을 작성하여 도크 패널의 `minimumSizeHint()`를 폭 200px 수준으로 유연하게 축소 허용.
+     - `condition_panel`의 `header_card`를 `upper_scroll` 스크롤 영역 내부로 포함시켜 화면 폭이 좁아져도 스크롤 가능하게 개선.
+     - `node_row`의 `loop_container`와 `lbl_loop_end_info`를 독립적인 행으로 분리하여 수평 고정 최소 너비를 대폭 절감.
+     - `dock_inspector` 및 `dock_actions`에 `setMinimumWidth(200)` 명시.
+
+2. 시나리오 노드 셀 색상 적용 확장 (스냅샷 빈 칸 및 고유 ID 컬럼)
+   - 조치 사항:
+     - `_update_table_row`에서 `row_bg`를 통합 산출 (커스텀 색상 > 폴더/루프 색상 > 하위 자식 틴트 색상).
+     - Column 0 (스냅샷): 레퍼런스 이미지가 없는 빈 칸(`it_empty`) 및 이미지가 표시되는 박스 위젯(`box`)에 동일하게 `row_bg` 적용.
+     - Column 1 (고유 ID): `it_uid.setBackground(row_bg)`를 일괄 적용하여 시나리오 식별 번호 칸까지 끊김 없이 일체감 있는 배경색 구현.
+     - Column 2 (체크박스) 및 Column 3~6까지 모든 컬럼에 `row_bg` 일관 적용.
+     - 우클릭 컨텍스트 메뉴에서 일반 시나리오 노드에도 `🎨 시나리오 색상 변경` 메뉴를 제공하여 직관적으로 색상 선택 가능.
+
+3. 검증 결과:
+   - `tests/test_scenario_hierarchy_and_custom_colors.py`에 도크 최소 크기 및 Col 0, 1 배경색 검증 테스트 추가 (7개 테스트 전체 통과).

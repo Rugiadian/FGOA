@@ -108,11 +108,12 @@ class TestStopPauseResumeAndBurnIn(unittest.TestCase):
         self.assertEqual(v_header.paused_row, -1)
 
     def test_anti_burn_in_overlay_black_white_rainbow_stages(self):
-        """Verify AntiBurnInOverlay transitions: Black -> White -> Rainbow -> Normal."""
-        parent_widget = QApplication.activeWindow() or tbl_dummy if 'tbl_dummy' in dir() else DraggableScenarioTableWidget()
+        """Verify AntiBurnInOverlay transitions: Stage 1 (Fade-in Black) -> Stage 2 (Hold Black) -> Stage 3 (Fade-out)."""
+        parent_widget = QApplication.activeWindow() or (tbl_dummy if 'tbl_dummy' in dir() else DraggableScenarioTableWidget())
         parent_widget.resize(800, 600)
         overlay = AntiBurnInOverlay(parent_widget)
         overlay.resize(800, 600)
+        overlay.set_hold_minutes(0.0)
 
         overlay.start_transition()
         self.assertEqual(overlay._stage, 1)
@@ -120,46 +121,26 @@ class TestStopPauseResumeAndBurnIn(unittest.TestCase):
         self.assertEqual(overlay._color.green(), 0)
         self.assertEqual(overlay._color.blue(), 0)
 
-        # Step until stage 2 (hold black)
-        for _ in range(40):
+        # Step until stage 2 (hold black: 255 / 6 = 43 steps)
+        for _ in range(50):
             if overlay._stage >= 2:
                 break
             overlay._on_anim_step()
         self.assertGreaterEqual(overlay._stage, 2)
+        self.assertEqual(overlay._alpha, 255)
 
-        # Step until stage 3 (lerp black to white)
-        for _ in range(15):
-            if overlay._stage >= 3:
-                break
-            overlay._on_anim_step()
+        # Step until stage 3 (hold 0 min expires immediately to stage 3)
+        overlay._on_anim_step()
         self.assertGreaterEqual(overlay._stage, 3)
 
-        # Step until stage 4 (white)
-        for _ in range(30):
-            if overlay._stage >= 4:
-                break
-            overlay._on_anim_step()
-        self.assertGreaterEqual(overlay._stage, 4)
-        if overlay._stage == 4:
-            self.assertEqual(overlay._color.red(), 255)
-            self.assertEqual(overlay._color.green(), 255)
-            self.assertEqual(overlay._color.blue(), 255)
-
-        # Step until stage 5 (rainbow mode)
-        for _ in range(20):
-            if overlay._stage >= 5:
-                break
-            overlay._on_anim_step()
-        self.assertGreaterEqual(overlay._stage, 5)
-
-        # Verify paintEvent in rainbow stage without exception
+        # Verify paintEvent in stage without exception
         pix = QPixmap(800, 600)
         painter = QPainter(pix)
         overlay.paintEvent(None)
         painter.end()
 
         # Step until transition ends (stage 0)
-        for _ in range(120):
+        for _ in range(60):
             if overlay._stage == 0:
                 break
             overlay._on_anim_step()

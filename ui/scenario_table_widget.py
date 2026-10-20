@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
     QTableWidget, QHeaderView, QAbstractItemView, QApplication,
     QStyledItemDelegate, QStyleOptionViewItem, QStyle, QMenu, QAction
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QMimeData
+from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QRect, QSize
 from PyQt5.QtGui import QColor, QDrag, QPainter
 
 
@@ -83,7 +83,12 @@ class ScenarioVerticalHeader(QHeaderView):
 
 
 class ScenarioItemDelegate(QStyledItemDelegate):
-    """Custom item delegate to maintain visible disabled gray text even when a row is selected."""
+    """
+    Custom item delegate supporting:
+    - Visible disabled gray text even when row is selected.
+    - Reddit comment-style vertical threadlines and cell indentation for COL_NAME.
+    """
+    INDENT_STEP = 18
 
     def __init__(self, table):
         super().__init__(table)
@@ -96,6 +101,46 @@ class ScenarioItemDelegate(QStyledItemDelegate):
         style = widget.style() if widget else QApplication.style()
 
         is_disabled = index.data(Qt.UserRole + 99)
+        depth = index.data(Qt.UserRole + 100) or 0
+        thread_colors = index.data(Qt.UserRole + 101) or []
+
+        # Reddit comment-style indentation & threadlines for scenario hierarchy column
+        if index.column() == COL_NAME and depth > 0:
+            painter.save()
+            theme = getattr(self.table, "current_theme", "light")
+
+            # 1. Fill base row background / selection over entire cell width
+            if opt.state & QStyle.State_Selected:
+                painter.fillRect(option.rect, opt.palette.highlight())
+            elif opt.backgroundBrush.style() != Qt.NoBrush:
+                painter.fillRect(option.rect, opt.backgroundBrush)
+
+            # 2. Draw vertical Reddit-style threadlines down each nesting depth level
+            for d in range(depth):
+                lx = option.rect.left() + d * self.INDENT_STEP + 8
+                line_rect = QRect(lx, option.rect.top(), 2, option.rect.height())
+                if d < len(thread_colors) and thread_colors[d]:
+                    line_col = QColor(thread_colors[d])
+                else:
+                    line_col = QColor("#cbd5e1" if theme == "light" else "#475569")
+                painter.fillRect(line_rect, line_col)
+
+            # 3. Draw scenario name text with indent
+            text_rect = option.rect.adjusted(depth * self.INDENT_STEP + 8, 0, -4, 0)
+            painter.setFont(opt.font)
+            if is_disabled and (opt.state & QStyle.State_Selected):
+                pen_color = QColor("#64748b" if theme == "light" else "#94a3b8")
+            elif opt.state & QStyle.State_Selected:
+                pen_color = opt.palette.highlightedText().color()
+            else:
+                fg = index.data(Qt.ForegroundRole)
+                pen_color = QColor(fg) if fg else opt.palette.text().color()
+
+            painter.setPen(pen_color)
+            painter.drawText(text_rect, int(opt.displayAlignment | Qt.AlignVCenter), opt.text)
+            painter.restore()
+            return
+
         if is_disabled and (opt.state & QStyle.State_Selected):
             # 1. Draw base selection background without text
             text = opt.text
@@ -117,6 +162,14 @@ class ScenarioItemDelegate(QStyledItemDelegate):
             painter.restore()
         else:
             super().paint(painter, option, index)
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        if index.column() == COL_NAME:
+            depth = index.data(Qt.UserRole + 100) or 0
+            if depth > 0:
+                return QSize(size.width() + depth * self.INDENT_STEP, size.height())
+        return size
 
 
 class DraggableScenarioTableWidget(QTableWidget):

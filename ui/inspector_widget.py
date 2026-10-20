@@ -18,9 +18,10 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
     QScrollArea, QFrame, QMessageBox, QStackedWidget, QSplitter,
     QMenu, QApplication, QShortcut, QAbstractItemView,
-    QStyledItemDelegate, QAbstractSpinBox, QInputDialog, QSizePolicy, QDialog
+    QStyledItemDelegate, QAbstractSpinBox, QInputDialog, QSizePolicy, QDialog,
+    QColorDialog, QStyle
 )
-from PyQt5.QtGui import QColor, QFont, QPixmap, QKeySequence, QDrag, QCursor
+from PyQt5.QtGui import QColor, QFont, QPixmap, QKeySequence, QDrag, QCursor, QIcon
 from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QSize
 
 from core.models import Scenario, Project, Condition, ColorPoint, Action, ActionSequence
@@ -36,6 +37,19 @@ from ui.action_editor_dialog import SingleActionDialog
 from ui.inspector_action_table import DraggableActionsTableWidget, ActionColumnDelegate
 from ui.clickable_thumbnail import ClickableThumbnailLabel
 from ui.custom_spinbox import NoWheelComboBox, NoWheelSpinBox, NoWheelDoubleSpinBox
+from ui.widgets.flow_layout import FlowLayout
+
+
+class ResponsiveDockPanel(QWidget):
+    """
+    Panel wrapper with bounded minimumSizeHint (width ~200px) so docks
+    can be flexibly resized by the user without locking out other panels.
+    """
+    def minimumSizeHint(self):
+        return QSize(200, 100)
+
+    def sizeHint(self):
+        return QSize(350, 400)
 
 
 class InspectorWidget(QWidget):
@@ -90,7 +104,7 @@ class InspectorWidget(QWidget):
         # ==========================================
         # 0. Condition & Branching Panel (Eye & Brain)
         # ==========================================
-        self.condition_panel = QWidget()
+        self.condition_panel = ResponsiveDockPanel()
         self.condition_panel.setObjectName("condition_panel")
         cp_layout = QVBoxLayout(self.condition_panel)
         cp_layout.setContentsMargins(0, 0, 0, 0)
@@ -158,14 +172,12 @@ class InspectorWidget(QWidget):
 
         self.lbl_inspector_status = QLabel("시나리오 설정")
         self.lbl_inspector_status.setStyleSheet("color: #64748b; font-size: 8.5pt;")
+        self.lbl_inspector_status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.lbl_inspector_status.setMinimumWidth(0)
         ph_layout.addWidget(self.lbl_inspector_status)
         cc_layout.addWidget(self.pane_header)
 
-        # 1.1 Header Card (Compact: 실행 순서, 고유 번호, 활성, 이름)
-        self.header_card = self._create_header_card()
-        cc_layout.addWidget(self.header_card)
-
-        # Condition & Branch cards in scroll area
+        # Condition, Header, & Branch cards in scroll area
         upper_scroll = QScrollArea()
         upper_scroll.setWidgetResizable(True)
         upper_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -174,11 +186,18 @@ class InspectorWidget(QWidget):
         upper_layout.setContentsMargins(4, 4, 4, 4)
         upper_layout.setSpacing(6)
 
+        # 1.1 Header Card (Compact: 실행 순서, 고유 번호, 활성, 이름) inside scroll area
+        self.header_card = self._create_header_card()
+        upper_layout.addWidget(self.header_card, 0)
+
         self.condition_card = self._create_condition_card()
-        upper_layout.addWidget(self.condition_card, 1)
+        upper_layout.addWidget(self.condition_card, 0)
 
         self.branch_card = self._create_branch_card()
         upper_layout.addWidget(self.branch_card, 0)
+
+        # Flexible bottom spacer so header card and name input don't stretch vertically when condition/branch cards are hidden (e.g. folder nodes)
+        upper_layout.addStretch(1)
 
         upper_scroll.setWidget(upper_container)
         cc_layout.addWidget(upper_scroll, 1)
@@ -189,7 +208,7 @@ class InspectorWidget(QWidget):
         # ==========================================
         # 1. Action Sequence Panel (Hand)
         # ==========================================
-        self.action_panel = QWidget()
+        self.action_panel = ResponsiveDockPanel()
         self.action_panel.setObjectName("action_panel")
         ap_layout = QVBoxLayout(self.action_panel)
         ap_layout.setContentsMargins(0, 0, 0, 0)
@@ -219,6 +238,8 @@ class InspectorWidget(QWidget):
 
         self.lbl_action_status = QLabel("")
         self.lbl_action_status.setStyleSheet("color: #64748b; font-size: 8.5pt;")
+        self.lbl_action_status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.lbl_action_status.setMinimumWidth(0)
         aph_layout.addWidget(self.lbl_action_status)
 
         aph_layout.addStretch()
@@ -327,6 +348,7 @@ class InspectorWidget(QWidget):
     def _create_header_card(self) -> QFrame:
         card = QFrame()
         card.setObjectName("inspector_card")
+        card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         main_card_layout = QHBoxLayout(card)
         main_card_layout.setContentsMargins(6, 6, 6, 6)
         main_card_layout.setSpacing(8)
@@ -384,12 +406,14 @@ class InspectorWidget(QWidget):
         name_row.addWidget(lbl_n)
         self.txt_name = QLineEdit()
         self.txt_name.setPlaceholderText("시나리오 설명 또는 목적 입력...")
+        self.txt_name.setMaximumHeight(28)
+        self.txt_name.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.txt_name.textChanged.connect(self._on_field_changed)
         self.txt_name.returnPressed.connect(self._on_save_inspector)
         name_row.addWidget(self.txt_name, 1)
         info_layout.addLayout(name_row)
 
-        # Node Type & Loop Control Row
+        # Node Type & Color Row
         node_row = QHBoxLayout()
         node_row.setSpacing(6)
         lbl_nt = QLabel("노드 유형:")
@@ -405,7 +429,16 @@ class InspectorWidget(QWidget):
         self.combo_node_type.currentIndexChanged.connect(self._on_node_type_changed)
         node_row.addWidget(self.combo_node_type)
 
-        # Loop Controls Sub-widget
+        # Color Button for all scenarios and blocks
+        self.btn_block_color = QPushButton("🎨 색상 설정")
+        self.btn_block_color.setToolTip("시나리오 노드 또는 폴더/루프 블록의 색상을 변경합니다.")
+        self.btn_block_color.clicked.connect(self._on_choose_block_color)
+        node_row.addWidget(self.btn_block_color)
+
+        node_row.addStretch()
+        info_layout.addLayout(node_row)
+
+        # Loop Controls Sub-widget (Dedicated row, visible only for loop_start)
         self.loop_container = QWidget()
         l_sub = QHBoxLayout(self.loop_container)
         l_sub.setContentsMargins(0, 0, 0, 0)
@@ -428,16 +461,14 @@ class InspectorWidget(QWidget):
         self.spin_loop_cnt.setSuffix(" 회")
         self.spin_loop_cnt.valueChanged.connect(self._on_field_changed)
         l_sub.addWidget(self.spin_loop_cnt)
-
-        node_row.addWidget(self.loop_container)
+        l_sub.addStretch()
+        self.loop_container.setVisible(False)
+        info_layout.addWidget(self.loop_container)
 
         self.lbl_loop_end_info = QLabel("🔁 대응되는 루프 시작점으로 복귀하여 다음 회차를 실행합니다.")
         self.lbl_loop_end_info.setStyleSheet("color: #7c3aed; font-weight: bold; font-size: 8.5pt;")
         self.lbl_loop_end_info.setVisible(False)
-        node_row.addWidget(self.lbl_loop_end_info)
-
-        node_row.addStretch()
-        info_layout.addLayout(node_row)
+        info_layout.addWidget(self.lbl_loop_end_info)
         main_card_layout.addLayout(info_layout, 1)
 
         # Right Column: Scenario Node Reference Snapshot Display
@@ -474,63 +505,75 @@ class InspectorWidget(QWidget):
         layout.setSpacing(4)
 
         # Condition Module Selection / Link Bar (인식조건 모듈화 연결)
-        cond_bar = QHBoxLayout()
-        cond_bar.setSpacing(4)
+        cond_combo_row = QHBoxLayout()
+        cond_combo_row.setSpacing(4)
         lbl_cond = QLabel("🔗 연결 조건:")
         lbl_cond.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
-        cond_bar.addWidget(lbl_cond)
+        cond_combo_row.addWidget(lbl_cond)
 
         self.combo_condition = NoWheelComboBox()
+        self.combo_condition.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.combo_condition.setMinimumContentsLength(8)
         self.combo_condition.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.combo_condition.setMinimumWidth(80)
         self.combo_condition.currentIndexChanged.connect(self._on_condition_combo_changed)
-        cond_bar.addWidget(self.combo_condition, 1)
+        cond_combo_row.addWidget(self.combo_condition, 1)
+        layout.addLayout(cond_combo_row)
+
+        # Condition Module Control Buttons (Responsive FlowLayout)
+        cond_btn_widget = QWidget()
+        cond_btn_flow = FlowLayout(cond_btn_widget, margin=0, spacing=4)
 
         self.btn_save_as_cond = QPushButton("💾 조건으로 등록...")
         self.btn_save_as_cond.setToolTip("현재 시나리오의 인식 조건을 재사용 가능한 '인식조건 모듈'로 등록하고 연결합니다.")
         self.btn_save_as_cond.clicked.connect(self._on_save_as_new_condition)
-        cond_bar.addWidget(self.btn_save_as_cond)
+        cond_btn_flow.addWidget(self.btn_save_as_cond)
 
         self.btn_unlink_cond = QPushButton("🔓 연결 해제")
         self.btn_unlink_cond.setToolTip("연결된 공용 인식조건 모듈을 해제하고 인스턴트 인식 조건으로 복제합니다.")
         self.btn_unlink_cond.clicked.connect(self._on_unlink_condition)
-        cond_bar.addWidget(self.btn_unlink_cond)
+        cond_btn_flow.addWidget(self.btn_unlink_cond)
 
         self.btn_manage_cond = QPushButton("⚙️ 모듈 관리...")
         self.btn_manage_cond.setToolTip("등록된 모듈(인식조건, 액션시퀀스) 관리 탭으로 이동")
         self.btn_manage_cond.clicked.connect(self._on_manage_conditions)
-        cond_bar.addWidget(self.btn_manage_cond)
+        cond_btn_flow.addWidget(self.btn_manage_cond)
 
-        layout.addLayout(cond_bar)
+        layout.addWidget(cond_btn_widget)
 
         self.lbl_cond_mod_status = QLabel("")
         self.lbl_cond_mod_status.setStyleSheet("color: #64748b; font-size: 8pt; padding: 1px 2px;")
         layout.addWidget(self.lbl_cond_mod_status)
 
-        # Top row: [v] 조건 감지 활성화 | 일치 규칙: [AND/OR] | [📋 조건 가져오기...]
-        top_row = QHBoxLayout()
-        top_row.setSpacing(6)
+        # Top row: [v] 조건 감지 활성화 | 일치 규칙: [AND/OR] | [📋 조건 가져오기...] (Responsive FlowLayout)
+        top_flow_widget = QWidget()
+        top_flow = FlowLayout(top_flow_widget, margin=0, spacing=6)
+
         self.chk_has_condition = QCheckBox("조건 감지 활성화")
         self.chk_has_condition.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
         self.chk_has_condition.setToolTip("체크 해제 시 조건 없이 무조건 액션을 실행합니다.")
         self.chk_has_condition.stateChanged.connect(self._on_has_condition_toggled)
-        top_row.addWidget(self.chk_has_condition)
+        top_flow.addWidget(self.chk_has_condition)
 
-        top_row.addStretch()
-
+        rule_box = QWidget()
+        rb_layout = QHBoxLayout(rule_box)
+        rb_layout.setContentsMargins(0, 0, 0, 0)
+        rb_layout.setSpacing(4)
         lbl_rule = QLabel("일치 규칙:")
         lbl_rule.setStyleSheet("font-size: 8.5pt;")
-        top_row.addWidget(lbl_rule)
+        rb_layout.addWidget(lbl_rule)
 
         self.combo_cond_logic = NoWheelComboBox()
         self.combo_cond_logic.addItem("모든 포인트 일치 (AND)", "AND")
         self.combo_cond_logic.addItem("하나라도 일치 (OR)", "OR")
         self.combo_cond_logic.currentIndexChanged.connect(self._on_field_changed)
-        top_row.addWidget(self.combo_cond_logic)
+        rb_layout.addWidget(self.combo_cond_logic)
+        top_flow.addWidget(rule_box)
 
         self.btn_copy_cond = QPushButton("📋 조건 가져오기...")
         self.btn_copy_cond.setToolTip("다른 시나리오의 색상 인식 조건을 복사해와서 조합합니다.")
         self.btn_copy_cond.clicked.connect(self._on_copy_condition_from_other)
-        top_row.addWidget(self.btn_copy_cond)
+        top_flow.addWidget(self.btn_copy_cond)
 
         # 50px Reference Thumbnail for Condition (Eye)
         self.lbl_thumb_cond = ClickableThumbnailLabel(
@@ -539,9 +582,9 @@ class InspectorWidget(QWidget):
         )
         self.lbl_thumb_cond.clicked.connect(self._on_open_canvas_editor)
         self.lbl_thumb_cond.hide()
-        top_row.addWidget(self.lbl_thumb_cond)
+        top_flow.addWidget(self.lbl_thumb_cond)
 
-        layout.addLayout(top_row)
+        layout.addWidget(top_flow_widget)
 
         # Points Table
         self.tbl_points = QTableWidget()
@@ -563,30 +606,29 @@ class InspectorWidget(QWidget):
         self.tbl_points.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.tbl_points, 1)
 
-        # Points Action Buttons Row
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(4)
+        # Points Action Buttons (Responsive FlowLayout with wrapping)
+        btn_flow_widget = QWidget()
+        btn_flow_layout = FlowLayout(btn_flow_widget, margin=0, spacing=4)
         btn_open_canvas = QPushButton("🎯 이미지에서 좌표 지정")
         btn_open_canvas.setObjectName("btn_primary")
         btn_open_canvas.setToolTip("레퍼런스 이미지 또는 게임 화면을 열어 색상 인식 포인트 좌표를 시각적으로 지정합니다.")
         btn_open_canvas.clicked.connect(self._on_open_canvas_editor)
-        btn_row.addWidget(btn_open_canvas)
+        btn_flow_layout.addWidget(btn_open_canvas)
 
         btn_add_pt = QPushButton("➕ 포인트 추가")
         btn_add_pt.clicked.connect(self._on_add_point)
-        btn_row.addWidget(btn_add_pt)
+        btn_flow_layout.addWidget(btn_add_pt)
 
         btn_del_pt = QPushButton("🗑️ 선택 삭제")
         btn_del_pt.clicked.connect(self._on_delete_point)
-        btn_row.addWidget(btn_del_pt)
+        btn_flow_layout.addWidget(btn_del_pt)
 
         btn_test_cond = QPushButton("⚡ 판정 테스트")
         btn_test_cond.setStyleSheet("color: #16a34a; font-weight: bold;")
         btn_test_cond.clicked.connect(self._on_test_condition_now)
-        btn_row.addWidget(btn_test_cond)
+        btn_flow_layout.addWidget(btn_test_cond)
 
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
+        layout.addWidget(btn_flow_widget)
 
         # Live Test Result Label
         self.lbl_cond_test_result = QLabel("")
@@ -610,7 +652,7 @@ class InspectorWidget(QWidget):
         m_layout.setSpacing(6)
         lbl_match = QLabel("만약 [조건 일치] ➔")
         lbl_match.setStyleSheet("color: #16a34a; font-weight: bold; font-size: 8.5pt;")
-        lbl_match.setFixedWidth(120)
+        lbl_match.setMinimumWidth(80)
         m_layout.addWidget(lbl_match)
 
         self.combo_on_match = NoWheelComboBox()
@@ -630,7 +672,7 @@ class InspectorWidget(QWidget):
         mm_layout.setSpacing(6)
         lbl_mismatch = QLabel("만약 [조건 불일치] ➔")
         lbl_mismatch.setStyleSheet("color: #dc2626; font-weight: bold; font-size: 8.5pt;")
-        lbl_mismatch.setFixedWidth(120)
+        lbl_mismatch.setMinimumWidth(80)
         mm_layout.addWidget(lbl_mismatch)
 
         self.combo_on_mismatch = NoWheelComboBox()
@@ -654,7 +696,7 @@ class InspectorWidget(QWidget):
 
         self.lbl_retry_fail = QLabel("재시도 모두 소진 시 ➔")
         self.lbl_retry_fail.setStyleSheet("color: #b91c1c; font-weight: bold; font-size: 8.5pt;")
-        self.lbl_retry_fail.setFixedWidth(135)
+        self.lbl_retry_fail.setMinimumWidth(90)
         rf_layout.addWidget(self.lbl_retry_fail)
 
         self.combo_retry_fail_action = NoWheelComboBox()
@@ -678,9 +720,10 @@ class InspectorWidget(QWidget):
 
         layout.addWidget(self.row_retry_fail)
 
-        # Retry & Post Delay options row
-        opt_layout = QHBoxLayout()
-        opt_layout.setSpacing(6)
+        # Retry & Post Delay options row (FlowLayout for responsive wrapping)
+        opt_widget = QWidget()
+        opt_flow = FlowLayout(opt_widget, margin=0, spacing=6)
+
         self.lbl_retry_cnt = QLabel("재시도:")
         self.lbl_retry_cnt.setStyleSheet("font-size: 8.5pt;")
         self.spin_retries = NoWheelSpinBox()
@@ -688,6 +731,14 @@ class InspectorWidget(QWidget):
         self.spin_retries.setValue(5)
         self.spin_retries.setSuffix(" 회")
         self.spin_retries.valueChanged.connect(self._on_field_changed)
+
+        box_retries = QWidget()
+        b_r_lay = QHBoxLayout(box_retries)
+        b_r_lay.setContentsMargins(0, 0, 0, 0)
+        b_r_lay.setSpacing(4)
+        b_r_lay.addWidget(self.lbl_retry_cnt)
+        b_r_lay.addWidget(self.spin_retries)
+        opt_flow.addWidget(box_retries)
 
         self.lbl_retry_sec = QLabel("간격:")
         self.lbl_retry_sec.setStyleSheet("font-size: 8.5pt;")
@@ -698,26 +749,32 @@ class InspectorWidget(QWidget):
         self.spin_retry_sec.setSuffix(" 초")
         self.spin_retry_sec.valueChanged.connect(self._on_field_changed)
 
-        opt_layout.addWidget(self.lbl_retry_cnt)
-        opt_layout.addWidget(self.spin_retries)
-        opt_layout.addWidget(self.lbl_retry_sec)
-        opt_layout.addWidget(self.spin_retry_sec)
-
-        opt_layout.addSpacing(10)
+        box_sec = QWidget()
+        b_s_lay = QHBoxLayout(box_sec)
+        b_s_lay.setContentsMargins(0, 0, 0, 0)
+        b_s_lay.setSpacing(4)
+        b_s_lay.addWidget(self.lbl_retry_sec)
+        b_s_lay.addWidget(self.spin_retry_sec)
+        opt_flow.addWidget(box_sec)
 
         lbl_delay = QLabel("완료 후 대기:")
         lbl_delay.setStyleSheet("font-size: 8.5pt;")
-        opt_layout.addWidget(lbl_delay)
         self.spin_post_delay = NoWheelDoubleSpinBox()
         self.spin_post_delay.setRange(0.0, 60.0)
         self.spin_post_delay.setValue(0.0)
         self.spin_post_delay.setSingleStep(0.5)
         self.spin_post_delay.setSuffix(" 초")
         self.spin_post_delay.valueChanged.connect(self._on_field_changed)
-        opt_layout.addWidget(self.spin_post_delay)
 
-        opt_layout.addStretch()
-        layout.addLayout(opt_layout)
+        box_delay = QWidget()
+        b_d_lay = QHBoxLayout(box_delay)
+        b_d_lay.setContentsMargins(0, 0, 0, 0)
+        b_d_lay.setSpacing(4)
+        b_d_lay.addWidget(lbl_delay)
+        b_d_lay.addWidget(self.spin_post_delay)
+        opt_flow.addWidget(box_delay)
+
+        layout.addWidget(opt_widget)
 
         return grp
 
@@ -730,79 +787,95 @@ class InspectorWidget(QWidget):
         layout.setContentsMargins(6, 10, 6, 6)
         layout.setSpacing(4)
 
-        # Sequence Selection / Link Bar (액션 시퀀스 모듈화 연결)
-        seq_bar = QHBoxLayout()
-        seq_bar.setSpacing(4)
+        # 1. Sequence Selection / Link Bar (액션 시퀀스 모듈화 연결)
+        seq_combo_row = QHBoxLayout()
+        seq_combo_row.setSpacing(4)
         lbl_seq = QLabel("🔗 연결 시퀀스:")
         lbl_seq.setStyleSheet("font-weight: bold; font-size: 8.5pt;")
-        seq_bar.addWidget(lbl_seq)
+        seq_combo_row.addWidget(lbl_seq)
 
         self.combo_sequence = NoWheelComboBox()
+        self.combo_sequence.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.combo_sequence.setMinimumContentsLength(8)
         self.combo_sequence.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.combo_sequence.setMinimumWidth(80)
         self.combo_sequence.currentIndexChanged.connect(self._on_sequence_combo_changed)
-        seq_bar.addWidget(self.combo_sequence, 1)
+        seq_combo_row.addWidget(self.combo_sequence, 1)
+        layout.addLayout(seq_combo_row)
+
+        # Sequence Module Control Buttons (Responsive FlowLayout)
+        seq_btn_widget = QWidget()
+        seq_btn_flow = FlowLayout(seq_btn_widget, margin=0, spacing=4)
 
         self.btn_new_seq = QPushButton("✨ 새로 만들기")
         self.btn_new_seq.setToolTip("새로운 빈 액션 시퀀스 모듈을 생성하여 연결합니다.")
         self.btn_new_seq.clicked.connect(self._on_new_sequence)
-        seq_bar.addWidget(self.btn_new_seq)
+        seq_btn_flow.addWidget(self.btn_new_seq)
 
         self.btn_clear_seq = QPushButton("🧹 클리어")
         self.btn_clear_seq.setToolTip("현재 액션 시퀀스의 모든 액션을 삭제(클리어)합니다.")
         self.btn_clear_seq.clicked.connect(self._on_clear_actions)
-        seq_bar.addWidget(self.btn_clear_seq)
+        seq_btn_flow.addWidget(self.btn_clear_seq)
 
         self.btn_save_as_seq = QPushButton("💾 시퀀스로 등록...")
         self.btn_save_as_seq.setToolTip("현재 시나리오의 액션 목록을 재사용 가능한 '액션 시퀀스 모듈'로 등록하고 연결합니다.")
         self.btn_save_as_seq.clicked.connect(self._on_save_as_new_sequence)
-        seq_bar.addWidget(self.btn_save_as_seq)
+        seq_btn_flow.addWidget(self.btn_save_as_seq)
 
         self.btn_unlink_seq = QPushButton("🔓 연결 해제")
         self.btn_unlink_seq.setToolTip("연결된 공용 시퀀스를 해제하고 인스턴트 액션 시퀀스로 복제합니다.")
         self.btn_unlink_seq.clicked.connect(self._on_unlink_sequence)
-        seq_bar.addWidget(self.btn_unlink_seq)
+        seq_btn_flow.addWidget(self.btn_unlink_seq)
 
         self.btn_manage_seq = QPushButton("⚙️ 모듈 관리...")
         self.btn_manage_seq.setToolTip("등록된 모듈(인식조건, 액션시퀀스) 관리 탭으로 이동")
         self.btn_manage_seq.clicked.connect(self._on_manage_conditions)
-        seq_bar.addWidget(self.btn_manage_seq)
+        seq_btn_flow.addWidget(self.btn_manage_seq)
 
-        layout.addLayout(seq_bar)
+        layout.addWidget(seq_btn_widget)
 
         self.lbl_seq_status = QLabel("")
         self.lbl_seq_status.setStyleSheet("color: #64748b; font-size: 8pt; padding: 1px 2px;")
         layout.addWidget(self.lbl_seq_status)
 
-        # Quick Add Buttons Bar + Copy from other scenario (2 Rows for neat layout)
-        # Row 1: Quick Add Buttons
-        add_bar_row1 = QHBoxLayout()
-        add_bar_row1.setSpacing(4)
+        # 2. Quick Add Buttons & Recording (Responsive FlowLayout)
+        add_bar_widget = QWidget()
+        add_bar_flow = FlowLayout(add_bar_widget, margin=0, spacing=4)
 
         btn_add_click = QPushButton("🖱️+클릭")
         btn_add_click.clicked.connect(lambda: self._on_quick_add_action("mouse_click"))
-        add_bar_row1.addWidget(btn_add_click)
+        add_bar_flow.addWidget(btn_add_click)
 
         btn_add_drag = QPushButton("↔️+드래그")
         btn_add_drag.clicked.connect(lambda: self._on_quick_add_action("mouse_drag"))
-        add_bar_row1.addWidget(btn_add_drag)
+        add_bar_flow.addWidget(btn_add_drag)
 
         btn_add_key = QPushButton("⌨️+키")
         btn_add_key.clicked.connect(lambda: self._on_quick_add_action("key_press"))
-        add_bar_row1.addWidget(btn_add_key)
+        add_bar_flow.addWidget(btn_add_key)
 
         btn_add_text = QPushButton("📝+텍스트")
         btn_add_text.clicked.connect(lambda: self._on_quick_add_action("text_type"))
-        add_bar_row1.addWidget(btn_add_text)
+        add_bar_flow.addWidget(btn_add_text)
 
         btn_add_delay = QPushButton("⏳+대기")
         btn_add_delay.clicked.connect(lambda: self._on_quick_add_action("delay"))
-        add_bar_row1.addWidget(btn_add_delay)
+        add_bar_flow.addWidget(btn_add_delay)
 
         btn_add_log = QPushButton("💬+로그")
         btn_add_log.clicked.connect(lambda: self._on_quick_add_action("log_message"))
-        add_bar_row1.addWidget(btn_add_log)
+        add_bar_flow.addWidget(btn_add_log)
 
-        add_bar_row1.addStretch()
+        btn_record = QPushButton("⏺️ 조작 녹화")
+        btn_record.setStyleSheet("color: #dc2626; font-weight: bold;")
+        btn_record.setToolTip("타겟 게임 창에서 직접 마우스 클릭 및 드래그를 조작하여 실시간으로 액션을 녹화합니다.")
+        btn_record.clicked.connect(self._on_start_operation_recording)
+        add_bar_flow.addWidget(btn_record)
+
+        self.btn_copy_act = QPushButton("📋 가져오기...")
+        self.btn_copy_act.setToolTip("다른 시나리오의 액션 시퀀스를 복사해와서 조합합니다.")
+        self.btn_copy_act.clicked.connect(self._on_copy_actions_from_other)
+        add_bar_flow.addWidget(self.btn_copy_act)
 
         # 50px Reference Thumbnail for Action (Hand)
         self.lbl_thumb_act = ClickableThumbnailLabel(
@@ -811,47 +884,30 @@ class InspectorWidget(QWidget):
         )
         self.lbl_thumb_act.clicked.connect(self._on_pick_coord_for_selected_action)
         self.lbl_thumb_act.hide()
-        add_bar_row1.addWidget(self.lbl_thumb_act)
+        add_bar_flow.addWidget(self.lbl_thumb_act)
 
-        layout.addLayout(add_bar_row1)
+        layout.addWidget(add_bar_widget)
 
-        # Row 2: Operation Recording & Sequence Copy
-        add_bar_row2 = QHBoxLayout()
-        add_bar_row2.setSpacing(4)
-
-        btn_record = QPushButton("⏺️ 조작 녹화")
-        btn_record.setStyleSheet("color: #dc2626; font-weight: bold;")
-        btn_record.setToolTip("타겟 게임 창에서 직접 마우스 클릭 및 드래그를 조작하여 실시간으로 액션을 녹화합니다.")
-        btn_record.clicked.connect(self._on_start_operation_recording)
-        add_bar_row2.addWidget(btn_record)
-
-        self.btn_copy_act = QPushButton("📋 가져오기...")
-        self.btn_copy_act.setToolTip("다른 시나리오의 액션 시퀀스를 복사해와서 조합합니다.")
-        self.btn_copy_act.clicked.connect(self._on_copy_actions_from_other)
-        add_bar_row2.addWidget(self.btn_copy_act)
-
-        add_bar_row2.addStretch()
-        layout.addLayout(add_bar_row2)
-
-        # Actions Table
+        # 3. Actions Table
         self.tbl_actions = DraggableActionsTableWidget()
         self.tbl_actions.setColumnCount(6)
         self.tbl_actions.setHorizontalHeaderLabels(["#", "액션 유형", "좌표 / 키 / 텍스트", "오프셋", "대기", "로그"])
         self.tbl_actions.setWordWrap(True)
         self.tbl_actions.sig_row_reordered.connect(self._on_action_row_reordered)
         hdr_act = self.tbl_actions.horizontalHeader()
+        hdr_act.setMinimumSectionSize(20)
         for c in range(6):
             hdr_act.setSectionResizeMode(c, QHeaderView.Interactive)
-        hdr_act.resizeSection(0, 36)
-        hdr_act.resizeSection(1, 95)
-        hdr_act.resizeSection(2, 115)
-        hdr_act.resizeSection(3, 58)
-        hdr_act.resizeSection(4, 58)
-        hdr_act.resizeSection(5, 140)
+        hdr_act.resizeSection(0, 32)
+        hdr_act.resizeSection(1, 90)
+        hdr_act.resizeSection(2, 110)
+        hdr_act.resizeSection(3, 50)
+        hdr_act.resizeSection(4, 50)
+        hdr_act.resizeSection(5, 120)
         self.tbl_actions.verticalHeader().setDefaultSectionSize(26)
-        self.tbl_actions.verticalHeader().setMinimumSectionSize(24)
+        self.tbl_actions.verticalHeader().setMinimumSectionSize(22)
         self.tbl_actions.setSelectionBehavior(QTableWidget.SelectRows)
-        self.tbl_actions.setMinimumHeight(110)
+        self.tbl_actions.setMinimumHeight(100)
         self.tbl_actions.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         # 델리게이트 연결: 오프셋, 대기, 로그 열에 대해 평상시 깔끔한 텍스트 출력 및 클릭 시 즉시 인라인 편집 지원
@@ -866,74 +922,74 @@ class InspectorWidget(QWidget):
         self.tbl_actions.cellDoubleClicked.connect(self._on_action_cell_double_clicked)
         layout.addWidget(self.tbl_actions, 1)
 
-        # Actions Control Buttons - Row 1: Item Manipulation (Edit, Pick Coord, Delete, Up, Down)
-        act_ctrl_row1 = QHBoxLayout()
-        act_ctrl_row1.setSpacing(4)
+        # 4. Actions Control Buttons (Responsive FlowLayout)
+        act_ctrl_widget = QWidget()
+        act_ctrl_flow = FlowLayout(act_ctrl_widget, margin=0, spacing=4)
+
+        btn_pick_coord_act = QPushButton("🎯 이미지로 좌표 지정...")
+        btn_pick_coord_act.setObjectName("btn_primary")
+        btn_pick_coord_act.setToolTip("액션 시퀀스 이미지로 좌표 지정 작업창을 열어 레퍼런스 이미지 상에서 좌표를 직접 지정 및 편집합니다.")
+        btn_pick_coord_act.clicked.connect(self._on_pick_coord_for_selected_action)
+        act_ctrl_flow.addWidget(btn_pick_coord_act)
+
         btn_edit_act = QPushButton("✏️ 편집")
         btn_edit_act.clicked.connect(self._on_edit_action)
-        act_ctrl_row1.addWidget(btn_edit_act)
+        act_ctrl_flow.addWidget(btn_edit_act)
 
         btn_dup_act = QPushButton("📋 복제")
         btn_dup_act.setToolTip("선택한 액션을 복제하여 바로 아래에 추가합니다.")
         btn_dup_act.clicked.connect(self._on_duplicate_action)
-        act_ctrl_row1.addWidget(btn_dup_act)
-
-        btn_pick_coord_act = QPushButton("🎯 액션 시퀀스 이미지로 좌표 지정...")
-        btn_pick_coord_act.setToolTip("액션 시퀀스 이미지로 좌표 지정 작업창을 열어 레퍼런스 이미지 상에서 좌표를 직접 지정 및 편집합니다.")
-        btn_pick_coord_act.clicked.connect(self._on_pick_coord_for_selected_action)
-        act_ctrl_row1.addWidget(btn_pick_coord_act)
+        act_ctrl_flow.addWidget(btn_dup_act)
 
         btn_del_act = QPushButton("🗑️ 삭제")
         btn_del_act.clicked.connect(self._on_delete_action)
-        act_ctrl_row1.addWidget(btn_del_act)
+        act_ctrl_flow.addWidget(btn_del_act)
 
         self.btn_clear_act = QPushButton("🧹 전체 클리어")
         self.btn_clear_act.setToolTip("현재 액션 시퀀스의 모든 액션을 일괄 삭제(클리어)합니다.")
         self.btn_clear_act.clicked.connect(self._on_clear_actions)
-        act_ctrl_row1.addWidget(self.btn_clear_act)
+        act_ctrl_flow.addWidget(self.btn_clear_act)
 
         btn_up_act = QPushButton("⬆️ 위로")
         btn_up_act.clicked.connect(self._on_move_action_up)
-        act_ctrl_row1.addWidget(btn_up_act)
+        act_ctrl_flow.addWidget(btn_up_act)
 
         btn_down_act = QPushButton("⬇️ 아래로")
         btn_down_act.clicked.connect(self._on_move_action_down)
-        act_ctrl_row1.addWidget(btn_down_act)
-
-        act_ctrl_row1.addStretch()
-        layout.addLayout(act_ctrl_row1)
-
-        # Actions Control Buttons - Row 2: Test & Execution (Single Action & Full Sequence)
-        act_ctrl_row2 = QHBoxLayout()
-        act_ctrl_row2.setSpacing(4)
+        act_ctrl_flow.addWidget(btn_down_act)
 
         self.btn_test_act = QPushButton("⚡ 선택 액션 즉시 실행")
         self.btn_test_act.setStyleSheet("color: #2563eb; font-weight: bold;")
         self.btn_test_act.setToolTip("목록에서 선택한 단일 액션을 현재 타겟 창에 즉시 테스트 실행합니다.")
         self.btn_test_act.clicked.connect(self._on_test_action_now)
-        act_ctrl_row2.addWidget(self.btn_test_act)
+        act_ctrl_flow.addWidget(self.btn_test_act)
 
         self.btn_test_all_act = QPushButton("▶ 전체 시퀀스 실행 테스트")
         self.btn_test_all_act.setStyleSheet("color: #16a34a; font-weight: bold;")
         self.btn_test_all_act.setToolTip("이 시나리오에 등록된 모든 액션을 등록된 순서대로 순차 테스트 실행합니다.")
         self.btn_test_all_act.clicked.connect(self._on_test_all_actions_now)
-        act_ctrl_row2.addWidget(self.btn_test_all_act)
+        act_ctrl_flow.addWidget(self.btn_test_all_act)
 
-        act_ctrl_row2.addStretch()
-        layout.addLayout(act_ctrl_row2)
+        layout.addWidget(act_ctrl_widget)
 
-        # Row 3: Action Custom Log Option (비워두면 오프, 입력하면 온)
-        log_bar = QHBoxLayout()
-        log_bar.setSpacing(6)
+        # 5. Row: Action Custom Log Option (Responsive wrap)
+        log_widget = QWidget()
+        log_flow = FlowLayout(log_widget, margin=0, spacing=6)
+
         lbl_action_log = QLabel("💬 액션 실행 시 로그 출력:")
         lbl_action_log.setToolTip("이 시나리오의 액션들이 실행될 때 로그 창에 출력할 문장입니다. (비워두면 오프, 입력하면 온)")
+        lbl_action_log.setStyleSheet("font-size: 8.5pt;")
+        log_flow.addWidget(lbl_action_log)
+
         self.txt_action_log = QLineEdit()
         self.txt_action_log.setPlaceholderText("원하는 로그 문장을 입력하세요 (비워두면 출력 안 함)")
         self.txt_action_log.setEnabled(True)
+        self.txt_action_log.setMinimumWidth(150)
+        self.txt_action_log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.txt_action_log.textChanged.connect(self._on_action_log_text_changed)
-        log_bar.addWidget(lbl_action_log)
-        log_bar.addWidget(self.txt_action_log, 1)
-        layout.addLayout(log_bar)
+        log_flow.addWidget(self.txt_action_log)
+
+        layout.addWidget(log_widget)
 
         return grp
 
@@ -1044,12 +1100,16 @@ class InspectorWidget(QWidget):
             # 3. Condition & Module Link
             self._populate_condition_combo()
             eff_cond = self._get_active_condition()
-            self.chk_has_condition.setChecked(eff_cond is not None)
+            is_cond_en = getattr(scenario, "condition_enabled", True) if eff_cond else False
+            self.chk_has_condition.blockSignals(True)
+            self.chk_has_condition.setChecked(is_cond_en)
+            self.chk_has_condition.blockSignals(False)
             if eff_cond:
                 idx_op = self.combo_cond_logic.findData(eff_cond.logic_operator)
                 if idx_op >= 0:
                     self.combo_cond_logic.setCurrentIndex(idx_op)
             self._refresh_points_table()
+            self._update_condition_status_label()
             self.lbl_cond_test_result.setVisible(False)
 
             # 4. Actions & Sequence Link
@@ -1264,77 +1324,23 @@ class InspectorWidget(QWidget):
         self._on_field_changed()
 
     def _on_node_snapshot_clicked(self):
-        """Displays options menu when user clicks the scenario node snapshot box."""
+        """Displays enlarged image preview when user clicks the scenario node snapshot box."""
         if not self.current_scenario:
             return
 
-        menu = QMenu(self)
-        act_gallery = menu.addAction("🖼️ 조건 인식 레퍼런스 이미지 선택 (기본 연동)...")
-        act_capture = menu.addAction("📸 현재 화면 캡처하여 조건 레퍼런스로 지정 (기본 연동)...")
-        menu.addSeparator()
+        from ui.image_preview_dialog import show_image_preview
+        eff_ref = self.current_scenario.get_effective_reference_image(self.project)
+        abs_ref = to_absolute_path(eff_ref) if eff_ref else None
 
-        sub_custom = menu.addMenu("📌 [고급] 노드 전용 분리 스냅샷 지정")
-        act_gallery_custom = sub_custom.addAction("🖼️ 갤러리에서 노드 전용 스냅샷 선택...")
-        act_capture_custom = sub_custom.addAction("📸 타겟 창 캡처하여 노드 전용 스냅샷 지정...")
-
-        eff_cond = self._get_active_condition()
-        if eff_cond and getattr(eff_cond, "reference_image_path", None):
-            act_edit_cond_img = menu.addAction("🎯 이미지에서 인식 조건 좌표 지정...")
+        if abs_ref and os.path.isfile(abs_ref):
+            show_image_preview(abs_ref, title=f"📸 [s{self.current_scenario.scenario_number}] {self.current_scenario.name} 레퍼런스 스냅샷", parent=self)
         else:
-            act_edit_cond_img = None
-
-        if self.current_scenario.reference_image_path is not None:
-            act_reset_cond = menu.addAction("🔄 조건 인식 레퍼런스 이미지 연동으로 복구 (기본값)")
-        else:
-            act_reset_cond = None
-
-        act_clear = menu.addAction("❌ 스냅샷 비우기 (빈칸으로 두기)")
-
-        selected = menu.exec_(QCursor.pos())
-        if selected in (act_gallery, act_gallery_custom):
-            from ui.reference_gallery_dialog import ReferenceGalleryDialog
-            dlg = ReferenceGalleryDialog(self.project, target_hwnd=self.target_hwnd, picker_mode=True, parent=self)
-            if dlg.exec_() == QDialog.Accepted:
-                sel_path = dlg.get_selected_image_path()
-                if sel_path and os.path.exists(sel_path):
-                    rel_path = to_relative_path(sel_path)
-                    if selected == act_gallery:
-                        self._set_condition_reference_image(rel_path)
-                    else:
-                        self.current_scenario.reference_image_path = rel_path
-                        self._on_field_changed()
-        elif selected in (act_capture, act_capture_custom):
-            if not self.target_hwnd:
-                QMessageBox.warning(self, "타겟 창 없음", "타겟 게임 창이 선택되어 있지 않습니다.")
-                return
-            img = ScreenCapture.capture_client_area(self.target_hwnd)
-            if img:
-                from core.path_utils import get_references_dir
-                save_dir = get_references_dir()
-                os.makedirs(save_dir, exist_ok=True)
-                import datetime
-                now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                fname = f"capture_{now_str}.png"
-                ref_path = os.path.join(save_dir, fname)
-                img.save(ref_path, "PNG")
-                rel_path = to_relative_path(ref_path)
-                if selected == act_capture:
-                    self._set_condition_reference_image(rel_path)
-                    QMessageBox.information(self, "캡처 완료", f"타겟 창 화면을 캡처하여 조건 레퍼런스(스냅샷 기본 연동)로 저장했습니다:\n{fname}")
-                else:
-                    self.current_scenario.reference_image_path = rel_path
-                    self._on_field_changed()
-                    QMessageBox.information(self, "캡처 완료", f"타겟 창 화면을 캡처하여 노드 전용 스냅샷으로 저장했습니다:\n{fname}")
-            else:
-                QMessageBox.warning(self, "캡처 실패", "타겟 창을 캡처할 수 없습니다.")
-        elif act_edit_cond_img and selected == act_edit_cond_img:
-            self._on_open_canvas_editor()
-        elif act_reset_cond and selected == act_reset_cond:
-            self.current_scenario.reference_image_path = None
-            self._on_field_changed()
-        elif selected == act_clear:
-            self.current_scenario.reference_image_path = ""
-            self._on_field_changed()
+            QMessageBox.information(
+                self,
+                "스냅샷 없음",
+                f"선택한 시나리오 [s{self.current_scenario.scenario_number}]에 등록된 레퍼런스 이미지가 없습니다.\n\n"
+                "인식 조건 카드에서 '이미지에서 좌표 지정'을 통해 레퍼런스 이미지를 등록할 수 있습니다."
+            )
 
     def _on_action_log_toggled(self, checked: bool):
         # Kept for backward compatibility
@@ -2029,6 +2035,16 @@ class InspectorWidget(QWidget):
         self.loop_container.setVisible(is_start)
         self.lbl_loop_end_info.setVisible(is_end)
 
+        if hasattr(self, "btn_block_color"):
+            self.btn_block_color.setVisible(True)
+            cur_col = getattr(self.current_scenario, "custom_color", None)
+            if cur_col:
+                self.btn_block_color.setText(f"🎨 {cur_col}")
+                self.btn_block_color.setStyleSheet(f"background-color: {cur_col}; color: #ffffff; font-weight: bold; border-radius: 3px; padding: 2px 8px;")
+            else:
+                self.btn_block_color.setText("🎨 색상 설정 (자동)")
+                self.btn_block_color.setStyleSheet("")
+
         if is_folder:
             self.condition_card.setVisible(False)
             self.branch_card.setVisible(False)
@@ -2048,6 +2064,79 @@ class InspectorWidget(QWidget):
             self.branch_card.setVisible(True)
             self.action_card.setVisible(True)
 
+    def _on_choose_block_color(self):
+        """Shows menu to pick custom color presets or custom QColorDialog for folder/loop."""
+        if not self.current_scenario:
+            return
+        menu = QMenu(self)
+        presets = [
+            ("기본 (자동 테마 색상)", None),
+            ("블루 (Blue)", "#3b82f6"),
+            ("에메랄드 (Green)", "#10b981"),
+            ("퍼플 (Purple)", "#8b5cf6"),
+            ("호박/앰버 (Amber)", "#f59e0b"),
+            ("로즈 (Rose)", "#f43f5e"),
+            ("인디고 (Indigo)", "#6366f1"),
+            ("틸 (Teal)", "#14b8a6"),
+            ("오렌지 (Orange)", "#f97316"),
+            ("시안 (Cyan)", "#06b6d4"),
+        ]
+
+        current_color = getattr(self.current_scenario, "custom_color", None)
+        for label, hex_col in presets:
+            pixmap = QPixmap(14, 14)
+            if hex_col:
+                pixmap.fill(QColor(hex_col))
+            else:
+                pixmap.fill(QColor("#94a3b8"))
+            act = menu.addAction(QIcon(pixmap), label)
+            if current_color == hex_col:
+                act.setIcon(self.style().standardIcon(QStyle.SP_DialogApplyButton))
+            act.triggered.connect(lambda checked, c=hex_col: self._set_block_custom_color(c))
+
+        menu.addSeparator()
+        act_custom = menu.addAction("🎨 직접 색상 선택 (Color Picker)...")
+        act_custom.triggered.connect(self._pick_custom_color_dialog)
+        menu.exec_(QCursor.pos())
+
+    def _set_block_custom_color(self, hex_code: Optional[str]):
+        if not self.current_scenario:
+            return
+        self._record_undo_state()
+        self.current_scenario.custom_color = hex_code
+        if self.original_scenario:
+            self.original_scenario.custom_color = hex_code
+
+        # If it has a partner node (folder end or loop end or start), sync custom_color
+        if self.project:
+            idx = self.project.find_scenario_index(self.current_scenario.id)
+            if idx is not None and idx >= 0:
+                partner_idx = None
+                nt = self.current_scenario.node_type
+                if getattr(self.current_scenario, "is_folder_start", nt in ("folder", "folder_start")):
+                    partner_idx = self.project.find_matching_folder_end(idx)
+                elif getattr(self.current_scenario, "is_folder_end", nt == "folder_end"):
+                    partner_idx = self.project.find_matching_folder_start(idx)
+                elif nt == "loop_start":
+                    partner_idx = self.project.find_matching_loop_end(idx)
+                elif nt == "loop_end":
+                    partner_idx = self.project.find_matching_loop_start(idx)
+
+                if partner_idx is not None and 0 <= partner_idx < len(self.project.scenarios):
+                    self.project.scenarios[partner_idx].custom_color = hex_code
+
+        self._update_node_type_visibility()
+        self._mark_dirty()
+        self._on_field_changed()
+        if self.original_scenario:
+            self.sig_scenario_changed.emit(self.original_scenario)
+
+    def _pick_custom_color_dialog(self):
+        initial = QColor(self.current_scenario.custom_color) if self.current_scenario and self.current_scenario.custom_color else QColor("#3b82f6")
+        picked = QColorDialog.getColor(initial, self, "블록 색상 선택")
+        if picked.isValid():
+            self._set_block_custom_color(picked.name())
+
     def _on_match_branch_changed(self):
         self._update_branch_visibility()
         self._on_field_changed()
@@ -2060,7 +2149,10 @@ class InspectorWidget(QWidget):
         if self._is_loading or not self.current_scenario:
             return
 
-        if state == Qt.Checked:
+        is_checked = (state == Qt.Checked)
+        self.current_scenario.condition_enabled = is_checked
+
+        if is_checked:
             eff_cond = self._get_active_condition()
             if not eff_cond:
                 self.current_scenario.condition = Condition(
@@ -2068,10 +2160,6 @@ class InspectorWidget(QWidget):
                     logic_operator=self.combo_cond_logic.currentData(),
                     points=[]
                 )
-        else:
-            self.current_scenario.condition = None
-            self.current_scenario.condition_id = None
-            self._populate_condition_combo()
 
         self._refresh_points_table()
         self._update_condition_status_label()

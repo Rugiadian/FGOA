@@ -176,9 +176,10 @@ class TestFolderDisabledAndWindowGeometry(unittest.TestCase):
         self.assertNotIn("🚫", item_child_name.text())
         self.assertFalse(item_child_name.font().strikeOut())
         self.assertFalse(item_child_name.font().underline())
-        # Check single arrow indentation (not double)
-        self.assertTrue(item_child_name.text().startswith("  ↳ 퀘스트 선택"))
-        self.assertNotIn("↳ ↳", item_child_name.text())
+        # Check Reddit-style cell indentation (text is clean without fake arrow emoji, depth stored in UserRole + 100)
+        self.assertEqual(item_child_name.text(), "퀘스트 선택")
+        self.assertEqual(item_child_name.data(Qt.UserRole + 100), 1)
+        self.assertNotIn("↳", item_child_name.text())
         self.assertNotIn("│", item_child_name.text())
 
         # Branch text preserved, not replaced with '(폴더 비활성)'

@@ -230,7 +230,8 @@ class WorkflowRunner(QThread):
                         continue
 
                     # 2. Check screen recognition condition (until_match / while_match)
-                    eff_cond = scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition
+                    is_cond_en = getattr(scen, "condition_enabled", True)
+                    eff_cond = (scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition) if is_cond_en else None
                     if scen.loop_mode in ("until_match", "while_match") and eff_cond and eff_cond.points:
                         self._wait_for_anti_burn()
                         matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
@@ -292,7 +293,8 @@ class WorkflowRunner(QThread):
                 matched = False
                 attempt = 0
                 max_attempts = (scen.retry_max_count + 1) if (scen.on_mismatch == "retry") else 1
-                eff_cond = scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition
+                is_cond_en = getattr(scen, "condition_enabled", True)
+                eff_cond = (scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition) if is_cond_en else None
                 point_results = []
 
                 while attempt < max_attempts and self._is_running:

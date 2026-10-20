@@ -362,6 +362,8 @@ class Test100UIInteractionChanges(unittest.TestCase):
 
     def test_44_select_all_scenarios_shortcut(self):
         """[Test 44] Verify selectAll selects all rows in table."""
+        for c in range(7):
+            self.win.tbl_scenarios.setColumnHidden(c, False)
         self.win.tbl_scenarios.selectAll()
         self.assertEqual(len(self.win.tbl_scenarios.selectedIndexes()), len(self.win.project.scenarios) * 7)
 

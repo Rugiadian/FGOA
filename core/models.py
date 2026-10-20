@@ -200,6 +200,64 @@ class ActionSequence:
         )
 
 
+def make_block_palette(hex_str: str) -> Dict[str, str]:
+    """
+    Generates distinct header and child background/text colors for light and dark themes
+    from a base hex color.
+    """
+    hex_clean = hex_str.lstrip("#") if hex_str else "3b82f6"
+    if len(hex_clean) != 6:
+        hex_clean = "3b82f6"
+    try:
+        r = int(hex_clean[0:2], 16)
+        g = int(hex_clean[2:4], 16)
+        b = int(hex_clean[4:6], 16)
+    except ValueError:
+        r, g, b = 59, 130, 246
+
+    # Light theme:
+    # Header bg: 18% base + 82% white
+    h_bg_l_r = int(r * 0.18 + 255 * 0.82)
+    h_bg_l_g = int(g * 0.18 + 255 * 0.82)
+    h_bg_l_b = int(b * 0.18 + 255 * 0.82)
+
+    # Child bg: 6% base + 94% white (noticeably lighter than header)
+    c_bg_l_r = int(r * 0.06 + 255 * 0.94)
+    c_bg_l_g = int(g * 0.06 + 255 * 0.94)
+    c_bg_l_b = int(b * 0.06 + 255 * 0.94)
+
+    # Text light: high-contrast darkened
+    txt_l_r = max(0, int(r * 0.55))
+    txt_l_g = max(0, int(g * 0.55))
+    txt_l_b = max(0, int(b * 0.55))
+
+    # Dark theme:
+    # Surface dark ref: (15, 23, 42)
+    h_bg_d_r = int(r * 0.32 + 15 * 0.68)
+    h_bg_d_g = int(g * 0.32 + 23 * 0.68)
+    h_bg_d_b = int(b * 0.32 + 42 * 0.68)
+
+    c_bg_d_r = int(r * 0.14 + 15 * 0.86)
+    c_bg_d_g = int(g * 0.14 + 23 * 0.86)
+    c_bg_d_b = int(b * 0.14 + 42 * 0.86)
+
+    # Text dark: pastel brightened
+    txt_d_r = min(255, int(r * 0.6 + 255 * 0.4))
+    txt_d_g = min(255, int(g * 0.6 + 255 * 0.4))
+    txt_d_b = min(255, int(b * 0.6 + 255 * 0.4))
+
+    return {
+        "base": f"#{hex_clean}",
+        "light": f"#{txt_l_r:02x}{txt_l_g:02x}{txt_l_b:02x}",
+        "dark": f"#{txt_d_r:02x}{txt_d_g:02x}{txt_d_b:02x}",
+        "bg_light": f"#{h_bg_l_r:02x}{h_bg_l_g:02x}{h_bg_l_b:02x}",
+        "bg_dark": f"#{h_bg_d_r:02x}{h_bg_d_g:02x}{h_bg_d_b:02x}",
+        "child_bg_light": f"#{c_bg_l_r:02x}{c_bg_l_g:02x}{c_bg_l_b:02x}",
+        "child_bg_dark": f"#{c_bg_d_r:02x}{c_bg_d_g:02x}{c_bg_d_b:02x}",
+        "name": f"#{hex_clean}"
+    }
+
+
 @dataclass
 class Scenario:
     """A workflow step combining Condition checking and Action execution (Composite Node)."""
@@ -215,10 +273,12 @@ class Scenario:
     loop_count: int = 5           # 반복 횟수 (또는 최대 안전 한도)
     loop_target_id: str = ""      # loop_end일 때 대응되는 loop_start의 ID
     folder_target_id: str = ""    # folder_end일 때 대응되는 folder_start의 ID (또는 그 반대)
+    custom_color: Optional[str] = None  # 사용자 지정 블록/폴더/루프 색상 (Hex: #RRGGBB)
     
     # Modular Condition slot (references project.conditions[condition_id])
     condition_id: Optional[str] = None
     condition: Optional[Condition] = None  # Direct / legacy condition
+    condition_enabled: bool = True  # 조건 감지 활성화 여부 (False 시 조건 목록은 유지하되 평가만 생략)
     
     # Branching on match
     on_match: str = "execute"  # "execute" (run actions then next), "jump" (jump to target), "stop" (stop automation), "break_loop" (루프 탈출)
@@ -364,6 +424,7 @@ class Scenario:
             "folder_target_id": getattr(self, "folder_target_id", ""),
             "condition_id": self.condition_id,
             "condition": self.condition.to_dict() if self.condition else None,
+            "condition_enabled": getattr(self, "condition_enabled", True),
             "on_match": self.on_match,
             "jump_target_on_match": self.jump_target_on_match,
             "on_mismatch": self.on_mismatch,
@@ -377,7 +438,8 @@ class Scenario:
             "post_delay_seconds": self.post_delay_seconds,
             "custom_log": self.custom_log,
             "last_action_image_path": to_relative_path(self.last_action_image_path),
-            "reference_image_path": to_relative_path(self.reference_image_path)
+            "reference_image_path": to_relative_path(self.reference_image_path),
+            "custom_color": self.custom_color
         }
 
     @classmethod
@@ -398,8 +460,10 @@ class Scenario:
             loop_count=data.get("loop_count", 5),
             loop_target_id=data.get("loop_target_id", ""),
             folder_target_id=data.get("folder_target_id", ""),
+            custom_color=data.get("custom_color"),
             condition_id=data.get("condition_id"),
             condition=condition,
+            condition_enabled=data.get("condition_enabled", True),
             on_match=data.get("on_match", "execute"),
             jump_target_on_match=data.get("jump_target_on_match", ""),
             on_mismatch=data.get("on_mismatch", "next"),
@@ -706,8 +770,14 @@ class Project:
             elif is_end:
                 if stack:
                     start_idx, start_scen, p_num = stack.pop()
-                    pal = palette_list[(p_num - 1) % len(palette_list)]
+                    if getattr(start_scen, "custom_color", None):
+                        pal = make_block_palette(start_scen.custom_color)
+                    elif getattr(scen, "custom_color", None):
+                        pal = make_block_palette(scen.custom_color)
+                    else:
+                        pal = palette_list[(p_num - 1) % len(palette_list)]
                     child_count = max(0, idx - start_idx - 1)
+                    c_col = getattr(start_scen, "custom_color", None) or getattr(scen, "custom_color", None)
                     info_map[start_idx] = {
                         "is_folder": True,
                         "node_type": "folder_start",
@@ -721,6 +791,8 @@ class Project:
                         "bg_dark": pal["bg_dark"],
                         "child_bg_light": pal["child_bg_light"],
                         "child_bg_dark": pal["child_bg_dark"],
+                        "base_color": pal.get("base", pal["light"]),
+                        "custom_color": c_col,
                         "warning": None
                     }
                     info_map[idx] = {
@@ -736,6 +808,8 @@ class Project:
                         "bg_dark": pal["bg_dark"],
                         "child_bg_light": pal["child_bg_light"],
                         "child_bg_dark": pal["child_bg_dark"],
+                        "base_color": pal.get("base", pal["light"]),
+                        "custom_color": c_col,
                         "warning": None
                     }
                     # Assign folder tint background to member nodes inside this folder
@@ -751,6 +825,7 @@ class Project:
                                 "color_dark": pal["dark"],
                                 "bg_light": pal["child_bg_light"],
                                 "bg_dark": pal["child_bg_dark"],
+                                "base_color": pal.get("base", pal["light"]),
                             }
                 else:
                     info_map[idx] = {
@@ -823,13 +898,13 @@ class Project:
         Returns mapping from scenario index to loop info dict.
         """
         palette_list = [
-            {"light": "#2563eb", "dark": "#60a5fa", "name": "블루"},
-            {"light": "#7c3aed", "dark": "#c084fc", "name": "퍼플"},
-            {"light": "#0d9488", "dark": "#2dd4bf", "name": "틸"},
-            {"light": "#ea580c", "dark": "#fb923c", "name": "오렌지"},
-            {"light": "#16a34a", "dark": "#4ade80", "name": "그린"},
-            {"light": "#db2777", "dark": "#f472b6", "name": "핑크"},
-            {"light": "#ca8a04", "dark": "#facc15", "name": "옐로우"},
+            {"base": "#2563eb", "light": "#1d4ed8", "dark": "#93c5fd", "bg_light": "#dbeafe", "bg_dark": "#172554", "child_bg_light": "#eff6ff", "child_bg_dark": "#0f172a", "name": "블루"},
+            {"base": "#7c3aed", "light": "#6d28d9", "dark": "#c4b5fd", "bg_light": "#ede9fe", "bg_dark": "#2e1065", "child_bg_light": "#f5f3ff", "child_bg_dark": "#150831", "name": "퍼플"},
+            {"base": "#0d9488", "light": "#0f766e", "dark": "#5eead4", "bg_light": "#ccfbf1", "bg_dark": "#134e4a", "child_bg_light": "#f0fdfa", "child_bg_dark": "#0d2826", "name": "틸"},
+            {"base": "#ea580c", "light": "#c2410c", "dark": "#fdba74", "bg_light": "#ffedd5", "bg_dark": "#431407", "child_bg_light": "#fff7ed", "child_bg_dark": "#200903", "name": "오렌지"},
+            {"base": "#16a34a", "light": "#15803d", "dark": "#86efac", "bg_light": "#dcfce7", "bg_dark": "#052e16", "child_bg_light": "#f0fdf4", "child_bg_dark": "#051f0f", "name": "그린"},
+            {"base": "#db2777", "light": "#be185d", "dark": "#f9a8d4", "bg_light": "#fce7f3", "bg_dark": "#500724", "child_bg_light": "#fff1f2", "child_bg_dark": "#260311", "name": "로즈"},
+            {"base": "#ca8a04", "light": "#a16207", "dark": "#fde047", "bg_light": "#fef9c3", "bg_dark": "#422006", "child_bg_light": "#fefce8", "child_bg_dark": "#221103", "name": "옐로우"},
         ]
         info_map = {}
         stack = []  # List of (index, scenario, pair_counter)
@@ -842,15 +917,29 @@ class Project:
             elif scen.node_type == "loop_end":
                 if stack:
                     start_idx, start_scen, p_num = stack.pop()
-                    pal = palette_list[(p_num - 1) % len(palette_list)]
+                    if getattr(start_scen, "custom_color", None):
+                        pal = make_block_palette(start_scen.custom_color)
+                    elif getattr(scen, "custom_color", None):
+                        pal = make_block_palette(scen.custom_color)
+                    else:
+                        pal = palette_list[(p_num - 1) % len(palette_list)]
+                    child_count = max(0, idx - start_idx - 1)
+                    c_col = getattr(start_scen, "custom_color", None) or getattr(scen, "custom_color", None)
                     info_map[start_idx] = {
                         "is_loop": True,
                         "node_type": "loop_start",
                         "has_pair": True,
                         "pair_number": p_num,
                         "partner_index": idx,
+                        "child_count": child_count,
                         "color_light": pal["light"],
                         "color_dark": pal["dark"],
+                        "bg_light": pal["bg_light"],
+                        "bg_dark": pal["bg_dark"],
+                        "child_bg_light": pal["child_bg_light"],
+                        "child_bg_dark": pal["child_bg_dark"],
+                        "base_color": pal.get("base", pal["light"]),
+                        "custom_color": c_col,
                         "warning": None
                     }
                     info_map[idx] = {
@@ -859,10 +948,32 @@ class Project:
                         "has_pair": True,
                         "pair_number": p_num,
                         "partner_index": start_idx,
+                        "child_count": child_count,
                         "color_light": pal["light"],
                         "color_dark": pal["dark"],
+                        "bg_light": pal["bg_light"],
+                        "bg_dark": pal["bg_dark"],
+                        "child_bg_light": pal["child_bg_light"],
+                        "child_bg_dark": pal["child_bg_dark"],
+                        "base_color": pal.get("base", pal["light"]),
+                        "custom_color": c_col,
                         "warning": None
                     }
+                    # Assign loop tint background to member nodes inside this loop
+                    for child_idx in range(start_idx + 1, idx):
+                        if child_idx not in info_map:
+                            info_map[child_idx] = {
+                                "is_loop": False,
+                                "is_child": True,
+                                "pair_number": p_num,
+                                "parent_loop_start": start_idx,
+                                "parent_loop_end": idx,
+                                "color_light": pal["light"],
+                                "color_dark": pal["dark"],
+                                "bg_light": pal["child_bg_light"],
+                                "bg_dark": pal["child_bg_dark"],
+                                "base_color": pal.get("base", pal["light"]),
+                            }
                 else:
                     # Orphaned loop_end (missing matching loop_start)
                     info_map[idx] = {
@@ -871,8 +982,15 @@ class Project:
                         "has_pair": False,
                         "pair_number": 0,
                         "partner_index": None,
+                        "child_count": 0,
                         "color_light": "#ef4444",
                         "color_dark": "#f87171",
+                        "bg_light": "#fee2e2",
+                        "bg_dark": "#450a0a",
+                        "child_bg_light": "#fef2f2",
+                        "child_bg_dark": "#2b0707",
+                        "base_color": "#ef4444",
+                        "custom_color": None,
                         "warning": "⚠️ [루프 짝 소실: 시작 노드 없음]"
                     }
 
@@ -885,8 +1003,15 @@ class Project:
                 "has_pair": False,
                 "pair_number": p_num,
                 "partner_index": None,
+                "child_count": 0,
                 "color_light": "#ef4444",
                 "color_dark": "#f87171",
+                "bg_light": "#fee2e2",
+                "bg_dark": "#450a0a",
+                "child_bg_light": "#fef2f2",
+                "child_bg_dark": "#2b0707",
+                "base_color": "#ef4444",
+                "custom_color": None,
                 "warning": "⚠️ [루프 짝 소실: 종료 노드 없음]"
             }
 

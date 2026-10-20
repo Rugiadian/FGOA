@@ -1,0 +1,58 @@
+================================================================================
+작업 일시: 2026-10-20 02:50:00
+작업 내용: 폴더 노드 이름 입력란 세로 늘어남 방지, 인식조건/액션시퀀스 가로 반응형(줄바꿈), 노드 스냅샷 원본 확대 미리보기, 조건 감지 비활성화 시 포인트 보존
+작업자: Antigravity
+================================================================================
+
+[1. 작업 배경 및 요구사항]
+1) 폴더 노드의 인식 조건 탭에서 이름란(txt_name)이 창 높이에 따라 비정상적으로 길어지는 현상 수정
+   - 하단 빈 공간(Spacer)을 유동적으로 배치하여 이름란이 세로로 확장되지 않도록 처리.
+2) 인식 조건 및 액션 시퀀스 창의 내용들이 가로 폭을 강제하는 문제 해결
+   - 가로 유동성, 자동 줄바꿈(FlowLayout) 등을 적용하여 창 너비 축소 시에도 자연스럽게 레이아웃이 줄어들고 찌그러지거나 다른 독 패널을 밀어내지 않도록 개선.
+3) 노드 스냅샷 클릭 동작 개선
+   - 기존의 옵션 메뉴를 제거하고 스냅샷 클릭 시 등록되어 있는 이미지를 크게(원본 해상도/스크롤 뷰어) 확대 표시.
+4) 조건 감지 활성화 체크박스 해제 동작 개선
+   - 체크 해제 시 기존에는 조건 및 포인트 리스트가 초기화(None)되던 것을 수정하여, 조건 포인트 목록은 그대로 보존하고 실행 시 조건 판단만 건너뛰도록 처리.
+
+[2. 주요 구현 내역]
+
+1) 폴더 노드 이름 입력란 세로 신장 방지 (ui/inspector_widget.py)
+   - upper_layout 내 self.condition_card, self.branch_card, self.action_card 숨김 시 남는 여백을 흡수하도록 upper_layout.addStretch(1) 배치.
+   - header_card에 setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum) 설정.
+   - txt_name에 setMaximumHeight(28) 및 setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)를 지정하여 높이 고정.
+
+2) 인식 조건 / 액션 시퀀스 가로 반응형 및 줄바꿈 적용 (ui/inspector_widget.py)
+   - 인식 조건(Condition Card):
+     * 상단 조건 모듈 선택 행(cond_combo_row)과 조작 버튼들(btn_save_as_cond, btn_unlink_cond, btn_manage_cond)을 분리하여 FlowLayout 적용.
+     * 조건 활성화 체크박스, 일치 규칙(AND/OR), 조건 가져오기 버튼 행에 FlowLayout 적용.
+     * 하단 포인트 액션 버튼(좌표 지정, 포인트 추가, 삭제, 판정 테스트)에 FlowLayout 적용.
+   - 분기 판단(Branch Card):
+     * 고정폭 라벨(120px, 135px)을 최소폭(80px, 90px)으로 완화하여 좁은 너비에서도 패널이 찌그러지지 않도록 개선.
+     * 재시도 횟수, 간격, 완료 후 대기 입력 위젯들을 FlowLayout으로 묶어 너비 축소 시 자동으로 2줄 줄바꿈 배치되도록 구성.
+   - 액션 시퀀스(Action Card):
+     * 연결 시퀀스 콤보와 모듈 제어 버튼(새로 만들기, 클리어, 시퀀스로 등록, 연결 해제, 모듈 관리)을 분리하여 FlowLayout 적용.
+     * 빠른 액션 추가 버튼(클릭, 드래그, 키, 텍스트, 대기, 로그) 및 조작 녹화, 가져오기 버튼들을 FlowLayout으로 묶어 자동 줄바꿈 지원.
+     * 액션 제어 버튼(좌표 지정, 편집, 복제, 삭제, 클리어, 위/아래 이동, 단일 테스트, 전체 시퀀스 테스트)을 FlowLayout으로 재구성.
+     * 액션 커스텀 로그 입력 행도 FlowLayout 기반 유동적 배치.
+     * 액션 테이블 및 포인트 테이블의 horizontalHeader()에 최소 섹션 크기 완화 및 유동적 너비 조정 설정.
+
+3) 노드 스냅샷 클릭 시 고해상도 확대 미리보기 다이얼로그 (ui/image_preview_dialog.py, ui/inspector_widget.py, ui/main_window.py)
+   - ImagePreviewDialog(QDialog) 컴포넌트 신규 구현:
+     * 이미지 원본 비율 유지 확대 표시 (최대 1200x850 화면 기준 반응형, 마우스 휠 확대/축소 및 스크롤 지원).
+     * 하단에 원본 해상도(WxH) 정보 및 닫기 버튼 제공.
+   - 인스펙터 헤더의 lbl_node_snapshot 클릭 시 기존 메뉴 호출 대신 show_image_preview()를 직접 호출하도록 변경. (이미지 미지정 시 친절한 안내 메시지 표시)
+   - 시나리오 목록 테이블(tbl_scenarios)의 0열 썸네일 클릭 및 더블클릭 시에도 동일한 원본 확대 미리보기 창 오픈.
+
+4) 조건 감지 활성화 해제 시 포인트 목록 보존 (core/models.py, core/runner.py, ui/inspector_widget.py, ui/main_window.py)
+   - Scenario 모델에 condition_enabled: bool = True 속성 추가 (to_dict/from_dict 직렬화 연동).
+   - runner.py의 execute_scenario 및 execute_loop_iteration에서 condition_enabled가 False인 경우 condition 객체를 보존하면서도 무조건 실행(조건 패스)하도록 처리.
+   - 인스펙터의 chk_has_condition 토글 시 scenario.condition을 None으로 지우지 않고 current_scenario.condition_enabled 플래그만 변경하도록 수정.
+   - 시나리오 테이블 목록에서 조건 비활성화 노드는 "⏸ [조건 비활성]" 텍스트와 흐린 글씨색으로 명확히 구분 표시.
+
+[3. 테스트 및 검증]
+- tests/test_scenario_hierarchy_and_custom_colors.py에 신규 단위 테스트 추가:
+  * test_08_condition_enabled_toggle_preserves_condition_points: 체크 해제 시에도 condition.points 리스트 보존 및 직렬화 검증 통과.
+  * test_09_folder_node_inspector_vertical_stretch_fix: 폴더 노드 선택 시 조건/분기/액션 카드 숨김 및 txt_name 고정 높이/Maximum 정책 검증 통과.
+  * test_10_snapshot_enlarged_preview_support: ImagePreviewDialog 생성 및 스냅샷 클릭 핸들러 연동 검증 통과.
+- 총 10개 단위 테스트 전체 통과 (OK, 21.441s).
+================================================================================
