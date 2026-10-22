@@ -353,6 +353,13 @@ class MainWindow(QMainWindow):
             self.chk_autoscroll.setChecked(autoscroll_enabled)
             self.chk_autoscroll.blockSignals(False)
 
+        # 5-1. Robust Trace Mode (강력 로그추적)
+        robust_trace_en = cfg.get("robust_trace_enabled", False)
+        if hasattr(self, "chk_robust_trace") and self.chk_robust_trace:
+            self.chk_robust_trace.blockSignals(True)
+            self.chk_robust_trace.setChecked(robust_trace_en)
+            self.chk_robust_trace.blockSignals(False)
+
         # 6. Scenario Table Column Visibility (시나리오 테이블 열 표시 여부)
         cols_vis = cfg.get("scenario_columns_visible")
         if isinstance(cols_vis, dict) and hasattr(self, "tbl_scenarios") and self.tbl_scenarios:
@@ -415,6 +422,8 @@ class MainWindow(QMainWindow):
                 cfg["hot_reload_enabled"] = self.chk_hot_reload.isChecked()
             if hasattr(self, "chk_autoscroll") and self.chk_autoscroll:
                 cfg["autoscroll_enabled"] = self.chk_autoscroll.isChecked()
+            if hasattr(self, "chk_robust_trace") and self.chk_robust_trace:
+                cfg["robust_trace_enabled"] = self.chk_robust_trace.isChecked()
             if hasattr(self, "tbl_scenarios") and self.tbl_scenarios:
                 cfg["scenario_columns_visible"] = self.tbl_scenarios.get_column_visibility_state()
 
@@ -1005,6 +1014,17 @@ class MainWindow(QMainWindow):
         lbl_log_title.setStyleSheet("font-weight: bold; font-size: 9.5pt;")
         log_header.addWidget(lbl_log_title)
         log_header.addStretch()
+
+        self.chk_robust_trace = QCheckBox("강력 로그추적")
+        self.chk_robust_trace.setToolTip("각 로그 출력 시 화면 스크린샷을 자동 촬영하여 링크합니다 (최소 1초 간격, 초고속 저화질).")
+        self.chk_robust_trace.toggled.connect(self._on_robust_trace_toggled)
+        log_header.addWidget(self.chk_robust_trace)
+
+        self.btn_delete_trace = QPushButton("🗑️ 추적 폴더 일괄 삭제")
+        self.btn_delete_trace.setFixedHeight(22)
+        self.btn_delete_trace.setToolTip("강력 로그추적으로 생성된 모든 스크린샷 및 루프 폴더를 일괄 삭제합니다.")
+        self.btn_delete_trace.clicked.connect(self._on_delete_trace_logs)
+        log_header.addWidget(self.btn_delete_trace)
 
         self.chk_autoscroll = QCheckBox("자동 스크롤")
         self.chk_autoscroll.setChecked(True)
@@ -3814,7 +3834,8 @@ class MainWindow(QMainWindow):
             self.target_hwnd,
             start_scenario_id=start_scenario_id,
             anti_burn_overlay=self.anti_burn_overlay,
-            parent=self
+            parent=self,
+            robust_trace_enabled=getattr(self, "chk_robust_trace", None) and self.chk_robust_trace.isChecked()
         )
         self.runner.sig_log.connect(self._append_log)
         self.runner.sig_scenario_started.connect(self._on_scenario_started)
@@ -4148,6 +4169,13 @@ class MainWindow(QMainWindow):
         color = color_map.get(level, pal["text_primary"])
         prefix_color = "#64748b" if pal["is_light"] else "#8da4c4"
 
+        # Check for [TRACE_SHOT:path] tag
+        shot_path = ""
+        m_shot = re.search(r"\[TRACE_SHOT:(.*?)\]", msg)
+        if m_shot:
+            shot_path = m_shot.group(1).strip()
+            msg = (msg[:m_shot.start()] + msg[m_shot.end():]).strip()
+
         log_id = self._next_log_id
         self._next_log_id += 1
 
@@ -4156,7 +4184,8 @@ class MainWindow(QMainWindow):
             "level": level,
             "raw_msg": msg,
             "expanded": False,
-            "has_mismatch": False
+            "has_mismatch": False,
+            "screenshot_path": shot_path
         }
 
         # Check for explicit [MISMATCH:count]detail[/MISMATCH] tags
@@ -4197,6 +4226,11 @@ class MainWindow(QMainWindow):
         log_id = record["id"]
         level = record["level"]
 
+        shot_p = record.get("screenshot_path", "")
+        shot_badge = ""
+        if shot_p and os.path.exists(shot_p):
+            shot_badge = f" <a href='view-screenshot:{shot_p}' style='color: #38bdf8; text-decoration: none; font-weight: bold;'>[📸 화면]</a>"
+
         # Equalize word width for log levels (INFO, SUCCESS, ACTION, WARN, ERROR)
         # Pad to 7 characters (length of 'SUCCESS') with non-breaking spaces for alignment
         padded_level = level.ljust(7)
@@ -4213,11 +4247,11 @@ class MainWindow(QMainWindow):
             if not record.get("expanded", False):
                 # Collapsed: Show clickable badge link to expand
                 btn_link = f"<a href='toggle-mismatch:{log_id}' style='color: #38bdf8; text-decoration: none; font-weight: bold;'>[▶ {cnt_str} 세부내역 열기]</a>"
-                return f"<div id='mismatch_{log_id}' style='margin: 1px 0;'>{tag_prefix} <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span></div>"
+                return f"<div id='mismatch_{log_id}' style='margin: 1px 0;'>{tag_prefix} <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span>{shot_badge}</div>"
             else:
                 # Expanded: Show clickable badge link to collapse, and formatted details indented per-point
                 btn_link = f"<a href='toggle-mismatch:{log_id}' style='color: #f87171; text-decoration: none; font-weight: bold;'>[▼ {cnt_str} 세부내역 닫기]</a>"
-                header_line = f"{tag_prefix} <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span>"
+                header_line = f"{tag_prefix} <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span>{shot_badge}"
 
                 # Format per-point detail lines
                 detail_lines = [l.strip() for l in detail_t.split("\n") if l.strip()]
@@ -4248,26 +4282,41 @@ class MainWindow(QMainWindow):
             badge = "<span style='background: #2563eb; color: #ffffff; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 8.5pt;'>🔄 루프 시작</span>"
             border_c = "#3b82f6"
             bg_c = "rgba(59, 130, 246, 0.12)" if not pal["is_light"] else "#eff6ff"
-            return f"<div style='margin: 3px 0; padding: 3px 6px; background-color: {bg_c}; border-left: 3px solid {border_c}; border-radius: 4px;'>{tag_prefix} {badge} <span style='color: {color}; font-weight: bold;'>{html.escape(record['raw_msg'])}</span></div>"
+            return f"<div style='margin: 3px 0; padding: 3px 6px; background-color: {bg_c}; border-left: 3px solid {border_c}; border-radius: 4px;'>{tag_prefix} {badge} <span style='color: {color}; font-weight: bold;'>{html.escape(record['raw_msg'])}</span>{shot_badge}</div>"
 
         elif "루프 탈출" in record['raw_msg'] or "루프 종료" in record['raw_msg']:
             badge = "<span style='background: #d97706; color: #ffffff; padding: 2px 7px; border-radius: 4px; font-weight: bold; font-size: 8.5pt;'>⚡ 루프 탈출</span>"
             border_c = "#f59e0b"
             bg_c = "rgba(245, 158, 11, 0.12)" if not pal["is_light"] else "#fffbeb"
-            return f"<div style='margin: 3px 0; padding: 3px 6px; background-color: {bg_c}; border-left: 3px solid {border_c}; border-radius: 4px;'>{tag_prefix} {badge} <span style='color: {color}; font-weight: bold;'>{html.escape(record['raw_msg'])}</span></div>"
+            return f"<div style='margin: 3px 0; padding: 3px 6px; background-color: {bg_c}; border-left: 3px solid {border_c}; border-radius: 4px;'>{tag_prefix} {badge} <span style='color: {color}; font-weight: bold;'>{html.escape(record['raw_msg'])}</span>{shot_badge}</div>"
 
         elif level == "USER":
             prefix_html = f"<span style='color: {color}; font-weight: bold;'>[사용자 로그]</span>"
             msg_html = f"<span style='color: {color}; font-weight: bold;'>{html.escape(record['raw_msg'])}</span>"
-            return f"{prefix_html} {msg_html}"
+            return f"{prefix_html} {msg_html}{shot_badge}"
         else:
-            return f"{tag_prefix} <span style='color: {color};'>{record['raw_msg']}</span>"
+            return f"{tag_prefix} <span style='color: {color};'>{record['raw_msg']}</span>{shot_badge}"
 
     def _on_log_anchor_clicked(self, url):
         if hasattr(url, "toString"):
             url_str = url.toString() or url.path() or ""
         else:
             url_str = str(url)
+
+        if "view-screenshot:" in url_str:
+            try:
+                shot_path = url_str.split("view-screenshot:", 1)[1].strip()
+                if shot_path.startswith("/") and len(shot_path) > 2 and shot_path[2] == ":":
+                    shot_path = shot_path[1:]
+                if os.path.isfile(shot_path):
+                    from ui.image_preview_dialog import show_image_preview
+                    show_image_preview(shot_path, title=f"📸 추적 스크린샷 - {os.path.basename(shot_path)}", parent=self)
+                else:
+                    from PyQt5.QtWidgets import QMessageBox
+                    QMessageBox.warning(self, "파일 없음", f"스크린샷 파일이 존재하지 않거나 이미 삭제되었습니다:\n{shot_path}")
+            except Exception:
+                pass
+            return
 
         if "toggle-mismatch:" in url_str or "toggle_mismatch:" in url_str:
             try:
@@ -4313,6 +4362,29 @@ class MainWindow(QMainWindow):
             sb.setValue(sb.maximum())
         else:
             sb.setValue(val)
+
+    def _on_robust_trace_toggled(self, checked: bool):
+        self._save_app_config()
+        if hasattr(self, "runner") and self.runner and self.runner.isRunning():
+            self.runner.set_robust_trace_enabled(checked)
+        self._append_log("INFO", f"⚙️ [설정] 강력 로그추적 모드가 {'활성화' if checked else '비활성화'}되었습니다.")
+
+    def _on_delete_trace_logs(self):
+        from core.trace_logger import TraceLogger, DEFAULT_TRACE_DIR
+        from PyQt5.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "추적 폴더 일괄 삭제",
+            f"강력 로그추적을 통해 저장된 모든 스크린샷과 루프 하위 폴더를 일괄 삭제하시겠습니까?\n\n대상 경로: {DEFAULT_TRACE_DIR}\n(삭제 후 복구할 수 없습니다.)",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            res = TraceLogger.clean_all_trace_logs()
+            freed_mb = res["freed_bytes"] / (1024 * 1024)
+            msg = f"강력 로그추적 폴더 정리 완료:\n폴더 {res['deleted_dirs']}개, 파일 {res['deleted_files']}개 삭제 (총 {freed_mb:.2f} MB 확보)"
+            self._append_log("INFO", f"🗑️ [추적 로그 정리] 폴더 {res['deleted_dirs']}개, 파일 {res['deleted_files']}개 ({freed_mb:.2f} MB) 일괄 삭제 완료.")
+            QMessageBox.information(self, "삭제 완료", msg)
 
     def _on_loop_count_changed(self, val: int):
         self.project.loop_count = val

@@ -10,6 +10,7 @@ from core.models import Project, Scenario, Action
 from core.window_manager import WindowManager
 from core.evaluator import ConditionEvaluator
 from core.input_controller import InputController
+from core.trace_logger import TraceLogger
 
 
 class WorkflowRunner(QThread):
@@ -28,18 +29,32 @@ class WorkflowRunner(QThread):
     sig_step_completed = pyqtSignal(int)  # next_scenario_index
     sig_finished = pyqtSignal(str)  # reason
 
-    def __init__(self, project: Project, hwnd: int, start_scenario_id: Optional[str] = None, anti_burn_overlay=None, parent=None):
+    def __init__(self, project: Project, hwnd: int, start_scenario_id: Optional[str] = None, anti_burn_overlay=None, parent=None, robust_trace_enabled: bool = False):
         super().__init__(parent)
         self.project = project
         self.hwnd = hwnd
         self.start_scenario_id = start_scenario_id
         self.anti_burn_overlay = anti_burn_overlay or getattr(parent, "anti_burn_overlay", None)
+        self.robust_trace_enabled = robust_trace_enabled
+        self.trace_logger = TraceLogger()
         self._next_scenario_id: Optional[str] = None
         self.current_scenario_id: Optional[str] = None
 
         self._is_running = False
         self._is_paused = False
         self._step_mode = False  # If True, runs one step then pauses
+
+    def set_robust_trace_enabled(self, enabled: bool):
+        """Toggle robust trace mode dynamically during runtime."""
+        self.robust_trace_enabled = enabled
+
+    def _log(self, level: str, msg: str):
+        """Emits a log message with optional trace screenshot link if robust trace is active."""
+        if getattr(self, "robust_trace_enabled", False) and hasattr(self, "trace_logger") and self.hwnd:
+            shot_path = self.trace_logger.capture_screenshot_if_eligible(self.hwnd)
+            if shot_path:
+                msg = f"{msg} [TRACE_SHOT:{shot_path}]"
+        self.sig_log.emit(level, msg)
 
     def _wait_for_anti_burn(self):
         """
@@ -54,7 +69,7 @@ class WorkflowRunner(QThread):
         is_trans = (overlay and overlay.is_transitioning()) or AntiBurnInOverlay.is_any_transitioning()
 
         if is_trans and self._is_running:
-            self.sig_log.emit("INFO", "🖥️ [번인 방지 대기] 번인 방지 블랙 화면 전환 진행 중... 색상 오판정 방지를 위해 대기합니다.")
+            self._log("INFO", "🖥️ [번인 방지 대기] 번인 방지 블랙 화면 전환 진행 중... 색상 오판정 방지를 위해 대기합니다.")
             last_log_time = time.time()
             while self._is_running and (
                 (overlay and overlay.is_transitioning()) or AntiBurnInOverlay.is_any_transitioning()
@@ -70,11 +85,11 @@ class WorkflowRunner(QThread):
                     if rem_sec > 0:
                         mins = int(rem_sec // 60)
                         secs = int(rem_sec % 60)
-                        self.sig_log.emit("INFO", f"🖥️ [번인 방지 대기] 블랙 유지 중 (남은 시간: 약 {mins}분 {secs:02d}초)...")
+                        self._log("INFO", f"🖥️ [번인 방지 대기] 블랙 유지 중 (남은 시간: 약 {mins}분 {secs:02d}초)...")
                     else:
-                        self.sig_log.emit("INFO", "🖥️ [번인 방지 대기] 번인 방지 화면 복귀 대기 중...")
+                        self._log("INFO", "🖥️ [번인 방지 대기] 번인 방지 화면 복귀 대기 중...")
             if self._is_running:
-                self.sig_log.emit("INFO", "🖥️ [번인 방지 종료] 화면 복귀 완료. 조건 평가를 재개합니다.")
+                self._log("INFO", "🖥️ [번인 방지 종료] 화면 복귀 완료. 조건 평가를 재개합니다.")
 
     def sleep_interruptible(self, seconds: float) -> bool:
         """Sleeps in small chunks (20ms) checking self._is_running. Returns True if completed, False if interrupted."""
@@ -122,25 +137,27 @@ class WorkflowRunner(QThread):
         self._is_running = True
         self._is_paused = False
 
-        self.sig_log.emit("INFO", f"=== 시나리오 실행 시작 (타겟 HWND: {self.hwnd}) ===")
+        self._log("INFO", f"=== 시나리오 실행 시작 (타겟 HWND: {self.hwnd}) ===")
 
         target_win = WindowManager.get_window_info(self.hwnd)
         if not target_win:
             self._is_running = False
-            self.sig_log.emit("ERROR", "타겟 창을 찾을 수 없습니다. 실행을 중단합니다.")
+            self._log("ERROR", "타겟 창을 찾을 수 없습니다. 실행을 중단합니다.")
             self.sig_finished.emit("타겟 창 없음")
             return
 
-        self.sig_log.emit("INFO", f"타겟 창: '{target_win.title}' ({target_win.client_width}x{target_win.client_height})")
+        self._log("INFO", f"타겟 창: '{target_win.title}' ({target_win.client_width}x{target_win.client_height})")
 
         total_loops = self.project.loop_count
         current_loop = 1
 
         while self._is_running:
             loop_start_time = time.time()
+            if self.robust_trace_enabled and hasattr(self, "trace_logger"):
+                self.trace_logger.start_loop(current_loop)
             loop_str = f"{current_loop}/{total_loops}" if total_loops > 0 else f"{current_loop}/무한"
             self.sig_loop_progress.emit(current_loop, total_loops)
-            self.sig_log.emit("INFO", f"--- 루프 회차 {loop_str} 시작 ---")
+            self._log("INFO", f"--- 루프 회차 {loop_str} 시작 ---")
 
             # Execute scenarios starting at step 1 or selected node
             scenarios = self.project.scenarios
@@ -149,7 +166,7 @@ class WorkflowRunner(QThread):
                 found_idx = next((i for i, s in enumerate(scenarios) if s.id == self.start_scenario_id), None)
                 if found_idx is not None:
                     current_index = found_idx
-                    self.sig_log.emit("INFO", f"[#{scenarios[found_idx].step_number}] ▶ 선택된 노드 '{scenarios[found_idx].name}'부터 실행을 시작합니다.")
+                    self._log("INFO", f"[#{scenarios[found_idx].step_number}] ▶ 선택된 노드 '{scenarios[found_idx].name}'부터 실행을 시작합니다.")
                 self.start_scenario_id = None
 
             loop_counters = {}  # {loop_start_id: int}
@@ -169,7 +186,7 @@ class WorkflowRunner(QThread):
                     target = self._resolve_target_scenario(self._next_scenario_id)
                     if target and target in scenarios:
                         current_index = scenarios.index(target)
-                        self.sig_log.emit("INFO", f"[#{target.step_number}] ▶ 선택된 노드 '{target.name}'(으)로 이동하여 진행합니다.")
+                        self._log("INFO", f"[#{target.step_number}] ▶ 선택된 노드 '{target.name}'(으)로 이동하여 진행합니다.")
                     self._next_scenario_id = None
                 elif was_paused and self.current_scenario_id:
                     # Defensive: if scenario list was reordered while paused, keep current_index pointing to current_scenario_id
@@ -190,18 +207,18 @@ class WorkflowRunner(QThread):
                     if not scen.enabled:
                         end_idx = self.project.find_matching_folder_end(current_index)
                         if end_idx is not None:
-                            self.sig_log.emit("INFO", f"📁 [폴더 비활성] '{scen.name}' 전체 ({current_index + 1} ~ {end_idx + 1}단계) 스킵")
+                            self._log("INFO", f"📁 [폴더 비활성] '{scen.name}' 전체 ({current_index + 1} ~ {end_idx + 1}단계) 스킵")
                             for skipped_i in range(current_index, end_idx + 1):
                                 self.sig_scenario_completed.emit(scenarios[skipped_i].id, "skipped")
                             current_index = end_idx + 1
                             continue
-                    self.sig_log.emit("INFO", f"📁 [폴더 시작] '{scen.name}' 통과 (시인성 그룹)")
+                    self._log("INFO", f"📁 [폴더 시작] '{scen.name}' 통과 (시인성 그룹)")
                     self.sig_scenario_completed.emit(scen.id, "success")
                     current_index += 1
                     continue
 
                 if getattr(scen, "is_folder_end", scen.node_type == "folder_end"):
-                    self.sig_log.emit("INFO", f"📁 [폴더 종료] '{scen.name}' 통과")
+                    self._log("INFO", f"📁 [폴더 종료] '{scen.name}' 통과")
                     self.sig_scenario_completed.emit(scen.id, "success")
                     current_index += 1
                     continue
@@ -223,7 +240,7 @@ class WorkflowRunner(QThread):
                     # 1. Check max iterations for count mode
                     if scen.loop_mode == "count" and current_iter >= max_iter:
                         end_idx = self.project.find_matching_loop_end(current_index)
-                        self.sig_log.emit("INFO", f"🚪 [루프 탈출 s{scen.scenario_number}] '{scen.name}': 지정 횟수({max_iter}회) 완료로 루프 탈출")
+                        self._log("INFO", f"🚪 [루프 탈출 s{scen.scenario_number}] '{scen.name}': 지정 횟수({max_iter}회) 완료로 루프 탈출")
                         if scen.id in loop_counters:
                             del loop_counters[scen.id]
                         current_index = (end_idx + 1) if end_idx is not None else (current_index + 1)
@@ -237,7 +254,7 @@ class WorkflowRunner(QThread):
                         matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
                         if scen.loop_mode == "until_match" and matched:
                             end_idx = self.project.find_matching_loop_end(current_index)
-                            self.sig_log.emit("SUCCESS", f"⚡ [루프 탈출 s{scen.scenario_number}] '{scen.name}': 탈출 인식 조건 충족! 루프 즉시 탈출")
+                            self._log("SUCCESS", f"⚡ [루프 탈출 s{scen.scenario_number}] '{scen.name}': 탈출 인식 조건 충족! 루프 즉시 탈출")
                             if scen.id in loop_counters:
                                 del loop_counters[scen.id]
                             current_index = (end_idx + 1) if end_idx is not None else (current_index + 1)
@@ -246,7 +263,7 @@ class WorkflowRunner(QThread):
                             mismatch_info = ConditionEvaluator.format_mismatch_log(point_results)
                             fail_count = sum(1 for p in point_results if not p.get("passed", False))
                             mismatch_tail = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
-                            self.sig_log.emit("INFO", f"⚡ [루프 탈출 s{scen.scenario_number}] '{scen.name}': 지속 조건 불일치{mismatch_tail}. 루프 탈출")
+                            self._log("INFO", f"⚡ [루프 탈출 s{scen.scenario_number}] '{scen.name}': 지속 조건 불일치{mismatch_tail}. 루프 탈출")
                             if scen.id in loop_counters:
                                 del loop_counters[scen.id]
                             current_index = (end_idx + 1) if end_idx is not None else (current_index + 1)
@@ -254,9 +271,9 @@ class WorkflowRunner(QThread):
 
                     limit_str = f"{max_iter}회" if scen.loop_mode != "infinite" else "무한"
                     if current_iter == 0:
-                        self.sig_log.emit("INFO", f"🔄 [루프 시작 s{scen.scenario_number}] '{scen.name}': 루프 진입 (최대 {limit_str})")
+                        self._log("INFO", f"🔄 [루프 시작 s{scen.scenario_number}] '{scen.name}': 루프 진입 (최대 {limit_str})")
                     else:
-                        self.sig_log.emit("INFO", f"🔁 [루프 반복 s{scen.scenario_number}] '{scen.name}': {current_iter + 1}/{limit_str} 회차 진행")
+                        self._log("INFO", f"🔁 [루프 반복 s{scen.scenario_number}] '{scen.name}': {current_iter + 1}/{limit_str} 회차 진행")
                     eff_actions = scen.get_effective_actions(self.project) if hasattr(scen, "get_effective_actions") else scen.actions
                     if eff_actions:
                         self._execute_actions(scen)
@@ -271,7 +288,7 @@ class WorkflowRunner(QThread):
                     if start_idx is not None:
                         start_scen = scenarios[start_idx]
                         loop_counters[start_scen.id] = loop_counters.get(start_scen.id, 0) + 1
-                        self.sig_log.emit("INFO", f"🔁 [루프 회귀 s{scen.scenario_number}] → 루프 시작 s{start_scen.scenario_number}로 복귀 (누적 {loop_counters[start_scen.id]}회 완료)")
+                        self._log("INFO", f"🔁 [루프 회귀 s{scen.scenario_number}] → 루프 시작 s{start_scen.scenario_number}로 복귀 (누적 {loop_counters[start_scen.id]}회 완료)")
                         current_index = start_idx
                     else:
                         current_index += 1
@@ -281,11 +298,11 @@ class WorkflowRunner(QThread):
                 # Standard Scenario Evaluation
                 # ----------------------------------------------------
                 self.sig_scenario_started.emit(scen.id)
-                self.sig_log.emit("INFO", f"[#{scen.step_number}] '{scen.name}' 조건 평가 중...")
+                self._log("INFO", f"[#{scen.step_number}] '{scen.name}' 조건 평가 중...")
 
                 # Verify window is still valid
                 if not WindowManager.get_window_info(self.hwnd):
-                    self.sig_log.emit("ERROR", "타겟 창이 닫혔거나 유효하지 않습니다.")
+                    self._log("ERROR", "타겟 창이 닫혔거나 유효하지 않습니다.")
                     self._is_running = False
                     break
 
@@ -307,7 +324,7 @@ class WorkflowRunner(QThread):
                         mismatch_info = ConditionEvaluator.format_mismatch_log(point_results)
                         fail_count = sum(1 for p in point_results if not p.get("passed", False))
                         mismatch_str = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
-                        self.sig_log.emit("INFO", f"[#{scen.step_number}] ⏳ '{scen.name}' 조건 불일치{mismatch_str} - 재시도 대기 ({attempt}/{scen.retry_max_count}회, {scen.retry_interval_sec:.1f}초 후 재검사)...")
+                        self._log("INFO", f"[#{scen.step_number}] ⏳ '{scen.name}' 조건 불일치{mismatch_str} - 재시도 대기 ({attempt}/{scen.retry_max_count}회, {scen.retry_interval_sec:.1f}초 후 재검사)...")
                         if not self.sleep_interruptible(scen.retry_interval_sec):
                             break
 
@@ -323,7 +340,7 @@ class WorkflowRunner(QThread):
                         rule_tag = f" - {total_count}/{total_count}개 일치, AND 충족"
                     else:
                         rule_tag = ""
-                    self.sig_log.emit("SUCCESS", f"[#{scen.step_number}] '{scen.name}' 조건 일치! (판정: 성공{rule_tag})")
+                    self._log("SUCCESS", f"[#{scen.step_number}] '{scen.name}' 조건 일치! (판정: 성공{rule_tag})")
 
                     if scen.on_match == "execute":
                         # Execute actions
@@ -340,20 +357,20 @@ class WorkflowRunner(QThread):
                             if scenarios[k].node_type == "loop_end":
                                 end_idx = k
                                 break
-                        self.sig_log.emit("INFO", f"[#{scen.step_number}] ⚡ [루프 탈출] 조건 일치로 현재 루프 즉시 탈출")
+                        self._log("INFO", f"[#{scen.step_number}] ⚡ [루프 탈출] 조건 일치로 현재 루프 즉시 탈출")
                         current_index = (end_idx + 1) if end_idx is not None else len(scenarios)
 
                     elif scen.on_match == "jump":
                         target_scen = self._resolve_target_scenario(scen.jump_target_on_match)
                         if target_scen:
-                            self.sig_log.emit("INFO", f"[#{scen.step_number}] → 조건 일치로 시나리오 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]로 점프")
+                            self._log("INFO", f"[#{scen.step_number}] → 조건 일치로 시나리오 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]로 점프")
                             current_index = scenarios.index(target_scen)
                         else:
-                            self.sig_log.emit("WARN", f"점프 대상 ID '{scen.jump_target_on_match}'을 찾을 수 없어 다음 단계로 진행합니다.")
+                            self._log("WARN", f"점프 대상 ID '{scen.jump_target_on_match}'을 찾을 수 없어 다음 단계로 진행합니다.")
                             current_index += 1
 
                     elif scen.on_match == "stop":
-                        self.sig_log.emit("INFO", f"[#{scen.step_number}] 조건 일치로 실행 정지 지시.")
+                        self._log("INFO", f"[#{scen.step_number}] 조건 일치로 실행 정지 지시.")
                         self._is_running = False
                         break
 
@@ -364,23 +381,23 @@ class WorkflowRunner(QThread):
                     mismatch_str = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
                     if scen.on_mismatch == "retry":
                         fail_action = getattr(scen, "retry_fail_action", "stop")
-                        self.sig_log.emit("WARN", f"[#{scen.step_number}] '{scen.name}' 조건 재시도({scen.retry_max_count}회) 모두 소진!{mismatch_str} (실패 처리: {fail_action})")
+                        self._log("WARN", f"[#{scen.step_number}] '{scen.name}' 조건 재시도({scen.retry_max_count}회) 모두 소진!{mismatch_str} (실패 처리: {fail_action})")
                         if fail_action == "stop":
-                            self.sig_log.emit("ERROR", f"[#{scen.step_number}] 조건 재시도 실패로 오토 실행을 정지합니다.")
+                            self._log("ERROR", f"[#{scen.step_number}] 조건 재시도 실패로 오토 실행을 정지합니다.")
                             self._is_running = False
                             break
                         elif fail_action == "jump":
                             target_id = getattr(scen, "retry_fail_jump_target", "") or scen.jump_target_on_mismatch
                             target_scen = self._resolve_target_scenario(target_id)
                             if target_scen and target_scen in scenarios:
-                                self.sig_log.emit("INFO", f"[#{scen.step_number}] → 재시도 소진으로 시나리오 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]로 점프합니다.")
+                                self._log("INFO", f"[#{scen.step_number}] → 재시도 소진으로 시나리오 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]로 점프합니다.")
                                 current_index = scenarios.index(target_scen)
                             else:
-                                self.sig_log.emit("WARN", f"재시도 실패 점프 대상 ID '{target_id}'를 찾을 수 없어 오토 실행을 정지합니다.")
+                                self._log("WARN", f"재시도 실패 점프 대상 ID '{target_id}'를 찾을 수 없어 오토 실행을 정지합니다.")
                                 self._is_running = False
                                 break
                         else:  # "next"
-                            self.sig_log.emit("INFO", f"[#{scen.step_number}] 조건 재시도 소진으로 다음 시나리오로 진행합니다.")
+                            self._log("INFO", f"[#{scen.step_number}] 조건 재시도 소진으로 다음 시나리오로 진행합니다.")
                             current_index += 1
 
                     elif scen.on_mismatch == "next":
@@ -392,20 +409,20 @@ class WorkflowRunner(QThread):
                             if scenarios[k].node_type == "loop_end":
                                 end_idx = k
                                 break
-                        self.sig_log.emit("INFO", f"[#{scen.step_number}] ⚡ [루프 탈출] 조건 불일치로 현재 루프 즉시 탈출")
+                        self._log("INFO", f"[#{scen.step_number}] ⚡ [루프 탈출] 조건 불일치로 현재 루프 즉시 탈출")
                         current_index = (end_idx + 1) if end_idx is not None else len(scenarios)
 
                     elif scen.on_mismatch == "jump":
                         target_scen = self._resolve_target_scenario(scen.jump_target_on_mismatch)
                         if target_scen:
-                            self.sig_log.emit("INFO", f"[#{scen.step_number}] → 조건 불일치로 시나리오 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]로 점프")
+                            self._log("INFO", f"[#{scen.step_number}] → 조건 불일치로 시나리오 s{target_scen.scenario_number} (실행 #{target_scen.step_number}) [{target_scen.name}]로 점프")
                             current_index = scenarios.index(target_scen)
                         else:
-                            self.sig_log.emit("WARN", f"점프 대상 ID '{scen.jump_target_on_mismatch}'을 찾을 수 없어 다음 단계로 진행합니다.")
+                            self._log("WARN", f"점프 대상 ID '{scen.jump_target_on_mismatch}'을 찾을 수 없어 다음 단계로 진행합니다.")
                             current_index += 1
 
                     elif scen.on_mismatch == "stop":
-                        self.sig_log.emit("INFO", f"[#{scen.step_number}] 조건 불일치로 실행 정지 지시.")
+                        self._log("INFO", f"[#{scen.step_number}] 조건 불일치로 실행 정지 지시.")
                         self._is_running = False
                         break
 
@@ -413,20 +430,20 @@ class WorkflowRunner(QThread):
                 if self._step_mode:
                     self._step_mode = False
                     self._is_paused = True
-                    self.sig_log.emit("INFO", "단일 스텝 완료 (일시정지됨)")
+                    self._log("INFO", "단일 스텝 완료 (일시정지됨)")
                     self.sig_step_completed.emit(current_index)
 
             # Check loop completion
             loop_duration = time.time() - loop_start_time
             dur_str = self._format_duration(loop_duration)
-            self.sig_log.emit("INFO", f"⏱️ [루프 소요 시간] 루프 {loop_str} 완료 (소요: {dur_str})")
+            self._log("INFO", f"⏱️ [루프 소요 시간] 루프 {loop_str} 완료 (소요: {dur_str})")
             self.sig_loop_completed.emit(current_loop, total_loops, loop_duration)
 
             if not self._is_running:
                 break
 
             if total_loops > 0 and current_loop >= total_loops:
-                self.sig_log.emit("SUCCESS", f"지정된 반복 횟수({total_loops}회)를 모두 완료했습니다. (최근 루프: {dur_str})")
+                self._log("SUCCESS", f"지정된 반복 횟수({total_loops}회)를 모두 완료했습니다. (최근 루프: {dur_str})")
                 break
 
             current_loop += 1
@@ -436,7 +453,7 @@ class WorkflowRunner(QThread):
 
         self._is_running = False
         self.sig_finished.emit("완료")
-        self.sig_log.emit("INFO", "=== 시나리오 실행 종료 ===")
+        self._log("INFO", "=== 시나리오 실행 종료 ===")
 
     def _execute_actions(self, scenario: Scenario):
         """Sequentially execute all actions defined in the scenario."""
@@ -449,7 +466,7 @@ class WorkflowRunner(QThread):
         offset_sec = float(getattr(self.project, "anti_ban_offset_seconds", getattr(self.project, "anti_ban_max_delay", 1.0)))
         scen_log = getattr(scenario, "custom_log", "")
         if scen_log:
-            self.sig_log.emit("USER", f"  [액션 로그] {scen_log}")
+            self._log("USER", f"  [액션 로그] {scen_log}")
 
         for act_idx, act in enumerate(actions):
             if not self._is_running:
@@ -498,12 +515,12 @@ class WorkflowRunner(QThread):
                 time_str = f" (안티밴 +{jitter:.2f}초)" if (should_anti_ban and jitter > 0) else ""
                 log_msg = f"액션 실행: {act.get_summary()}{coord_str}{time_str}"
             step_tag = f"[#{scenario.step_number}] " if getattr(scenario, "step_number", None) is not None else ""
-            self.sig_log.emit("ACTION", f"{step_tag}▶ {log_msg}")
+            self._log("ACTION", f"{step_tag}▶ {log_msg}")
 
             if act.action_type == "log_message":
-                self.sig_log.emit("USER", f"  [사용자 로그] {act.log_text}")
+                self._log("USER", f"  [사용자 로그] {act.log_text}")
             elif getattr(act, "custom_log", ""):
-                self.sig_log.emit("USER", f"  [사용자 로그] {act.custom_log}")
+                self._log("USER", f"  [사용자 로그] {act.custom_log}")
 
             InputController.execute_action(
                 action=act,

@@ -13,6 +13,7 @@ env/
 *.log
 fgoa_crash.log
 fgoa_debug.log
+trace_logs/
 
 # Visual Studio / .NET Build Artifacts
 [Bb]in/

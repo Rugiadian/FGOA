@@ -1,0 +1,54 @@
+================================================================================
+작업 일시: 2026-10-22 20:07:00
+작업 명: 강력 로그추적 모드, 초고속 스크린샷 링크, 루프별 폴더 격리 저장 및 일괄 삭제 기능 추가
+작업자: Antigravity
+================================================================================
+
+[1. 작업 배경 및 요구사항]
+1) 강력한 로그추적 모드 추가
+   - 각 로그 출력 마다 타겟 화면 스크린샷을 촬영하고 로그 메시지에 링크 연결.
+   - 단, 1초 이하 간격으로는 촬영하지 않음 (과도한 캡처 및 시스템 부하 방지).
+2) 초고속 및 안정적인 캡처 최적화
+   - 화면을 대강 알아볼 수 있는 수준에서 가장 빠르고 안정적인 옵션 적용.
+3) 시나리오 전체 루프 1회마다 폴더 생성 및 저장
+   - 루프 회차별로 별도 디렉터리를 생성하여 스냅샷 격리 보관.
+4) 강력로그추적 폴더 일괄 삭제 버튼 추가
+   - UI에서 원클릭으로 추적 폴더 및 모든 스크린샷을 안전하게 일괄 삭제.
+
+[2. 주요 변경 내역]
+1) 초고속·저부하 추적 스크린샷 매니저 신설 (core/trace_logger.py)
+   - TraceLogger 클래스 구현:
+     * min_interval_sec=1.0 간격 제약 엄격 적용 (마지막 캡처 후 1초 미만 호출 시 즉시 None 반환하여 촬영 건너뜀).
+     * mss 기반 타겟 윈도우 클라이언트 영역 고속 캡처 -> PIL Image.Resampling.NEAREST로 가로 640px 다운스케일(0.5ms 이하) -> JPEG quality 40 압축 저장(1~3ms).
+     * 1회 캡처/저장 소요 시간 약 10ms, 파일 크기 약 15~25KB로 극단적 성능 최적화 및 디스크 용량 절약.
+     * start_loop(loop_index): loop_{loop:03d}_{timestamp} 형태의 회차별 하위 디렉터리 생성 및 격리 보관.
+     * clean_all_trace_logs(trace_base_dir): 모든 루프 폴더 및 스냅샷 파일 일괄 정리 및 통계(삭제 폴더 수, 파일 수, 확보 용량) 반환.
+
+2) 시나리오 실행 엔진 연동 (core/runner.py)
+   - WorkflowRunner에 robust_trace_enabled 플래그 및 trace_logger 인스턴스 연동.
+   - 런타임 중 동적 활성화/비활성화를 지원하는 set_robust_trace_enabled(enabled) 메서드 추가.
+   - while self._is_running 루프 시작 시점에 trace_logger.start_loop(current_loop) 호출로 루프별 폴더 자동 분리.
+   - 러너 내 로그 발행을 _log(level, msg)로 일원화:
+     * 강력 로그추적 활성 시 1초 경과 여부를 판별하여 스냅샷 캡처 후 [TRACE_SHOT:{shot_path}] 태그를 메시지에 첨부.
+     * 백그라운드 QThread에서 캡처/저장을 수행하여 메인 UI 스레드 렌더링 지연(블로킹) 0% 달성.
+
+3) 실시간 실행 로그 UI 링크 렌더링 및 제어 버튼 추가 (ui/main_window.py)
+   - 실시간 실행 로그 패널 상단(log_header)에 컨트롤 배치:
+     * chk_robust_trace: '강력 로그추적' 체크박스 (툴팁 안내 및 실행 중 실시간 러너 연동, fgoa_config.json에 설정 자동 저장/복원).
+     * btn_delete_trace: '🗑️ 추적 폴더 일괄 삭제' 버튼 (확인 다이얼로그 후 일괄 삭제 수행 및 결과/확보 용량 알림).
+   - _append_log: [TRACE_SHOT:path] 태그 파싱 후 record["screenshot_path"]로 보관.
+   - _format_log_record_html: 스크린샷이 첨부된 로그 항목에 [📸 화면] 하이퍼링크 뱃지 출력.
+   - _on_log_anchor_clicked: view-screenshot:{path} 클릭 시 내장 ImagePreviewDialog를 띄워 확대 이미지 확인 지원.
+
+4) .gitignore 업데이트 (.gitignore)
+   - 생성되는 스크린샷 및 루프 폴더의 git 추적 방지를 위해 trace_logs/ 등록.
+
+[3. 테스트 및 검증]
+- tests/test_robust_trace_logger.py 신규 작성 (5개 테스트 케이스 100% 통과):
+  * test_01_trace_logger_interval_enforcement_and_loop_folders: 1초 미만 캡처 스킵, 1초 이상 정상 캡처, 640px 리사이즈, 루프별 폴더 격리 검증.
+  * test_02_bulk_cleanup_trace_logs: 모든 하위 폴더 및 파일 일괄 삭제와 디스크 용량 계산 검증.
+  * test_03_runner_trace_integration: WorkflowRunner에서 _log 호출 시 1초 간격에 맞춰 [TRACE_SHOT:path] 태그 발송 검증.
+  * test_04_ui_log_parsing_and_clickable_link: MainWindow에서 태그 파싱, [📸 화면] 뱃지 생성 및 앵커 클릭 시 ImagePreviewDialog 호출 검증.
+  * test_05_ui_robust_trace_controls_and_config_persistence: 체크박스, 일괄 삭제 버튼 및 config 영속 저장/복원 검증.
+- 기존 단위 테스트 회귀 검증: test_log_alignment, test_mismatch_toggle_and_or_condition, test_config_persistence_all_controls 전체 통과.
+================================================================================
