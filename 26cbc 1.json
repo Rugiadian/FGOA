@@ -2,12 +2,12 @@
   "version": "1.0.0",
   "name": "FGOA Auto Project",
   "target_window_title": "Android Device",
-  "target_client_width": 1024,
-  "target_client_height": 616,
+  "target_client_width": 1023,
+  "target_client_height": 615,
   "authoring_width": 1024,
   "authoring_height": 616,
   "reference_image_path": null,
-  "loop_count": 1,
+  "loop_count": 10,
   "loop_delay_seconds": 1.0,
   "anti_ban_enabled": true,
   "anti_ban_offset": 10,
@@ -6864,6 +6864,14 @@
       "description": "",
       "actions": [],
       "last_action_image_path": null
+    },
+    {
+      "id": "seq_d62bf2",
+      "sequence_number": 39,
+      "name": "시퀀스 39",
+      "description": "",
+      "actions": [],
+      "last_action_image_path": null
     }
   ],
   "scenarios": [
@@ -6881,6 +6889,7 @@
       "folder_target_id": "scen_a04e50",
       "condition_id": null,
       "condition": null,
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -6894,14 +6903,15 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_79be92",
       "step_number": 2,
       "scenario_number": 32,
       "name": "퀘스트 진입 (복제)",
-      "enabled": true,
+      "enabled": false,
       "node_type": "normal",
       "is_collapsed": false,
       "loop_mode": "count",
@@ -6910,6 +6920,7 @@
       "folder_target_id": "",
       "condition_id": null,
       "condition": null,
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "retry",
@@ -6923,7 +6934,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_c41b51",
@@ -6960,6 +6972,7 @@
         ],
         "action_sequence_id": null
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "retry",
@@ -6973,7 +6986,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_0ebd87",
@@ -7010,6 +7024,7 @@
         ],
         "action_sequence_id": null
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "retry",
@@ -7023,7 +7038,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_4beb2b",
@@ -7060,6 +7076,7 @@
         ],
         "action_sequence_id": null
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "retry",
@@ -7073,14 +7090,15 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_17f470",
       "step_number": 6,
       "scenario_number": 35,
       "name": "칼데아보이즈26",
-      "enabled": false,
+      "enabled": true,
       "node_type": "normal",
       "is_collapsed": false,
       "loop_mode": "count",
@@ -7110,6 +7128,7 @@
         ],
         "action_sequence_id": null
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "retry",
@@ -7123,7 +7142,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_a04e50",
@@ -7139,6 +7159,7 @@
       "folder_target_id": "scen_9c1f96",
       "condition_id": null,
       "condition": null,
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -7152,7 +7173,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_c71a1b",
@@ -7176,6 +7198,7 @@
         "points": [],
         "action_sequence_id": "seq_930aa3"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -7189,7 +7212,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": "references/capture_20260927_220614.png",
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_3d50b1",
@@ -7205,6 +7229,7 @@
       "folder_target_id": "",
       "condition_id": null,
       "condition": null,
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -7241,7 +7266,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_eb4c01",
@@ -7265,6 +7291,7 @@
         "points": [],
         "action_sequence_id": "seq_219667"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -7278,7 +7305,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_d89884",
@@ -7294,6 +7322,7 @@
       "folder_target_id": "",
       "condition_id": null,
       "condition": null,
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -7330,7 +7359,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_55fc7a",
@@ -7379,6 +7409,7 @@
         ],
         "action_sequence_id": null
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "retry",
@@ -7392,7 +7423,8 @@
       "post_delay_seconds": 0.7,
       "custom_log": "",
       "last_action_image_path": "references/capture_20261009_092731.png",
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_c747e3",
@@ -7429,6 +7461,7 @@
         ],
         "action_sequence_id": null
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "retry",
@@ -7442,7 +7475,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": "references/capture_20260925_182937.png",
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_04a2fb",
@@ -7539,6 +7573,7 @@
         ],
         "action_sequence_id": null
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -7552,7 +7587,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_ab426f",
@@ -7576,6 +7612,7 @@
         "points": [],
         "action_sequence_id": "seq_ea099c"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -7589,7 +7626,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": "references/capture_20261006_160949.png",
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_fad5df",
@@ -7613,6 +7651,7 @@
         "points": [],
         "action_sequence_id": "seq_aadb96"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -7626,7 +7665,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_6a74fb",
@@ -7650,6 +7690,7 @@
         "points": [],
         "action_sequence_id": "seq_8dda6b"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -7663,7 +7704,8 @@
       "post_delay_seconds": 3.0,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_aff5ba",
@@ -7700,6 +7742,7 @@
         ],
         "action_sequence_id": null
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "retry",
@@ -7780,7 +7823,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": "references/capture_20260925_182937.png",
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_e37e39",
@@ -7796,6 +7840,7 @@
       "folder_target_id": "",
       "condition_id": null,
       "condition": null,
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -7809,7 +7854,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": "references/capture_20260925_204346.png",
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_c9f19f",
@@ -7833,6 +7879,7 @@
         "points": [],
         "action_sequence_id": "seq_1337a0"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -7846,7 +7893,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": "references/capture_20261006_160949.png",
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_daa9b1",
@@ -7870,6 +7918,7 @@
         "points": [],
         "action_sequence_id": "seq_19966c"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -7883,7 +7932,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_784a45",
@@ -7899,6 +7949,7 @@
       "folder_target_id": "",
       "condition_id": null,
       "condition": null,
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -7935,85 +7986,12 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": "references/capture_20260925_182937.png",
-      "reference_image_path": null
-    },
-    {
-      "id": "scen_b0c3e6",
-      "step_number": 23,
-      "scenario_number": 43,
-      "name": "인연업 감지",
-      "enabled": true,
-      "node_type": "normal",
-      "is_collapsed": false,
-      "loop_mode": "count",
-      "loop_count": 5,
-      "loop_target_id": "",
-      "folder_target_id": "",
-      "condition_id": "cond_f25e26",
-      "condition": {
-        "id": "cond_f25e26",
-        "condition_number": 36,
-        "name": "시나리오 43 조건",
-        "logic_operator": "AND",
-        "reference_image_path": null,
-        "points": [],
-        "action_sequence_id": "seq_3f494b"
-      },
-      "on_match": "execute",
-      "jump_target_on_match": "",
-      "on_mismatch": "next",
-      "jump_target_on_mismatch": "",
-      "retry_max_count": 3,
-      "retry_interval_sec": 0.5,
-      "retry_fail_action": "stop",
-      "retry_fail_jump_target": "",
-      "sequence_id": "seq_3a0a23",
-      "actions": [],
-      "post_delay_seconds": 0.2,
-      "custom_log": "",
-      "last_action_image_path": null,
-      "reference_image_path": null
-    },
-    {
-      "id": "scen_eafa76",
-      "step_number": 24,
-      "scenario_number": 44,
-      "name": "인연업 감지 (복제)",
-      "enabled": true,
-      "node_type": "normal",
-      "is_collapsed": false,
-      "loop_mode": "count",
-      "loop_count": 5,
-      "loop_target_id": "",
-      "folder_target_id": "",
-      "condition_id": "cond_f25e26",
-      "condition": {
-        "id": "cond_f25e26",
-        "condition_number": 36,
-        "name": "시나리오 43 조건",
-        "logic_operator": "AND",
-        "reference_image_path": null,
-        "points": [],
-        "action_sequence_id": "seq_3f494b"
-      },
-      "on_match": "execute",
-      "jump_target_on_match": "",
-      "on_mismatch": "next",
-      "jump_target_on_mismatch": "",
-      "retry_max_count": 3,
-      "retry_interval_sec": 0.5,
-      "retry_fail_action": "stop",
-      "retry_fail_jump_target": "",
-      "sequence_id": "seq_3a0a23",
-      "actions": [],
-      "post_delay_seconds": 0.2,
-      "custom_log": "",
-      "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_728919",
-      "step_number": 25,
+      "step_number": 23,
       "scenario_number": 37,
       "name": "이것저것 감지",
       "enabled": true,
@@ -8070,6 +8048,7 @@
         ],
         "action_sequence_id": "seq_93ba1e"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "retry",
@@ -8083,7 +8062,86 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": "references/capture_20260925_182937.png",
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
+    },
+    {
+      "id": "scen_b0c3e6",
+      "step_number": 24,
+      "scenario_number": 43,
+      "name": "인연업 감지",
+      "enabled": true,
+      "node_type": "normal",
+      "is_collapsed": false,
+      "loop_mode": "count",
+      "loop_count": 5,
+      "loop_target_id": "",
+      "folder_target_id": "",
+      "condition_id": "cond_f25e26",
+      "condition": {
+        "id": "cond_f25e26",
+        "condition_number": 36,
+        "name": "시나리오 43 조건",
+        "logic_operator": "AND",
+        "reference_image_path": null,
+        "points": [],
+        "action_sequence_id": "seq_3f494b"
+      },
+      "condition_enabled": true,
+      "on_match": "execute",
+      "jump_target_on_match": "",
+      "on_mismatch": "next",
+      "jump_target_on_mismatch": "",
+      "retry_max_count": 3,
+      "retry_interval_sec": 0.5,
+      "retry_fail_action": "stop",
+      "retry_fail_jump_target": "",
+      "sequence_id": "seq_3a0a23",
+      "actions": [],
+      "post_delay_seconds": 0.2,
+      "custom_log": "",
+      "last_action_image_path": null,
+      "reference_image_path": null,
+      "custom_color": null
+    },
+    {
+      "id": "scen_eafa76",
+      "step_number": 25,
+      "scenario_number": 44,
+      "name": "인연업 감지 (복제)",
+      "enabled": true,
+      "node_type": "normal",
+      "is_collapsed": false,
+      "loop_mode": "count",
+      "loop_count": 5,
+      "loop_target_id": "",
+      "folder_target_id": "",
+      "condition_id": "cond_f25e26",
+      "condition": {
+        "id": "cond_f25e26",
+        "condition_number": 36,
+        "name": "시나리오 43 조건",
+        "logic_operator": "AND",
+        "reference_image_path": null,
+        "points": [],
+        "action_sequence_id": "seq_3f494b"
+      },
+      "condition_enabled": true,
+      "on_match": "execute",
+      "jump_target_on_match": "",
+      "on_mismatch": "next",
+      "jump_target_on_mismatch": "",
+      "retry_max_count": 3,
+      "retry_interval_sec": 0.5,
+      "retry_fail_action": "stop",
+      "retry_fail_jump_target": "",
+      "sequence_id": "seq_3a0a23",
+      "actions": [],
+      "post_delay_seconds": 0.2,
+      "custom_log": "",
+      "last_action_image_path": null,
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_a1653e",
@@ -8099,6 +8157,7 @@
       "folder_target_id": "",
       "condition_id": null,
       "condition": null,
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -8112,7 +8171,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_9a0781",
@@ -8136,6 +8196,7 @@
         "points": [],
         "action_sequence_id": "seq_8dda6b"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -8149,7 +8210,8 @@
       "post_delay_seconds": 5.0,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_becfa5",
@@ -8173,6 +8235,7 @@
         "points": [],
         "action_sequence_id": null
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "retry",
@@ -8186,7 +8249,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": "references/capture_20261009_092731.png",
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_0a912a",
@@ -8202,6 +8266,7 @@
       "folder_target_id": "scen_5f9209",
       "condition_id": null,
       "condition": null,
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -8215,7 +8280,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_b9ed83",
@@ -8239,6 +8305,7 @@
         "points": [],
         "action_sequence_id": null
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "retry",
@@ -8252,7 +8319,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_a9f4b5",
@@ -8289,6 +8357,7 @@
         ],
         "action_sequence_id": null
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "retry",
@@ -8302,7 +8371,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_5f9209",
@@ -8318,6 +8388,7 @@
       "folder_target_id": "scen_0a912a",
       "condition_id": null,
       "condition": null,
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -8331,7 +8402,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_e5142f",
@@ -8355,6 +8427,7 @@
         "points": [],
         "action_sequence_id": null
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -8368,7 +8441,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": "references/capture_20260925_214424.png",
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_b9e4c6",
@@ -8392,6 +8466,7 @@
         "points": [],
         "action_sequence_id": "seq_d4ea96"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -8405,7 +8480,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_c59dbb",
@@ -8429,6 +8505,7 @@
         "points": [],
         "action_sequence_id": "seq_6f406a"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -8442,7 +8519,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_208176",
@@ -8458,6 +8536,7 @@
       "folder_target_id": "scen_1acc2d",
       "condition_id": null,
       "condition": null,
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -8471,7 +8550,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_1ec90e",
@@ -8508,6 +8588,7 @@
         ],
         "action_sequence_id": null
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -8676,7 +8757,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_f634c9",
@@ -8700,6 +8782,7 @@
         "points": [],
         "action_sequence_id": "seq_e4bf50"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -8713,7 +8796,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_46ee68",
@@ -8762,6 +8846,7 @@
         ],
         "action_sequence_id": "seq_e4bf50"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -8775,7 +8860,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_1acc2d",
@@ -8791,6 +8877,7 @@
       "folder_target_id": "scen_208176",
       "condition_id": null,
       "condition": null,
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -8804,7 +8891,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_61b6af",
@@ -8828,6 +8916,7 @@
         "points": [],
         "action_sequence_id": "seq_42b043"
       },
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "next",
@@ -8841,7 +8930,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": "references/capture_20260925_205954.png",
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_41265e",
@@ -8857,6 +8947,7 @@
       "folder_target_id": "",
       "condition_id": null,
       "condition": null,
+      "condition_enabled": true,
       "on_match": "execute",
       "jump_target_on_match": "",
       "on_mismatch": "retry",
@@ -8937,7 +9028,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     },
     {
       "id": "scen_8bac43",
@@ -8961,6 +9053,7 @@
         "points": [],
         "action_sequence_id": "seq_bea285"
       },
+      "condition_enabled": true,
       "on_match": "stop",
       "jump_target_on_match": "",
       "on_mismatch": "stop",
@@ -8974,7 +9067,8 @@
       "post_delay_seconds": 0.2,
       "custom_log": "",
       "last_action_image_path": null,
-      "reference_image_path": null
+      "reference_image_path": null,
+      "custom_color": null
     }
   ]
 }
