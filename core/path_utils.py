@@ -102,3 +102,103 @@ def to_absolute_path(path: Optional[str], base_dir: Optional[str] = None) -> Opt
 
     # 5. Fallback: return resolved path relative to base
     return os.path.abspath(os.path.join(base, path_str)) if not os.path.isabs(path_str) else path_str
+
+
+def get_trace_dir(base_dir: Optional[str] = None) -> str:
+    """Returns the primary repository trace logs directory (trace_logs/)."""
+    root = os.path.abspath(base_dir or get_project_root())
+    trace_dir = os.path.join(root, "trace_logs")
+    os.makedirs(trace_dir, exist_ok=True)
+    return trace_dir
+
+
+def to_trace_relative_path(path: Optional[str], base_dir: Optional[str] = None) -> Optional[str]:
+    """
+    Converts a trace screenshot path to repository-relative path (e.g. 'trace_logs/loop_001_.../shot_0001.jpg').
+    Ensures forward-slash normalization for cross-platform and cross-PC compatibility.
+    """
+    if not path:
+        return None
+    path_str = str(path).strip()
+    if not path_str:
+        return None
+
+    if not os.path.isabs(path_str):
+        return path_str.replace("\\", "/")
+
+    abs_path = os.path.abspath(path_str)
+    root = os.path.abspath(base_dir or get_project_root())
+
+    try:
+        rel = os.path.relpath(abs_path, root)
+        if not rel.startswith(".."):
+            return rel.replace("\\", "/")
+    except ValueError:
+        pass
+
+    norm_slash = abs_path.replace("\\", "/")
+    if "/trace_logs/" in norm_slash:
+        parts = norm_slash.split("/trace_logs/")
+        if len(parts) > 1:
+            return f"trace_logs/{parts[-1]}"
+
+    return norm_slash
+
+
+def to_trace_absolute_path(path: Optional[str], base_dir: Optional[str] = None) -> Optional[str]:
+    """
+    Converts a trace screenshot path (relative, URL-encoded, or from a foreign computer)
+    to the local machine's valid absolute path with multi-stage fallback and filename recovery.
+    """
+    if not path:
+        return None
+    import urllib.parse
+    raw_str = str(path).strip()
+    if not raw_str:
+        return None
+
+    # Handle URL decoding (e.g. %20, %5C, Korean chars)
+    path_str = urllib.parse.unquote(raw_str)
+
+    # Clean leading slashes before Windows drive letter (e.g. '/C:/...' or '///C:/...')
+    path_str = path_str.replace("\\", "/")
+    while path_str.startswith("/") and len(path_str) > 2 and path_str[2] == ":":
+        path_str = path_str[1:]
+
+    root = os.path.abspath(base_dir or get_project_root())
+    trace_dir = get_trace_dir(root)
+
+    # 1. If it's already an absolute path and exists locally on this PC:
+    if os.path.isabs(path_str) and os.path.exists(path_str):
+        return os.path.abspath(path_str)
+
+    # 2. If it's a relative path and exists locally:
+    if not os.path.isabs(path_str):
+        candidate = os.path.abspath(os.path.join(root, path_str))
+        if os.path.exists(candidate):
+            return candidate
+
+    # 3. Cross-PC re-anchoring: if path contains 'trace_logs', map to current PC's project trace_logs:
+    if "trace_logs" in path_str:
+        parts = path_str.split("trace_logs/")
+        if len(parts) > 1:
+            rel_tail = parts[-1]
+            candidate = os.path.abspath(os.path.join(trace_dir, rel_tail))
+            if os.path.exists(candidate):
+                return candidate
+
+    # 4. Deep Recovery by filename: search inside local trace_logs for matching filename
+    filename = os.path.basename(path_str)
+    if filename and os.path.exists(trace_dir):
+        for sub_root, _, files in os.walk(trace_dir):
+            if filename in files:
+                return os.path.abspath(os.path.join(sub_root, filename))
+
+    # 5. Fallback candidate
+    if "trace_logs" in path_str:
+        parts = path_str.split("trace_logs/")
+        if len(parts) > 1:
+            return os.path.abspath(os.path.join(trace_dir, parts[-1]))
+
+    return os.path.abspath(os.path.join(root, path_str)) if not os.path.isabs(path_str) else path_str
+

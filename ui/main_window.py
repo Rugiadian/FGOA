@@ -4169,11 +4169,25 @@ class MainWindow(QMainWindow):
         color = color_map.get(level, pal["text_primary"])
         prefix_color = "#64748b" if pal["is_light"] else "#8da4c4"
 
-        # Check for [TRACE_SHOT:path] tag
+        # Check for [TRACE_SHOT:path(|NUM:0001)] tag
         shot_path = ""
+        shot_num = ""
         m_shot = re.search(r"\[TRACE_SHOT:(.*?)\]", msg)
         if m_shot:
-            shot_path = m_shot.group(1).strip()
+            raw_shot_info = m_shot.group(1).strip()
+            if "|NUM:" in raw_shot_info:
+                shot_path, shot_num = raw_shot_info.split("|NUM:", 1)
+                shot_path = shot_path.strip()
+                shot_num = shot_num.strip()
+            elif "|" in raw_shot_info:
+                shot_path, shot_num = raw_shot_info.split("|", 1)
+                shot_path = shot_path.strip()
+                shot_num = shot_num.strip().lstrip("#")
+            else:
+                shot_path = raw_shot_info
+                m_num = re.search(r'shot_(\d+)', os.path.basename(shot_path))
+                shot_num = m_num.group(1) if m_num else ""
+
             msg = (msg[:m_shot.start()] + msg[m_shot.end():]).strip()
 
         log_id = self._next_log_id
@@ -4185,7 +4199,8 @@ class MainWindow(QMainWindow):
             "raw_msg": msg,
             "expanded": False,
             "has_mismatch": False,
-            "screenshot_path": shot_path
+            "screenshot_path": shot_path,
+            "screenshot_number": shot_num
         }
 
         # Check for explicit [MISMATCH:count]detail[/MISMATCH] tags
@@ -4227,9 +4242,14 @@ class MainWindow(QMainWindow):
         level = record["level"]
 
         shot_p = record.get("screenshot_path", "")
+        shot_num = record.get("screenshot_number", "")
         shot_badge = ""
-        if shot_p and os.path.exists(shot_p):
-            shot_badge = f" <a href='view-screenshot:{shot_p}' style='color: #38bdf8; text-decoration: none; font-weight: bold;'>[📸 화면]</a>"
+        if shot_p:
+            from core.path_utils import to_trace_absolute_path
+            shot_abs = to_trace_absolute_path(shot_p)
+            if shot_abs and os.path.isfile(shot_abs):
+                num_tag = f" #{shot_num}" if shot_num else ""
+                shot_badge = f" <a href='view-screenshot:{log_id}' style='color: #38bdf8; text-decoration: none; font-weight: bold;'>[📸{num_tag} 화면]</a>"
 
         # Equalize word width for log levels (INFO, SUCCESS, ACTION, WARN, ERROR)
         # Pad to 7 characters (length of 'SUCCESS') with non-breaking spaces for alignment
@@ -4305,17 +4325,42 @@ class MainWindow(QMainWindow):
 
         if "view-screenshot:" in url_str:
             try:
-                shot_path = url_str.split("view-screenshot:", 1)[1].strip()
-                if shot_path.startswith("/") and len(shot_path) > 2 and shot_path[2] == ":":
-                    shot_path = shot_path[1:]
-                if os.path.isfile(shot_path):
+                param = url_str.split("view-screenshot:", 1)[1].strip()
+                shot_path = ""
+                shot_num = ""
+
+                # 1. Try resolving by log_id integer (avoids URL encoding issues on foreign PCs)
+                if param.isdigit() and hasattr(self, "_log_records"):
+                    target_id = int(param)
+                    target_rec = next((r for r in self._log_records if r.get("id") == target_id), None)
+                    if target_rec:
+                        shot_path = target_rec.get("screenshot_path", "")
+                        shot_num = target_rec.get("screenshot_number", "")
+
+                # 2. Fallback to direct path string if not integer
+                if not shot_path:
+                    shot_path = param
+
+                from core.path_utils import to_trace_absolute_path
+                resolved_abs = to_trace_absolute_path(shot_path)
+
+                if resolved_abs and os.path.isfile(resolved_abs):
                     from ui.image_preview_dialog import show_image_preview
-                    show_image_preview(shot_path, title=f"📸 추적 스크린샷 - {os.path.basename(shot_path)}", parent=self)
+                    num_prefix = f"[#{shot_num}] " if shot_num else ""
+                    show_image_preview(resolved_abs, title=f"📸 추적 스크린샷 {num_prefix}- {os.path.basename(resolved_abs)}", parent=self)
                 else:
                     from PyQt5.QtWidgets import QMessageBox
-                    QMessageBox.warning(self, "파일 없음", f"스크린샷 파일이 존재하지 않거나 이미 삭제되었습니다:\n{shot_path}")
-            except Exception:
-                pass
+                    QMessageBox.warning(
+                        self,
+                        "스크린샷 파일 없음",
+                        f"스크린샷 파일을 찾을 수 없습니다.\n\n"
+                        f"기록된 경로: {shot_path}\n"
+                        f"탐색된 로컬 경로: {resolved_abs or '없음'}\n\n"
+                        f"다른 컴퓨터에서 복사한 경우 trace_logs 폴더가 함께 복사되었는지 확인해 주세요."
+                    )
+            except Exception as e:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "오류", f"스크린샷을 여는 중 오류가 발생했습니다:\n{e}")
             return
 
         if "toggle-mismatch:" in url_str or "toggle_mismatch:" in url_str:
@@ -4370,17 +4415,19 @@ class MainWindow(QMainWindow):
         self._append_log("INFO", f"⚙️ [설정] 강력 로그추적 모드가 {'활성화' if checked else '비활성화'}되었습니다.")
 
     def _on_delete_trace_logs(self):
-        from core.trace_logger import TraceLogger, DEFAULT_TRACE_DIR
+        from core.trace_logger import TraceLogger
+        from core.path_utils import get_trace_dir
         from PyQt5.QtWidgets import QMessageBox
+        target_dir = get_trace_dir()
         reply = QMessageBox.question(
             self,
             "추적 폴더 일괄 삭제",
-            f"강력 로그추적을 통해 저장된 모든 스크린샷과 루프 하위 폴더를 일괄 삭제하시겠습니까?\n\n대상 경로: {DEFAULT_TRACE_DIR}\n(삭제 후 복구할 수 없습니다.)",
+            f"강력 로그추적을 통해 저장된 모든 스크린샷과 루프 하위 폴더를 일괄 삭제하시겠습니까?\n\n대상 경로: {target_dir}\n(삭제 후 복구할 수 없습니다.)",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         if reply == QMessageBox.Yes:
-            res = TraceLogger.clean_all_trace_logs()
+            res = TraceLogger.clean_all_trace_logs(target_dir)
             freed_mb = res["freed_bytes"] / (1024 * 1024)
             msg = f"강력 로그추적 폴더 정리 완료:\n폴더 {res['deleted_dirs']}개, 파일 {res['deleted_files']}개 삭제 (총 {freed_mb:.2f} MB 확보)"
             self._append_log("INFO", f"🗑️ [추적 로그 정리] 폴더 {res['deleted_dirs']}개, 파일 {res['deleted_files']}개 ({freed_mb:.2f} MB) 일괄 삭제 완료.")

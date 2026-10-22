@@ -1,0 +1,35 @@
+================================================================================
+작업 일시: 2026-10-22 20:24:00
+작업 명: 다른 컴퓨터 간 스크린샷 폴더(trace_logs) 경로 이식성 및 크로스 머신 복원 대응
+작업자: Antigravity
+================================================================================
+
+[1. 작업 배경 및 요구사항]
+- 프로젝트를 다른 컴퓨터(다른 드라이브/사용자명/디렉터리 구조)로 이동하거나 공유했을 때,
+  강력 로그추적 스크린샷 폴더(`trace_logs/`) 및 로그 내 스크린샷 링크가 깨지지 않고 정상 작동하도록 경로 이식성 대응.
+
+[2. 주요 변경 내역]
+1) 추적 스크린샷 경로 유틸리티 신설 (core/path_utils.py)
+   - get_trace_dir(base_dir): 현재 실행 환경의 프로젝트 루트 기준 `trace_logs/` 절대 경로 반환.
+   - to_trace_relative_path(path): 스크린샷 절대/상대 경로를 프로젝트 기준 상대 경로(`trace_logs/loop_.../shot_...jpg`, `/` 슬래시 표준화)로 변환.
+   - to_trace_absolute_path(path):
+     * 다른 컴퓨터의 절대 경로(예: `D:/ForeignPC/FGOA/trace_logs/loop_.../shot_...jpg`)나 상대 경로가 들어와도,
+     * 현재 컴퓨터의 로컬 프로젝트 루트(`get_project_root()`) 및 `trace_logs/` 디렉터리로 자동 재매핑(Re-anchoring)하여 로컬 절대 경로로 복원.
+
+2) 초고속 스크린샷 매니저 상대 경로 반환 적용 (core/trace_logger.py)
+   - DEFAULT_TRACE_DIR을 `get_trace_dir()`로 통일하여 실행 머신 환경에 종속되지 않도록 개선.
+   - TraceLogger.__init__에서 전달받은 경로를 to_trace_absolute_path로 정규화.
+   - capture_screenshot_if_eligible 시 기본값 `as_relative=True`로 저장된 파일의 상대 경로(`trace_logs/...`)를 반환하도록 하여, 로그 메시지에 머신 종속적인 드라이브 절대 경로가 박히지 않도록 개선.
+
+3) UI 로그 렌더링 및 클릭 핸들러 복원 연동 (ui/main_window.py)
+   - _format_log_record_html: `to_trace_absolute_path`를 통해 상대 경로 및 타 PC 경로를 로컬 파일 경로로 실시간 해석 후 파일 존재 시 `[📸 화면]` 하이퍼링크 뱃지 출력.
+   - _on_log_anchor_clicked: 클릭 시 `to_trace_absolute_path`를 통해 현재 PC의 파일 위치를 찾아 [`ImagePreviewDialog`](ui/image_preview_dialog.py)로 확대 표시.
+   - _on_delete_trace_logs: `get_trace_dir()`를 사용하여 현재 실행 머신의 로컬 추적 폴더를 정확히 감지 및 삭제.
+
+[3. 테스트 및 검증]
+- tests/test_robust_trace_logger.py에 test_06_cross_computer_trace_path_portability 테스트 케이스 추가 및 검증:
+  * 상대 경로 변환(`to_trace_relative_path`) 검증.
+  * 다른 컴퓨터의 절대 경로(외국 PC 경로)를 현재 PC의 프로젝트 `trace_logs`로 재매핑 복원(`to_trace_absolute_path`) 검증.
+  * 타 PC에서 가져온 로그 레코드의 HTML 링크 렌더링 및 클릭 핸들러 정상 작동 검증.
+- 6개 단위 테스트 및 기존 회귀 테스트 전체 100% 통과 (OK).
+================================================================================

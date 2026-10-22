@@ -1,25 +1,32 @@
 """
 Robust Trace Logger Module for FGOA.
 Captures ultra-fast, low-overhead screenshots synchronized with execution logs,
-organizing snapshots into per-loop subdirectories and providing bulk cleanup.
+organizing snapshots into per-loop subdirectories, stamping visible numbering,
+and providing bulk cleanup.
+Supports cross-computer relative paths and portable folder mapping.
 """
 import os
 import time
 import shutil
 import datetime
 from typing import Optional, Dict, Any
-from PIL import Image
+from PIL import Image, ImageDraw
 from core.screen_capture import ScreenCapture
+from core.path_utils import get_trace_dir, to_trace_relative_path, to_trace_absolute_path, get_project_root
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_TRACE_DIR = os.path.join(BASE_DIR, "trace_logs")
+DEFAULT_TRACE_DIR = get_trace_dir()
 
 
 class TraceLogger:
     """Manages high-speed screenshot trace capture, per-loop directory storage, and cleanup."""
 
-    def __init__(self, trace_base_dir: str = DEFAULT_TRACE_DIR, min_interval_sec: float = 1.0):
-        self.trace_base_dir = trace_base_dir
+    def __init__(self, trace_base_dir: Optional[str] = None, min_interval_sec: float = 1.0):
+        if trace_base_dir:
+            self.trace_base_dir = to_trace_absolute_path(trace_base_dir)
+        else:
+            self.trace_base_dir = get_trace_dir()
+        os.makedirs(self.trace_base_dir, exist_ok=True)
+
         self.min_interval_sec = min_interval_sec
         self.last_capture_time: float = 0.0
         self.current_loop_dir: Optional[str] = None
@@ -36,11 +43,12 @@ class TraceLogger:
         self.shot_counter = 0
         return self.current_loop_dir
 
-    def capture_screenshot_if_eligible(self, hwnd: int) -> Optional[str]:
+    def capture_screenshot_if_eligible(self, hwnd: int, as_relative: bool = True) -> Optional[str]:
         """
         Captures a low-resolution snapshot if at least min_interval_sec (1.0s) has passed.
         Fastest performance: small downscaled JPEG with quality=40 for minimal CPU/disk footprint.
-        Returns the absolute file path if captured, or None if skipped (within 1s) or failed.
+        Stamps visual numbering (#0001 HH:MM:SS) on top-left of image for 1:1 cross-checking with logs.
+        Returns 'path|NUM:0001' or None if skipped (within 1s) or failed.
         """
         if not hwnd:
             return None
@@ -68,32 +76,52 @@ class TraceLogger:
                 img = img.resize((640, target_h), resample=resample)
 
             self.shot_counter += 1
-            ts = datetime.datetime.now().strftime("%H%M%S")
-            filename = f"shot_{self.shot_counter:04d}_{ts}.jpg"
+            shot_num = self.shot_counter
+            now_dt = datetime.datetime.now()
+            ts = now_dt.strftime("%H%M%S")
+            time_display = now_dt.strftime("%H:%M:%S")
+
+            # Stamp visual numbering badge on top-left of image
+            try:
+                draw = ImageDraw.Draw(img)
+                stamp_text = f"#{shot_num:04d} ({time_display})"
+                bbox = draw.textbbox((0, 0), stamp_text)
+                tw = bbox[2] - bbox[0]
+                th = bbox[3] - bbox[1]
+                # High-contrast background box
+                draw.rectangle([(6, 6), (6 + tw + 8, 6 + th + 6)], fill=(0, 0, 0))
+                draw.text((10, 8), stamp_text, fill=(255, 230, 0))
+            except Exception:
+                pass
+
+            filename = f"shot_{shot_num:04d}_{ts}.jpg"
             file_path = os.path.join(self.current_loop_dir, filename)
 
             # Fast low-quality JPEG save (quality=40)
             img.save(file_path, format="JPEG", quality=40)
             self.last_capture_time = now
-            return file_path
+
+            target_path = to_trace_relative_path(file_path) if as_relative else file_path
+            return f"{target_path}|NUM:{shot_num:04d}"
         except Exception:
             return None
 
     @classmethod
-    def clean_all_trace_logs(cls, trace_base_dir: str = DEFAULT_TRACE_DIR) -> Dict[str, Any]:
+    def clean_all_trace_logs(cls, trace_base_dir: Optional[str] = None) -> Dict[str, Any]:
         """
         Deletes all loop directories and screenshot files in trace_base_dir.
         Returns summary info: {'deleted_dirs': int, 'deleted_files': int, 'freed_bytes': int}.
         """
-        if not os.path.exists(trace_base_dir):
-            os.makedirs(trace_base_dir, exist_ok=True)
+        target_dir = os.path.abspath(trace_base_dir or get_trace_dir())
+        if not os.path.exists(target_dir):
+            os.makedirs(target_dir, exist_ok=True)
             return {"deleted_dirs": 0, "deleted_files": 0, "freed_bytes": 0}
 
         deleted_dirs = 0
         deleted_files = 0
         freed_bytes = 0
 
-        for root, dirs, files in os.walk(trace_base_dir, topdown=False):
+        for root, dirs, files in os.walk(target_dir, topdown=False):
             for f in files:
                 fp = os.path.join(root, f)
                 try:
@@ -111,7 +139,7 @@ class TraceLogger:
                     pass
 
         # Re-ensure base dir exists
-        os.makedirs(trace_base_dir, exist_ok=True)
+        os.makedirs(target_dir, exist_ok=True)
 
         return {
             "deleted_dirs": deleted_dirs,
