@@ -1,0 +1,37 @@
+================================================================================
+FGOA Work History Log
+================================================================================
+
+[일시 / Timestamp]
+- 시작 일시: 2026-10-23 23:46:11
+- 완료 일시: 2026-10-24 00:47:29
+
+[요청 내용 / User Request]
+Phase 1부터 순차적으로 분리 작업을 진행
+
+[결과 요약 / Summary of Results]
+1. Phase 1 모듈 분리 완료 (로그 & 트레이스 매니저 추출):
+   - ui/main_window_parts/log_manager.py (신규 생성):
+     - MainWindowLogMixin 클래스 구현.
+     - _clear_logs: 로그 버퍼 및 기록 초기화.
+     - _append_log: 색상 매핑, [TRACE_SHOT] 태그 파싱, [MISMATCH] 아코디언 파싱, 메모리 캡 및 HTML 포맷 추가.
+     - _format_log_record_html: 로그 레벨 균등 패딩, 불일치 세부내역 토글 박스, 루프 뱃지 렌더링.
+     - _on_log_anchor_clicked: 📸 추적 스크린샷 뷰어 연동 및 불일치 아코디언 토글.
+     - _rerender_all_logs: 테마 변경 시 로그 전체 리렌더링 및 자동 스크롤 보존.
+     - _on_robust_trace_toggled: 강력 로그추적 모드 토글 및 러너 동적 연동.
+     - _on_delete_trace_logs: 추적 로그 폴더 일괄 정리 다이얼로그 연동.
+   - ui/main_window_parts/__init__.py: MainWindowLogMixin export.
+   - ui/main_window.py:
+     - MainWindowLogMixin 다중 상속 연동.
+     - 289줄의 중복 로깅 메서드 제거 완료 (-289 lines).
+
+2. 테스트 검증 및 문제 해결:
+   - show_image_preview 모달 다이얼로그 호출 방식을 동적 로컬 import로 유지하여 단위 테스트(test_robust_trace_logger.py)의 mock_preview 패치 정상 적용.
+   - test_robust_trace_logger.py (6/6 OK, 3.0초) 및 test_background_mode.py (7/7 OK, 1.1초) 등 전원 통과 검증 완료.
+
+[영향 파일 목록 / Affected Files]
+- ui/main_window_parts/__init__.py (신규 생성)
+- ui/main_window_parts/log_manager.py (신규 생성)
+- ui/main_window.py (수정, 289줄 감축)
+- history/2026-10-24_004729_Phase1_로그_및_트레이스_매니저_모듈_분리.txt (신규 생성)
+================================================================================

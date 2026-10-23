@@ -43,11 +43,94 @@ class ScreenCapture:
             win32gui.ReleaseDC(0, hdc)
 
     @classmethod
-    def get_client_pixel_color(cls, hwnd: int, rel_x: int, rel_y: int) -> Optional[Tuple[int, int, int]]:
+    def capture_client_area_background(cls, hwnd: int) -> Optional[Image.Image]:
+        """
+        Captures the client area of target window even when covered by other windows or in background.
+        Uses PrintWindow with PW_CLIENTONLY | PW_RENDERFULLCONTENT (3) and falls back to BitBlt on the target window's DC.
+        """
+        if not hwnd or not win32gui.IsWindow(hwnd):
+            return None
+
+        win_info = WindowManager.get_window_info(hwnd)
+        if not win_info or win_info.client_width <= 0 or win_info.client_height <= 0:
+            return None
+
+        w = win_info.client_width
+        h = win_info.client_height
+
+        # 1. Try PrintWindow on client area DC
+        try:
+            hwnd_dc = win32gui.GetDC(hwnd)
+            if hwnd_dc:
+                mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
+                save_dc = mfc_dc.CreateCompatibleDC()
+                save_bitmap = win32ui.CreateBitmap()
+                save_bitmap.CreateCompatibleBitmap(mfc_dc, w, h)
+                save_dc.SelectObject(save_bitmap)
+
+                printed = False
+                for flag in (3, 2, 1, 0):
+                    res = ctypes.windll.user32.PrintWindow(hwnd, save_dc.GetSafeHdc(), flag)
+                    if res != 0:
+                        printed = True
+                        break
+
+                if not printed:
+                    # Fallback to direct BitBlt from client DC
+                    save_dc.BitBlt((0, 0), (w, h), mfc_dc, (0, 0), win32con.SRCCOPY)
+
+                bmpinfo = save_bitmap.GetInfo()
+                bmpstr = save_bitmap.GetBitmapBits(True)
+                img = Image.frombuffer(
+                    'RGB',
+                    (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
+                    bmpstr, 'raw', 'BGRX', 0, 1
+                )
+
+                win32gui.DeleteObject(save_bitmap.GetHandle())
+                save_dc.DeleteDC()
+                mfc_dc.DeleteDC()
+                win32gui.ReleaseDC(hwnd, hwnd_dc)
+                return img
+        except Exception:
+            pass
+
+        # 2. Fallback to general capture_client_area with prefer_display=False
+        return cls.capture_client_area(hwnd, prefer_display=False)
+
+    @classmethod
+    def get_client_pixel_color(
+        cls, hwnd: int, rel_x: int, rel_y: int, background: bool = False
+    ) -> Optional[Tuple[int, int, int]]:
         """
         Get RGB color at relative coordinates (rel_x, rel_y) inside target window.
-        Automatically converts to screen coordinates.
+        When background=True, samples directly from the target window's DC / background snapshot
+        without requiring screen visibility.
+        When background=False, automatically converts to screen coordinates and reads via GDI GetPixel(0).
         """
+        if not hwnd or not win32gui.IsWindow(hwnd):
+            return None
+
+        if background:
+            # 1. First try direct GetPixel on window DC
+            hdc = win32gui.GetDC(hwnd)
+            if hdc:
+                try:
+                    colorref = ctypes.windll.gdi32.GetPixel(hdc, int(rel_x), int(rel_y))
+                    if colorref != -1 and colorref != 0xFFFFFFFF:
+                        r = colorref & 0xFF
+                        g = (colorref >> 8) & 0xFF
+                        b = (colorref >> 16) & 0xFF
+                        return (r, g, b)
+                finally:
+                    win32gui.ReleaseDC(hwnd, hdc)
+
+            # 2. If direct GetPixel failed or returned invalid, sample via background capture
+            bg_img = cls.capture_client_area_background(hwnd)
+            if bg_img:
+                return cls.get_image_pixel(bg_img, int(rel_x), int(rel_y))
+
+        # Standard foreground display capture via screen coordinates
         screen_pt = WindowManager.client_to_screen(hwnd, rel_x, rel_y)
         if not screen_pt:
             return None

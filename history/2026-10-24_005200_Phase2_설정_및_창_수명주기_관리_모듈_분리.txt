@@ -1,0 +1,38 @@
+================================================================================
+FGOA Work History Log
+================================================================================
+
+[일시 / Timestamp]
+- 시작 일시: 2026-10-24 00:49:07
+- 완료 일시: 2026-10-24 00:52:00
+
+[요청 내용 / User Request]
+이어서 진행 (Phase 2: 설정 & 수명주기 관리 모듈 분리)
+
+[결과 요약 / Summary of Results]
+1. Phase 2 모듈 분리 완료 (설정 & 창 수명주기/핫키/번인방지 관리 추출):
+   - ui/main_window_parts/config_lifecycle.py (신규 생성):
+     - MainWindowConfigLifecycleMixin 클래스 구현.
+     - 전역 핫키 및 플로팅 위젯: _init_global_hotkey_and_floating_stop, _cleanup_global_hotkey, _on_global_hotkey_stop (F6), _on_global_hotkey_pause (Shift+F6), _on_anti_burn_emergency_escape (F12).
+     - 창 타이틀 및 더티 상태: _update_window_title, _mark_dirty, _check_reload_state.
+     - 설정 I/O: _load_app_config (창 좌표, 크기, 최대화, 도크 배치 등 복원), _apply_ui_config (위젯 시그널 블로킹 적용), _save_app_config (fgoa_config.json 저장).
+     - 윈도우 이벤트: closeEvent (러너/타이머/오버레이 정리 및 최종 설정 저장), resizeEvent, moveEvent, __del__.
+     - 모니터 번인 방지 핸들러: _on_toggle_anti_burn, _on_anti_burn_mode_changed, _on_test_anti_burn, _on_anti_burn_started, _on_anti_burn_finished, _on_anti_burn_interval_changed, _on_anti_burn_hold_changed.
+   - ui/main_window_parts/__init__.py: MainWindowConfigLifecycleMixin export.
+   - ui/main_window.py:
+     - MainWindow(MainWindowConfigLifecycleMixin, MainWindowLogMixin, QMainWindow) 다중 상속 연동.
+     - 401줄의 설정/수명주기 코드 분리 완료 (누적 -680 lines).
+
+2. 테스트 검증 완료:
+   - test_background_mode.py: 7/7 OK (1.1초)
+   - test_config_persistence_all_controls.py: 2/2 OK (1.6초)
+   - test_burn_in_mode2_and_playbar.py: 5/5 OK (4.9초)
+   - test_robust_trace_logger.py: 6/6 OK (3.0초)
+   - 100% 하위 호환성 유지 및 회귀 버그 0건 확인.
+
+[영향 파일 목록 / Affected Files]
+- ui/main_window_parts/__init__.py (수정)
+- ui/main_window_parts/config_lifecycle.py (신규 생성)
+- ui/main_window.py (수정, 누적 680줄 감축)
+- history/2026-10-24_005200_Phase2_설정_및_창_수명주기_관리_모듈_분리.txt (신규 생성)
+================================================================================

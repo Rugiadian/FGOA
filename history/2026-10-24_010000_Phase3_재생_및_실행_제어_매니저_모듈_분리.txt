@@ -1,0 +1,42 @@
+================================================================================
+FGOA Work History Log
+================================================================================
+
+[일시 / Timestamp]
+- 시작 일시: 2026-10-24 00:53:00
+- 완료 일시: 2026-10-24 01:00:00
+
+[요청 내용 / User Request]
+페이즈3 진행 (Phase 3: 실행/재생 제어 모듈 분리)
+
+[결과 요약 / Summary of Results]
+1. Phase 3 모듈 분리 완료 (실행 및 재생 제어기 MainWindowPlaybackMixin 추출):
+   - ui/main_window_parts/playback_controller.py (신규 생성):
+     - MainWindowPlaybackMixin 클래스 구현.
+     - 실행 시작/일시정지/정지/단일스텝 제어:
+       _on_start_all_execution, _on_start_selected_execution, _set_paused_state, _clear_paused_state,
+       _on_start_execution, _on_pause_execution, _on_stop_execution, _on_step_execution, _on_step_completed.
+     - 실행 행 하이라이트 및 오버레이 시각화:
+       _highlight_running_row_header, _show_action_visual_overlay, _draw_roi_box, _draw_click_point,
+       _draw_swipe_arrow, _clear_action_visual_overlay.
+     - 스레드 러너(Runner) 시그널 연동 및 상태 핸들러:
+       _on_runner_step_started, _on_runner_step_finished, _on_runner_finished, _on_runner_progress,
+       _on_runner_state_changed, _on_runner_runtime_error.
+     - 팝업 플레이바 제어 연동:
+       _on_playbar_play, _on_playbar_stop, _on_playbar_pause, _on_playbar_step, _on_playbar_mode_changed, _on_playbar_anti_burn_toggled.
+   - ui/main_window_parts/__init__.py: MainWindowPlaybackMixin export.
+   - ui/main_window.py:
+     - MainWindow(MainWindowConfigLifecycleMixin, MainWindowPlaybackMixin, MainWindowLogMixin, QMainWindow) 다중 상속 연동.
+     - 379줄의 실행 제어 코드 분리 완료 (누적 -1,060 lines 감축).
+
+2. 테스트 검증 완료:
+   - test_burn_in_mode2_and_playbar.py: 5/5 OK
+   - test_background_mode.py: 7/7 OK
+   - 100% 하위 호환성 유지 및 회귀 버그 0건 확인.
+
+[영향 파일 목록 / Affected Files]
+- ui/main_window_parts/__init__.py (수정)
+- ui/main_window_parts/playback_controller.py (신규 생성)
+- ui/main_window.py (수정, 누적 1,060줄 감축)
+- history/2026-10-24_010000_Phase3_재생_및_실행_제어_매니저_모듈_분리.txt (신규 생성)
+================================================================================

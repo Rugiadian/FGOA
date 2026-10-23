@@ -9,6 +9,7 @@ from ctypes import wintypes
 from typing import List, Tuple, Optional, Callable
 import win32api
 import win32con
+import win32gui
 from core.window_manager import WindowManager
 
 
@@ -60,11 +61,129 @@ class InputController:
     def set_cursor_pos(screen_x: int, screen_y: int):
         ctypes.windll.user32.SetCursorPos(screen_x, screen_y)
 
+    @staticmethod
+    def make_lparam(x: int, y: int) -> int:
+        """Packs client relative coordinates (x, y) into a 32-bit lParam."""
+        return ((int(y) & 0xFFFF) << 16) | (int(x) & 0xFFFF)
+
     @classmethod
-    def click_at(cls, hwnd: int, rel_x: int, rel_y: int, button: str = "left", click_type: str = "single", repeat: int = 1):
+    def resolve_input_target(cls, hwnd: int, rel_x: int, rel_y: int) -> Tuple[int, int, int]:
+        """
+        Resolves the child window handle and coordinates for background PostMessage.
+        If a child window exists under (rel_x, rel_y), translates coordinates to that child's client space.
+        Returns (target_hwnd, target_rel_x, target_rel_y).
+        """
+        if not hwnd or not win32gui.IsWindow(hwnd):
+            return hwnd, int(rel_x), int(rel_y)
+        try:
+            pt = (int(rel_x), int(rel_y))
+            child = win32gui.ChildWindowFromPoint(hwnd, pt)
+            if child and child != hwnd and win32gui.IsWindow(child):
+                screen_pt = WindowManager.client_to_screen(hwnd, int(rel_x), int(rel_y))
+                if screen_pt:
+                    cx, cy = win32gui.ScreenToClient(child, screen_pt)
+                    return child, cx, cy
+        except Exception:
+            pass
+        return hwnd, int(rel_x), int(rel_y)
+
+    @classmethod
+    def post_click_at(
+        cls,
+        hwnd: int,
+        rel_x: int,
+        rel_y: int,
+        button: str = "left",
+        click_type: str = "single",
+        repeat: int = 1
+    ) -> bool:
+        """
+        Performs mouse clicks in the background without moving physical cursor using Win32 PostMessage.
+        Allows the user to freely use the mouse on other tasks simultaneously.
+        """
+        if not hwnd or not win32gui.IsWindow(hwnd):
+            return False
+
+        target_hwnd, tx, ty = cls.resolve_input_target(hwnd, rel_x, rel_y)
+        lparam = cls.make_lparam(tx, ty)
+
+        down_msg, up_msg, wparam_down = {
+            "left": (win32con.WM_LBUTTONDOWN, win32con.WM_LBUTTONUP, win32con.MK_LBUTTON),
+            "right": (win32con.WM_RBUTTONDOWN, win32con.WM_RBUTTONUP, win32con.MK_RBUTTON),
+            "middle": (win32con.WM_MBUTTONDOWN, win32con.WM_MBUTTONUP, win32con.MK_MBUTTON)
+        }.get(button, (win32con.WM_LBUTTONDOWN, win32con.WM_LBUTTONUP, win32con.MK_LBUTTON))
+
+        clicks = 2 if click_type == "double" else 1
+
+        for _ in range(repeat):
+            for _ in range(clicks):
+                win32api.PostMessage(target_hwnd, win32con.WM_MOUSEMOVE, 0, lparam)
+                time.sleep(0.015)
+                win32api.PostMessage(target_hwnd, down_msg, wparam_down, lparam)
+                time.sleep(0.04)
+                win32api.PostMessage(target_hwnd, up_msg, 0, lparam)
+                if clicks > 1:
+                    time.sleep(0.08)
+            time.sleep(0.05)
+        return True
+
+    @classmethod
+    def post_drag_and_drop(
+        cls,
+        hwnd: int,
+        start_x: int,
+        start_y: int,
+        end_x: int,
+        end_y: int,
+        duration_ms: int = 300
+    ) -> bool:
+        """
+        Performs mouse drag-and-drop in the background without moving physical cursor using Win32 PostMessage.
+        """
+        if not hwnd or not win32gui.IsWindow(hwnd):
+            return False
+
+        target_hwnd_start, sx, sy = cls.resolve_input_target(hwnd, start_x, start_y)
+        _, ex, ey = cls.resolve_input_target(hwnd, end_x, end_y)
+
+        start_lparam = cls.make_lparam(sx, sy)
+        end_lparam = cls.make_lparam(ex, ey)
+
+        win32api.PostMessage(target_hwnd_start, win32con.WM_MOUSEMOVE, 0, start_lparam)
+        time.sleep(0.03)
+        win32api.PostMessage(target_hwnd_start, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, start_lparam)
+        time.sleep(0.03)
+
+        steps = max(10, int(duration_ms / 15))
+        for step in range(1, steps + 1):
+            cur_x = int(sx + (ex - sx) * (step / steps))
+            cur_y = int(sy + (ey - sy) * (step / steps))
+            cur_lparam = cls.make_lparam(cur_x, cur_y)
+            win32api.PostMessage(target_hwnd_start, win32con.WM_MOUSEMOVE, win32con.MK_LBUTTON, cur_lparam)
+            time.sleep(duration_ms / (steps * 1000.0))
+
+        time.sleep(0.03)
+        win32api.PostMessage(target_hwnd_start, win32con.WM_LBUTTONUP, 0, end_lparam)
+        return True
+
+    @classmethod
+    def click_at(
+        cls,
+        hwnd: int,
+        rel_x: int,
+        rel_y: int,
+        button: str = "left",
+        click_type: str = "single",
+        repeat: int = 1,
+        background: bool = False
+    ):
         """
         Clicks at relative client coordinates inside target window.
+        When background=True, uses Win32 PostMessage without moving physical cursor.
         """
+        if background and hwnd:
+            return cls.post_click_at(hwnd, rel_x, rel_y, button=button, click_type=click_type, repeat=repeat)
+
         screen_pt = WindowManager.client_to_screen(hwnd, rel_x, rel_y)
         if not screen_pt:
             return False
@@ -92,8 +211,20 @@ class InputController:
         return True
 
     @classmethod
-    def drag_and_drop(cls, hwnd: int, start_x: int, start_y: int, end_x: int, end_y: int, duration_ms: int = 300):
+    def drag_and_drop(
+        cls,
+        hwnd: int,
+        start_x: int,
+        start_y: int,
+        end_x: int,
+        end_y: int,
+        duration_ms: int = 300,
+        background: bool = False
+    ):
         """Smooth drag from start relative coordinate to end relative coordinate."""
+        if background and hwnd:
+            return cls.post_drag_and_drop(hwnd, start_x, start_y, end_x, end_y, duration_ms=duration_ms)
+
         start_pt = WindowManager.client_to_screen(hwnd, start_x, start_y)
         end_pt = WindowManager.client_to_screen(hwnd, end_x, end_y)
         if not start_pt or not end_pt:
@@ -175,6 +306,33 @@ class InputController:
             pass
 
     @classmethod
+    def post_text(cls, hwnd: int, text: str, delay_per_char: float = 0.02):
+        """Sends text directly to target window via WM_CHAR messages."""
+        if not hwnd or not win32gui.IsWindow(hwnd):
+            return
+        for ch in text:
+            win32api.PostMessage(hwnd, win32con.WM_CHAR, ord(ch), 0)
+            if delay_per_char > 0:
+                time.sleep(delay_per_char)
+
+    @classmethod
+    def post_key_combination(cls, hwnd: int, key_name: str, modifiers: Optional[List[str]] = None):
+        """Sends key press directly to target window via WM_KEYDOWN / WM_KEYUP."""
+        if not hwnd or not win32gui.IsWindow(hwnd):
+            return
+        key_name_clean = key_name.strip()
+        vk = VK_MAP.get(key_name_clean)
+        if vk is None:
+            if len(key_name_clean) == 1:
+                vk = win32api.VkKeyScan(key_name_clean) & 0xFF
+            else:
+                vk = win32con.VK_RETURN
+
+        win32api.PostMessage(hwnd, win32con.WM_KEYDOWN, vk, 0)
+        time.sleep(0.03)
+        win32api.PostMessage(hwnd, win32con.WM_KEYUP, vk, 0)
+
+    @classmethod
     def execute_action(
         cls,
         action,
@@ -184,7 +342,8 @@ class InputController:
         min_delay: float = 0.15,
         max_delay: float = 1.0,
         precomputed_jitter: Optional[float] = None,
-        stop_checker: Optional[Callable[[], bool]] = None
+        stop_checker: Optional[Callable[[], bool]] = None,
+        background: bool = False
     ) -> Tuple[int, int, float, float]:
         """
         Executes a single Action model instance against target window hwnd.
@@ -236,7 +395,8 @@ class InputController:
                 rel_y=act_y,
                 button=action.mouse_button,
                 click_type=action.click_type,
-                repeat=action.repeat_count
+                repeat=action.repeat_count,
+                background=background
             )
         elif act_type == "mouse_drag":
             cls.drag_and_drop(
@@ -245,12 +405,19 @@ class InputController:
                 start_y=act_y,
                 end_x=act_end_x,
                 end_y=act_end_y,
-                duration_ms=action.drag_duration_ms
+                duration_ms=action.drag_duration_ms,
+                background=background
             )
         elif act_type == "key_press":
-            cls.send_key_combination(action.key, action.modifiers)
+            if background and hwnd:
+                cls.post_key_combination(hwnd, action.key, action.modifiers)
+            else:
+                cls.send_key_combination(action.key, action.modifiers)
         elif act_type == "text_type":
-            cls.type_text(action.text)
+            if background and hwnd:
+                cls.post_text(hwnd, action.text)
+            else:
+                cls.type_text(action.text)
         elif act_type == "delay":
             cls.sleep_interruptible(max(0.0, final_time), stop_checker=stop_checker)
             return act_x, act_y, orig_time, final_time

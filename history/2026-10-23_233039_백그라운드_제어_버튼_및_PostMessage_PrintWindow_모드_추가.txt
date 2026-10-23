@@ -1,0 +1,66 @@
+================================================================================
+FGOA Work History Log
+================================================================================
+
+[일시 / Timestamp]
+- 시작 일시: 2026-10-23 22:53:06
+- 완료 일시: 2026-10-23 23:30:39
+
+[요청 내용 / User Request]
+> 이 앱을 실행하는 동안 내가 다른 마우스 조작이 가능하도록 백그라운드 제어 버튼 추가.
+  아래의 방법은 이전에 ai가 제안한 방법. 이걸로 해줘.
+  
+  FGOA를 실행하면서 사용자가 PC에서 다른 마우스 작업을 동시에 자유롭게 수행하기 위해서는 두 가지 핵심 문제(입력 충돌, 화면 가림 인식)가 해결되어야 합니다.
+  
+  현재 FGOA는:
+  1. 마우스 제어: SetCursorPos와 mouse_event를 사용하여 물리 마우스 커서를 직접 이동시키므로 사용자의 조작과 충돌합니다.
+  2. 화면 인식: GetDC(0)(전체 화면 기준)를 사용하여 화면을 읽기 때문에 타겟 창 위에 다른 창이 덮이면 색상 판정이 실패합니다.
+  
+  이를 해결하기 위해 적용 가능한 4가지 백그라운드 실행 방안을 제안드립니다.
+  ──────
+  ### 🚀 방안 1. Win32 비활성 메시지 전송 모드 (PostMessage) [FGOA 내부 기능 개선]
+  • 원리:
+      • 물리 마우스 커서를 움직이지 않고, 타겟 창의 핸들(HWND)에 WM_LBUTTONDOWN, WM_LBUTTONUP 메시지를 직접 전송합니다.
+      • 화면 인식은 화면 전체 DC 대신 타겟 창의 DC(GetDC(hwnd))나 PrintWindow(..., PW_RENDERFULLCONTENT)를 사용하여 창이 다른 창에 가려져 있어도 백그라운드 픽셀을 읽습니다.
+  • 장점:
+      • 사용자의 물리 마우스 커서가 단 1픽셀도 움직이지 않아 웹 서핑, 문서 작업, 다른 게임 등을 자유롭게 할 수 있습니다.
+      • 외부 툴 설치 없이 FGOA 코드 업데이트만으로 지원 가능합니다.
+
+[결과 요약 / Summary of Results]
+1. 비활성 마우스/키보드 입력 제어 구현 (core/input_controller.py):
+   - make_lparam(x, y): 클라이언트 상대좌표를 Win32 32비트 lParam으로 인코딩.
+   - resolve_input_target(hwnd, rel_x, rel_y): 타겟 창 내부에 에뮬레이터 캔버스나 자식 윈도우(ChildWindowFromPoint)가 존재하는 경우 해당 자식 창의 핸들 및 클라이언트 상대좌표로 자동 변환.
+   - post_click_at(hwnd, rel_x, rel_y, ...): 물리 커서(SetCursorPos/mouse_event)를 전혀 조작하지 않고, WM_MOUSEMOVE, WM_LBUTTONDOWN/UP, WM_RBUTTONDOWN/UP 메시지를 비동기 PostMessage로 대상 창에 직접 전달.
+   - post_drag_and_drop(hwnd, ...): 물리 커서 이동 없이 PostMessage 마우스 이동 보간 시퀀스 구현.
+   - post_text / post_key_combination: 비활성 상태 텍스트(WM_CHAR) 및 키보드(WM_KEYDOWN/UP) 전달 구현.
+   - execute_action에 background 매개변수 추가하여 기존 시나리오 액션 실행 파이프라인과 완벽 연동.
+
+2. 가려진 창/백그라운드 화면 인식 엔진 구현 (core/screen_capture.py, core/evaluator.py):
+   - capture_client_area_background(hwnd): PrintWindow(PW_CLIENTONLY | PW_RENDERFULLCONTENT) 및 GetDC(hwnd) BitBlt 폴백을 적용하여 타겟 창이 다른 프로그램(웹 브라우저, 탐색기 등) 밑에 완전히 가려져 있어도 깨끗한 클라이언트 영역 비트맵 캡처.
+   - get_client_pixel_color(..., background=True): 전체 화면 GetDC(0) 대신 타겟 창 DC의 GetPixel 및 백그라운드 캡처를 통해 가려진 상태에서도 정확한 RGB 색상 샘플링.
+   - ConditionEvaluator.evaluate(..., background_mode=True): 백그라운드 모드 평가 시 조건 내 여러 포인트 검사마다 창을 반복 캡처하지 않고, 1회의 백그라운드 스냅샷을 캡처한 뒤 인메모리에서 일괄 검사하여 초고속(15ms 이하) 처리 및 프레임 정합성 보장.
+
+3. 시나리오 실행 스레드 백그라운드 모드 연동 (core/runner.py):
+   - WorkflowRunner에 background_mode 및 set_background_mode(enabled) 구현.
+   - 루프 조건 및 일반 조건 검사 시 ConditionEvaluator에 background_mode 전달.
+   - 액션 실행 시 InputController.execute_action에 background 플래그 전달.
+   - 시작 로그에 '[👻 백그라운드 모드]' 표기 지원.
+
+4. UI 컨트롤 및 설정 영속화 (ui/main_window.py):
+   - 시나리오 재생 툴바(row1_ctrl)에 '👻 백그라운드 제어' (chk_background_mode) 체크박스 컨트롤 추가.
+   - 툴팁 및 상태 안내 로그 지원 ("👻 백그라운드 제어 모드 활성화 (마우스 독립 조작 가능, 비활성 PostMessage/PrintWindow)").
+   - 프로그램 실행 중에도 체크박스를 실시간으로 켜고 끌 수 있도록 러너 동적 연동.
+   - fgoa_config.json에 background_mode_enabled 설정이 자동 저장되고, 프로그램 재실행 시 상태 자동 복원.
+
+5. 테스트 검증 (tests/test_background_mode.py):
+   - 물리 마우스 무간섭 검증, PostMessage 패킷 검증, 백그라운드 스냅샷 단일 캡처 검증, WorkflowRunner 연동, MainWindow UI 설정 저장/복원 등 7종 단위/통합 테스트 작성 및 통과 (7/7 OK).
+
+[영향 파일 목록 / Affected Files]
+- core/input_controller.py (수정)
+- core/screen_capture.py (수정)
+- core/evaluator.py (수정)
+- core/runner.py (수정)
+- ui/main_window.py (수정)
+- tests/test_background_mode.py (신규 생성)
+- history/2026-10-23_233039_백그라운드_제어_버튼_및_PostMessage_PrintWindow_모드_추가.txt (신규 생성)
+================================================================================

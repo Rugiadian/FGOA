@@ -29,13 +29,23 @@ class WorkflowRunner(QThread):
     sig_step_completed = pyqtSignal(int)  # next_scenario_index
     sig_finished = pyqtSignal(str)  # reason
 
-    def __init__(self, project: Project, hwnd: int, start_scenario_id: Optional[str] = None, anti_burn_overlay=None, parent=None, robust_trace_enabled: bool = False):
+    def __init__(
+        self,
+        project: Project,
+        hwnd: int,
+        start_scenario_id: Optional[str] = None,
+        anti_burn_overlay=None,
+        parent=None,
+        robust_trace_enabled: bool = False,
+        background_mode: bool = False
+    ):
         super().__init__(parent)
         self.project = project
         self.hwnd = hwnd
         self.start_scenario_id = start_scenario_id
         self.anti_burn_overlay = anti_burn_overlay or getattr(parent, "anti_burn_overlay", None)
         self.robust_trace_enabled = robust_trace_enabled
+        self.background_mode = background_mode
         self.trace_logger = TraceLogger()
         self._next_scenario_id: Optional[str] = None
         self.current_scenario_id: Optional[str] = None
@@ -47,6 +57,10 @@ class WorkflowRunner(QThread):
     def set_robust_trace_enabled(self, enabled: bool):
         """Toggle robust trace mode dynamically during runtime."""
         self.robust_trace_enabled = enabled
+
+    def set_background_mode(self, enabled: bool):
+        """Toggle background execution mode dynamically during runtime."""
+        self.background_mode = enabled
 
     def _log(self, level: str, msg: str):
         """Emits a log message with optional trace screenshot link if robust trace is active."""
@@ -137,7 +151,8 @@ class WorkflowRunner(QThread):
         self._is_running = True
         self._is_paused = False
 
-        self._log("INFO", f"=== 시나리오 실행 시작 (타겟 HWND: {self.hwnd}) ===")
+        mode_tag = " [👻 백그라운드 모드]" if getattr(self, "background_mode", False) else ""
+        self._log("INFO", f"=== 시나리오 실행 시작 (타겟 HWND: {self.hwnd}){mode_tag} ===")
 
         target_win = WindowManager.get_window_info(self.hwnd)
         if not target_win:
@@ -251,7 +266,7 @@ class WorkflowRunner(QThread):
                     eff_cond = (scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition) if is_cond_en else None
                     if scen.loop_mode in ("until_match", "while_match") and eff_cond and eff_cond.points:
                         self._wait_for_anti_burn()
-                        matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
+                        matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd, background_mode=getattr(self, "background_mode", False))
                         if scen.loop_mode == "until_match" and matched:
                             end_idx = self.project.find_matching_loop_end(current_index)
                             self._log("SUCCESS", f"⚡ [루프 탈출 s{scen.scenario_number}] '{scen.name}': 탈출 인식 조건 충족! 루프 즉시 탈출")
@@ -316,7 +331,7 @@ class WorkflowRunner(QThread):
 
                 while attempt < max_attempts and self._is_running:
                     self._wait_for_anti_burn()
-                    matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
+                    matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd, background_mode=getattr(self, "background_mode", False))
                     if matched:
                         break
                     attempt += 1
@@ -530,7 +545,8 @@ class WorkflowRunner(QThread):
                 min_delay=0.0,
                 max_delay=offset_sec,
                 precomputed_jitter=jitter,
-                stop_checker=lambda: not self._is_running
+                stop_checker=lambda: not self._is_running,
+                background=getattr(self, "background_mode", False)
             )
 
             self.sig_action_finished.emit(act)

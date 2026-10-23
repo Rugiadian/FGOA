@@ -1,0 +1,46 @@
+================================================================================
+FGOA Work History Log
+================================================================================
+
+[일시 / Timestamp]
+- 시작 일시: 2026-10-24 01:07:31
+- 완료 일시: 2026-10-24 01:12:00
+
+[요청 내용 / User Request]
+5 진행 (Phase 5: 독 레이아웃, 테마 & 코드 핫리로드 매니저 모듈 분리)
+
+[결과 요약 / Summary of Results]
+1. Phase 5 모듈 분리 완료 (독 레이아웃, 테마, 코드 핫리로드, 시나리오 프리셋 매니저 추출):
+   - ui/main_window_parts/layout_theme_manager.py (신규 생성):
+     - MainWindowLayoutThemeMixin 클래스 구현.
+     - 코드 감시 & 라이브 핫리로드:
+       _init_code_watcher, _on_code_file_changed, _on_code_changed_timeout, _reload_application, _on_open_crash_log.
+     - 테마 모드 지원:
+       _toggle_theme, _update_theme_toggle_btn, _apply_theme.
+     - Unity 스타일 다이내믹 독 레이아웃 관리:
+       _init_layout_and_docks, _refresh_layout_combo, _on_layout_combo_changed, apply_layout,
+       _on_save_custom_layout, _on_reset_layout.
+     - 시나리오 프리셋 저장 및 매니저 다이얼로그 연동:
+       _on_save_preset, _on_open_preset_manager, _on_quick_load_preset.
+   - ui/main_window_parts/__init__.py: MainWindowLayoutThemeMixin export 추가.
+   - ui/main_window.py:
+     - MainWindow(MainWindowConfigLifecycleMixin, MainWindowPlaybackMixin, MainWindowTargetMixin, MainWindowLayoutThemeMixin, MainWindowLogMixin, QMainWindow) 상속 연동.
+     - 331줄의 레이아웃/테마/프리셋/핫리로드 코드 분리 완료.
+     - ui/main_window.py 전체 라인 수: 4,647줄 -> 2,625줄로 누적 2,022줄 대폭 감축.
+
+2. 테스트 검증 완료:
+   - test_presets_and_layouts.py: 6/6 OK
+   - test_burn_in_mode2_and_playbar.py: 5/5 OK
+   - test_background_mode.py: 7/7 OK
+   - test_robust_trace_logger.py: 6/6 OK
+   - test_config_persistence_all_controls.py: 2/2 OK
+   - test_virtual_canvas_and_recent_file.py: 5/5 OK
+   - 총 35개 단위 테스트 전체 통과 (Ran 35 tests in 38.3s, OK).
+   - 100% 하위 호환성 유지 및 회귀 버그 0건 확인.
+
+[영향 파일 목록 / Affected Files]
+- ui/main_window_parts/__init__.py (수정)
+- ui/main_window_parts/layout_theme_manager.py (신규 생성)
+- ui/main_window.py (수정, 누적 2,022줄 감축, 현재 2,625줄)
+- history/2026-10-24_011200_Phase5_독레이아웃_테마_및_코드핫리로드_매니저_모듈_분리.txt (신규 생성)
+================================================================================

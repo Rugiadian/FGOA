@@ -1,0 +1,44 @@
+================================================================================
+FGOA Work History Log
+================================================================================
+
+[일시 / Timestamp]
+- 시작 일시: 2026-10-24 01:00:00
+- 완료 일시: 2026-10-24 01:07:00
+
+[요청 내용 / User Request]
+페이즈4 진행 (Phase 4: 타겟 윈도우 & 가상 캔버스 매니저 모듈 분리)
+
+[결과 요약 / Summary of Results]
+1. Phase 4 모듈 분리 완료 (타겟 창 추적, 가상 캔버스, 제작 기준 해상도 관리 추출):
+   - ui/main_window_parts/target_manager.py (신규 생성):
+     - MainWindowTargetMixin 클래스 구현 (17개 메서드 포함).
+     - 타겟 윈도우 자동 감지 및 선택/포커스:
+       _auto_track_target_window, _on_select_target_window, _on_focus_target_window.
+     - 가상 캔버스 창 생명주기 및 좌표 동기화:
+       _on_open_virtual_canvas, _on_virtual_canvas_closed.
+     - 타겟 상태 라벨 및 제작 기준 해상도 관리:
+       _update_target_label (MagicMock 안전 포맷 지원), _update_authoring_resolution_display,
+       _apply_authoring_image, _on_register_authoring_image, _on_select_authoring_image_from_gallery,
+       _create_authoring_menu, _on_show_authoring_menu, _on_authoring_res_context_menu,
+       _on_manual_authoring_resolution, _on_clear_authoring_image.
+     - 타겟 창 생존 모니터링 타이머:
+       _start_target_monitor_timer, _check_target_alive.
+   - ui/main_window_parts/__init__.py: MainWindowTargetMixin export 추가.
+   - ui/main_window.py:
+     - MainWindow(MainWindowConfigLifecycleMixin, MainWindowPlaybackMixin, MainWindowTargetMixin, MainWindowLogMixin, QMainWindow) 상속 연동.
+     - 326줄의 타겟 윈도우 관리 코드 분리 완료.
+     - ui/main_window.py 전체 라인 수: 4,650줄 -> 2,910줄로 누적 1,740줄 대폭 감축.
+
+2. 테스트 검증 완료:
+   - test_virtual_canvas_and_recent_file.py: 5/5 OK (4.7s)
+   - test_reference_gallery_resolution.py & test_presets_and_layouts.py: 11/11 OK (7.2s)
+   - test_burn_in_mode2_and_playbar.py & test_background_mode.py & test_robust_trace_logger.py & test_config_persistence_all_controls.py: 20/20 OK (25.2s)
+   - 100% 하위 호환성 유지 및 회귀 버그 0건 확인.
+
+[영향 파일 목록 / Affected Files]
+- ui/main_window_parts/__init__.py (수정)
+- ui/main_window_parts/target_manager.py (신규 생성)
+- ui/main_window.py (수정, 누적 1,740줄 감축, 2,910줄)
+- history/2026-10-24_010700_Phase4_타겟윈도우_및_가상캔버스_매니저_모듈_분리.txt (신규 생성)
+================================================================================

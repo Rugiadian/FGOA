@@ -1,0 +1,69 @@
+================================================================================
+FGOA Work History Log
+================================================================================
+
+[일시 / Timestamp]
+- 시작 일시: 2026-10-24 01:12:36
+- 완료 일시: 2026-10-24 01:22:00
+
+[요청 내용 / User Request]
+진행 (Phase 6: 시나리오 테이블 & 하이에라키 컨트롤러 모듈 분리 및 6단계 최종 완성)
+
+[결과 요약 / Summary of Results]
+1. Phase 6 모듈 분리 완료 (시나리오 테이블, 하이에라키, CRUD, Undo/Redo, 모듈 링커 추출):
+   - ui/main_window_parts/table_controller.py (신규 생성, 1,666줄):
+     - MainWindowTableMixin 클래스 구현.
+     - 테이블 선택 및 인스펙터 바인딩:
+       _on_table_selection_changed, _on_inspector_scenario_saved, _on_inspector_scenario_changed.
+     - Undo/Redo 히스토리 스택:
+       _on_global_undo, _on_global_redo, _push_scenario_undo_state, _update_scenario_undo_redo_buttons,
+       _undo_scenario, _redo_scenario.
+     - 테이블 렌더링 및 스타일링:
+       _refresh_scenario_table, _update_table_row (깊이별 들여쓰기, 스레드선, 컬러 배지, 스냅샷 썸네일, 루프/폴더 접기 UI),
+       _get_jump_display, _on_scenario_toggle, _apply_imported_scenarios.
+     - 컨텍스트 메뉴 및 블록 색상:
+       _on_scenario_context_menu, _toggle_folder_enabled, _set_folder_children_enabled,
+       _populate_color_menu, _change_scenario_color, _change_folder_color, _change_loop_color, _pick_block_color_dialog.
+     - 모듈(조건/액션 시퀀스) 연결:
+       _on_modules_changed, _on_scenario_cell_double_clicked, _show_condition_module_picker,
+       _assign_condition_to_scenario, _create_and_assign_condition, _unlink_condition_from_scenario,
+       _clear_condition_from_scenario, _show_sequence_module_picker, _assign_sequence_to_scenario,
+       _create_and_assign_sequence, _unlink_sequence_from_scenario, _clear_sequence_from_scenario.
+     - 시나리오 및 블록 CRUD / 순서 변경:
+       _on_add_scenario, _get_block_range, _on_add_folder, _toggle_folder_collapse, _rename_folder,
+       _on_add_loop_block, _on_open_reference_gallery, _on_duplicate_scenario, _on_delete_scenario,
+       _on_move_up, _on_move_down, _on_scenario_row_reordered.
+   - ui/main_window_parts/__init__.py: MainWindowTableMixin export 추가.
+   - ui/main_window.py:
+     - 6개 도메인 Mixin 전원 상속 연동:
+       class MainWindow(
+           MainWindowConfigLifecycleMixin,
+           MainWindowPlaybackMixin,
+           MainWindowTargetMixin,
+           MainWindowLayoutThemeMixin,
+           MainWindowTableMixin,
+           MainWindowLogMixin,
+           QMainWindow
+       ):
+     - 4,647줄의 거대 파일에서 3,662줄 감축되어 985줄의 순수 UI 조립 셸로 최종 완성.
+
+2. 전체 단위 테스트 검증 완료:
+   - test_background_mode.py: 7/7 OK
+   - test_burn_in_mode2_and_playbar.py: 5/5 OK
+   - test_robust_trace_logger.py: 6/6 OK
+   - test_config_persistence_all_controls.py: 2/2 OK
+   - test_virtual_canvas_and_recent_file.py: 5/5 OK
+   - test_presets_and_layouts.py: 6/6 OK
+   - test_scenario_table_column_visibility.py: 6/6 OK
+   - test_scenario_hierarchy_and_custom_colors.py: 10/10 OK
+   - test_scenario_table_flow_and_uid.py: 7/7 OK
+   - test_multi_select_delete_and_folder_features.py: 6/6 OK
+   - test_composite_scenario_modules.py: 6/6 OK
+   - 종합 68개 이상 단위 테스트 전체 통과 (OK, 0 Regression).
+
+[영향 파일 목록 / Affected Files]
+- ui/main_window_parts/__init__.py (수정)
+- ui/main_window_parts/table_controller.py (신규 생성, 1,666줄)
+- ui/main_window.py (수정, 4,647줄 -> 985줄, 누적 78.8% 감축)
+- history/2026-10-24_012200_Phase6_시나리오테이블_및_하이에라키_컨트롤러_모듈_분리_최종완료.txt (신규 생성)
+================================================================================

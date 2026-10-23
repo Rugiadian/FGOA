@@ -58,15 +58,26 @@ class ConditionEvaluator:
         return points
 
     @staticmethod
-    def evaluate(condition: Optional[Condition], hwnd: int = 0, image: Optional[Image.Image] = None) -> Tuple[bool, List[Dict[str, Any]]]:
+    def evaluate(
+        condition: Optional[Condition],
+        hwnd: int = 0,
+        image: Optional[Image.Image] = None,
+        background_mode: bool = False
+    ) -> Tuple[bool, List[Dict[str, Any]]]:
         """
         Evaluates condition against live target window HWND or provided Image (dummy canvas / reference).
+        When background_mode=True, samples from background PrintWindow capture / window DC
+        even if covered by other windows.
         Returns:
             (is_matched, point_results_list)
         """
         if condition is None or not condition.points:
             # Unconditional
             return (True, [])
+
+        bg_img = None
+        if background_mode and hwnd and image is None:
+            bg_img = ScreenCapture.capture_client_area_background(hwnd)
 
         point_results = []
         matches_count = 0
@@ -76,8 +87,11 @@ class ConditionEvaluator:
             if image is not None:
                 color = ScreenCapture.get_image_pixel(image, pt.x, pt.y)
                 actual_color = color[:3] if color else None
+            elif bg_img is not None:
+                color = ScreenCapture.get_image_pixel(bg_img, pt.x, pt.y)
+                actual_color = color[:3] if color else None
             else:
-                actual_color = ScreenCapture.get_client_pixel_color(hwnd, pt.x, pt.y)
+                actual_color = ScreenCapture.get_client_pixel_color(hwnd, pt.x, pt.y, background=background_mode)
 
             if actual_color is None:
                 passed = False
