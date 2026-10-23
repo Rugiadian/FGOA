@@ -30,6 +30,17 @@ class GlobalFloatingStopWidget(QWidget):
         self._drag_pos = QPoint()
         self._init_ui()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        try:
+            hwnd = int(self.winId())
+            if hwnd:
+                import win32gui, win32con
+                style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+                win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style | 0x08000000)
+        except Exception:
+            pass
+
     def _init_ui(self):
         root_layout = QHBoxLayout(self)
         root_layout.setContentsMargins(8, 8, 8, 8)

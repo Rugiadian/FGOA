@@ -87,6 +87,48 @@ class InputController:
             pass
         return hwnd, int(rel_x), int(rel_y)
 
+    @staticmethod
+    def ensure_no_activate_style(hwnd: int):
+        """Ensures target window has WS_EX_NOACTIVATE style so Windows won't activate it upon mouse messages."""
+        if not hwnd or not win32gui.IsWindow(hwnd):
+            return
+        try:
+            style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+            if not (style & 0x08000000):  # WS_EX_NOACTIVATE
+                win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style | 0x08000000)
+        except Exception:
+            pass
+
+    @staticmethod
+    def restore_foreground_window(hwnd: int):
+        """Restores foreground focus back to user's active window if it was disrupted."""
+        if not hwnd or not win32gui.IsWindow(hwnd):
+            return
+        try:
+            cur_fg = win32gui.GetForegroundWindow()
+            if cur_fg == hwnd:
+                return
+            user32 = ctypes.windll.user32
+            cur_thread = user32.GetCurrentThreadId()
+            fg_thread = user32.GetWindowThreadProcessId(cur_fg, None)
+            target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+
+            attached = False
+            if fg_thread and fg_thread != cur_thread:
+                user32.AttachThreadInput(cur_thread, fg_thread, True)
+                attached = True
+
+            user32.SetForegroundWindow(hwnd)
+            user32.BringWindowToTop(hwnd)
+
+            if attached:
+                user32.AttachThreadInput(cur_thread, fg_thread, False)
+        except Exception:
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+
     @classmethod
     def post_click_at(
         cls,
@@ -99,13 +141,19 @@ class InputController:
     ) -> bool:
         """
         Performs mouse clicks in the background without moving physical cursor using Win32 PostMessage.
-        Allows the user to freely use the mouse on other tasks simultaneously.
+        Allows the user to freely use the mouse on other tasks simultaneously without losing focus.
         """
         if not hwnd or not win32gui.IsWindow(hwnd):
             return False
 
         target_hwnd, tx, ty = cls.resolve_input_target(hwnd, rel_x, rel_y)
         lparam = cls.make_lparam(tx, ty)
+
+        # Capture user's active window to safeguard focus
+        fg_before = win32gui.GetForegroundWindow()
+        cls.ensure_no_activate_style(hwnd)
+        if target_hwnd != hwnd:
+            cls.ensure_no_activate_style(target_hwnd)
 
         down_msg, up_msg, wparam_down = {
             "left": (win32con.WM_LBUTTONDOWN, win32con.WM_LBUTTONUP, win32con.MK_LBUTTON),
@@ -115,16 +163,30 @@ class InputController:
 
         clicks = 2 if click_type == "double" else 1
 
-        for _ in range(repeat):
-            for _ in range(clicks):
-                win32api.PostMessage(target_hwnd, win32con.WM_MOUSEMOVE, 0, lparam)
-                time.sleep(0.015)
-                win32api.PostMessage(target_hwnd, down_msg, wparam_down, lparam)
-                time.sleep(0.04)
-                win32api.PostMessage(target_hwnd, up_msg, 0, lparam)
-                if clicks > 1:
-                    time.sleep(0.08)
-            time.sleep(0.05)
+        try:
+            try:
+                ctypes.windll.user32.LockSetForegroundWindow(1)  # LSFW_LOCK
+            except Exception:
+                pass
+
+            for _ in range(repeat):
+                for _ in range(clicks):
+                    win32api.PostMessage(target_hwnd, win32con.WM_MOUSEMOVE, 0, lparam)
+                    time.sleep(0.015)
+                    win32api.PostMessage(target_hwnd, down_msg, wparam_down, lparam)
+                    time.sleep(0.04)
+                    win32api.PostMessage(target_hwnd, up_msg, 0, lparam)
+                    if clicks > 1:
+                        time.sleep(0.08)
+                time.sleep(0.05)
+        finally:
+            try:
+                ctypes.windll.user32.LockSetForegroundWindow(2)  # LSFW_UNLOCK
+            except Exception:
+                pass
+            if fg_before and win32gui.IsWindow(fg_before):
+                if win32gui.GetForegroundWindow() != fg_before:
+                    cls.restore_foreground_window(fg_before)
         return True
 
     @classmethod
@@ -146,24 +208,43 @@ class InputController:
         target_hwnd_start, sx, sy = cls.resolve_input_target(hwnd, start_x, start_y)
         _, ex, ey = cls.resolve_input_target(hwnd, end_x, end_y)
 
+        fg_before = win32gui.GetForegroundWindow()
+        cls.ensure_no_activate_style(hwnd)
+        if target_hwnd_start != hwnd:
+            cls.ensure_no_activate_style(target_hwnd_start)
+
         start_lparam = cls.make_lparam(sx, sy)
         end_lparam = cls.make_lparam(ex, ey)
 
-        win32api.PostMessage(target_hwnd_start, win32con.WM_MOUSEMOVE, 0, start_lparam)
-        time.sleep(0.03)
-        win32api.PostMessage(target_hwnd_start, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, start_lparam)
-        time.sleep(0.03)
+        try:
+            try:
+                ctypes.windll.user32.LockSetForegroundWindow(1)  # LSFW_LOCK
+            except Exception:
+                pass
 
-        steps = max(10, int(duration_ms / 15))
-        for step in range(1, steps + 1):
-            cur_x = int(sx + (ex - sx) * (step / steps))
-            cur_y = int(sy + (ey - sy) * (step / steps))
-            cur_lparam = cls.make_lparam(cur_x, cur_y)
-            win32api.PostMessage(target_hwnd_start, win32con.WM_MOUSEMOVE, win32con.MK_LBUTTON, cur_lparam)
-            time.sleep(duration_ms / (steps * 1000.0))
+            win32api.PostMessage(target_hwnd_start, win32con.WM_MOUSEMOVE, 0, start_lparam)
+            time.sleep(0.03)
+            win32api.PostMessage(target_hwnd_start, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, start_lparam)
+            time.sleep(0.03)
 
-        time.sleep(0.03)
-        win32api.PostMessage(target_hwnd_start, win32con.WM_LBUTTONUP, 0, end_lparam)
+            steps = max(10, int(duration_ms / 15))
+            for step in range(1, steps + 1):
+                cur_x = int(sx + (ex - sx) * (step / steps))
+                cur_y = int(sy + (ey - sy) * (step / steps))
+                cur_lparam = cls.make_lparam(cur_x, cur_y)
+                win32api.PostMessage(target_hwnd_start, win32con.WM_MOUSEMOVE, win32con.MK_LBUTTON, cur_lparam)
+                time.sleep(duration_ms / (steps * 1000.0))
+
+            time.sleep(0.03)
+            win32api.PostMessage(target_hwnd_start, win32con.WM_LBUTTONUP, 0, end_lparam)
+        finally:
+            try:
+                ctypes.windll.user32.LockSetForegroundWindow(2)  # LSFW_UNLOCK
+            except Exception:
+                pass
+            if fg_before and win32gui.IsWindow(fg_before):
+                if win32gui.GetForegroundWindow() != fg_before:
+                    cls.restore_foreground_window(fg_before)
         return True
 
     @classmethod
@@ -310,16 +391,25 @@ class InputController:
         """Sends text directly to target window via WM_CHAR messages."""
         if not hwnd or not win32gui.IsWindow(hwnd):
             return
-        for ch in text:
-            win32api.PostMessage(hwnd, win32con.WM_CHAR, ord(ch), 0)
-            if delay_per_char > 0:
-                time.sleep(delay_per_char)
+        fg_before = win32gui.GetForegroundWindow()
+        cls.ensure_no_activate_style(hwnd)
+        try:
+            for ch in text:
+                win32api.PostMessage(hwnd, win32con.WM_CHAR, ord(ch), 0)
+                if delay_per_char > 0:
+                    time.sleep(delay_per_char)
+        finally:
+            if fg_before and win32gui.IsWindow(fg_before):
+                if win32gui.GetForegroundWindow() != fg_before:
+                    cls.restore_foreground_window(fg_before)
 
     @classmethod
     def post_key_combination(cls, hwnd: int, key_name: str, modifiers: Optional[List[str]] = None):
         """Sends key press directly to target window via WM_KEYDOWN / WM_KEYUP."""
         if not hwnd or not win32gui.IsWindow(hwnd):
             return
+        fg_before = win32gui.GetForegroundWindow()
+        cls.ensure_no_activate_style(hwnd)
         key_name_clean = key_name.strip()
         vk = VK_MAP.get(key_name_clean)
         if vk is None:
@@ -328,9 +418,14 @@ class InputController:
             else:
                 vk = win32con.VK_RETURN
 
-        win32api.PostMessage(hwnd, win32con.WM_KEYDOWN, vk, 0)
-        time.sleep(0.03)
-        win32api.PostMessage(hwnd, win32con.WM_KEYUP, vk, 0)
+        try:
+            win32api.PostMessage(hwnd, win32con.WM_KEYDOWN, vk, 0)
+            time.sleep(0.03)
+            win32api.PostMessage(hwnd, win32con.WM_KEYUP, vk, 0)
+        finally:
+            if fg_before and win32gui.IsWindow(fg_before):
+                if win32gui.GetForegroundWindow() != fg_before:
+                    cls.restore_foreground_window(fg_before)
 
     @classmethod
     def execute_action(

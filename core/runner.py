@@ -105,12 +105,15 @@ class WorkflowRunner(QThread):
             if self._is_running:
                 self._log("INFO", "🖥️ [번인 방지 종료] 화면 복귀 완료. 조건 평가를 재개합니다.")
 
-    def sleep_interruptible(self, seconds: float) -> bool:
-        """Sleeps in small chunks (20ms) checking self._is_running. Returns True if completed, False if interrupted."""
+    def sleep_interruptible(self, seconds: float, abort_on_pause: bool = True) -> bool:
+        """Sleeps in small chunks (20ms) checking self._is_running and optionally self._is_paused.
+        Returns True if full duration completed, False if interrupted."""
         if seconds <= 0:
             return True
         if hasattr(time.sleep, "assert_called") or hasattr(time.sleep, "mock_calls"):
             time.sleep(seconds)
+            if abort_on_pause and self._is_paused:
+                return False
             return self._is_running
         from PyQt5.QtCore import QThread
         from PyQt5.QtWidgets import QApplication
@@ -119,11 +122,36 @@ class WorkflowRunner(QThread):
 
         end_time = time.time() + seconds
         while time.time() < end_time and self._is_running:
+            if abort_on_pause and self._is_paused:
+                return False
             if is_main and app:
                 app.processEvents()
             rem = end_time - time.time()
             time.sleep(min(0.02, max(0.001, rem)))
+        if abort_on_pause and self._is_paused:
+            return False
         return self._is_running
+
+    def _wait_while_paused(self) -> bool:
+        """
+        If the runner is in paused state, pauses execution immediately and waits until resumed or stopped.
+        Returns True if still running (resumed).
+        Returns False if runner was stopped.
+        """
+        if not self._is_running:
+            return False
+        if not self._is_paused:
+            return True
+
+        self._log("INFO", f"⏸️ [일시정지] 실행이 즉시 일시정지되었습니다. (재개 대기 중...)")
+        while self._is_running and self._is_paused:
+            self.sleep_interruptible(0.03, abort_on_pause=False)
+
+        if not self._is_running:
+            return False
+
+        self._log("INFO", f"▶️ [재개] 일시정지 상태에서 실행을 재개합니다.")
+        return True
 
     def set_next_scenario_id(self, scenario_id: Optional[str]):
         """Sets the scenario ID to jump to next (used when stepping from user-selected node)."""
@@ -189,9 +217,10 @@ class WorkflowRunner(QThread):
             while self._is_running and current_index < len(scenarios):
                 # Check pause
                 was_paused = False
-                while self._is_running and self._is_paused:
+                if self._is_paused:
                     was_paused = True
-                    self.sleep_interruptible(0.05)
+                    if not self._wait_while_paused():
+                        break
 
                 if not self._is_running:
                     break
@@ -265,8 +294,18 @@ class WorkflowRunner(QThread):
                     is_cond_en = getattr(scen, "condition_enabled", True)
                     eff_cond = (scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition) if is_cond_en else None
                     if scen.loop_mode in ("until_match", "while_match") and eff_cond and eff_cond.points:
+                        if not self._wait_while_paused():
+                            break
                         self._wait_for_anti_burn()
-                        matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd, background_mode=getattr(self, "background_mode", False))
+                        if getattr(self, "background_mode", False):
+                            matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd, background_mode=True)
+                        else:
+                            matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
+                        if self._is_paused:
+                            if not self._wait_while_paused():
+                                break
+                            if self._next_scenario_id and self._next_scenario_id != scen.id:
+                                continue
                         if scen.loop_mode == "until_match" and matched:
                             end_idx = self.project.find_matching_loop_end(current_index)
                             self._log("SUCCESS", f"⚡ [루프 탈출 s{scen.scenario_number}] '{scen.name}': 탈출 인식 조건 충족! 루프 즉시 탈출")
@@ -328,20 +367,78 @@ class WorkflowRunner(QThread):
                 is_cond_en = getattr(scen, "condition_enabled", True)
                 eff_cond = (scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition) if is_cond_en else None
                 point_results = []
+                interrupted_by_pause_jump = False
 
                 while attempt < max_attempts and self._is_running:
+                    # [Pause Check 1]: Check before evaluating
+                    if self._is_paused:
+                        if not self._wait_while_paused():
+                            break
+                        if self._next_scenario_id and self._next_scenario_id != scen.id:
+                            interrupted_by_pause_jump = True
+                            break
+                        self._next_scenario_id = None
+                        attempt = 0
+                        self._log("INFO", f"[#{scen.step_number}] '{scen.name}' 재개됨: 조건 재평가를 시작합니다.")
+
                     self._wait_for_anti_burn()
-                    matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd, background_mode=getattr(self, "background_mode", False))
+                    if getattr(self, "background_mode", False):
+                        matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd, background_mode=True)
+                    else:
+                        matched, point_results = ConditionEvaluator.evaluate(eff_cond, self.hwnd)
+
+                    # [Pause Check 2]: Check right after evaluation
+                    if self._is_paused:
+                        if not self._wait_while_paused():
+                            break
+                        if self._next_scenario_id and self._next_scenario_id != scen.id:
+                            interrupted_by_pause_jump = True
+                            break
+                        self._next_scenario_id = None
+                        attempt = 0
+                        matched = False
+                        self._log("INFO", f"[#{scen.step_number}] '{scen.name}' 재개됨: 조건 재평가를 시작합니다.")
+                        continue
+
                     if matched:
                         break
+
                     attempt += 1
                     if attempt < max_attempts and self._is_running:
                         mismatch_info = ConditionEvaluator.format_mismatch_log(point_results)
                         fail_count = sum(1 for p in point_results if not p.get("passed", False))
                         mismatch_str = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
                         self._log("INFO", f"[#{scen.step_number}] ⏳ '{scen.name}' 조건 불일치{mismatch_str} - 재시도 대기 ({attempt}/{scen.retry_max_count}회, {scen.retry_interval_sec:.1f}초 후 재검사)...")
-                        if not self.sleep_interruptible(scen.retry_interval_sec):
+                        if not self.sleep_interruptible(scen.retry_interval_sec, abort_on_pause=True):
+                            if not self._is_running:
+                                break
+                            if self._is_paused:
+                                if not self._wait_while_paused():
+                                    break
+                                if self._next_scenario_id and self._next_scenario_id != scen.id:
+                                    interrupted_by_pause_jump = True
+                                    break
+                                self._next_scenario_id = None
+                                attempt = 0
+                                self._log("INFO", f"[#{scen.step_number}] '{scen.name}' 재개됨: 조건 재평가를 시작합니다.")
+                                continue
                             break
+
+                if interrupted_by_pause_jump:
+                    continue
+
+                if not self._is_running:
+                    break
+
+                # [Pause Check 4]: Check before handling match/mismatch outcomes
+                if self._is_paused:
+                    if not self._wait_while_paused():
+                        break
+                    if self._next_scenario_id and self._next_scenario_id != scen.id:
+                        continue
+                    self._next_scenario_id = None
+                    # Resumed on this node: re-evaluate this node freshly!
+                    continue
 
                 # Handle evaluation outcome
                 if matched:
@@ -358,11 +455,23 @@ class WorkflowRunner(QThread):
                     self._log("SUCCESS", f"[#{scen.step_number}] '{scen.name}' 조건 일치! (판정: 성공{rule_tag})")
 
                     if scen.on_match == "execute":
+                        # Check pause before executing actions
+                        if self._is_paused:
+                            if not self._wait_while_paused():
+                                break
+                            if self._next_scenario_id and self._next_scenario_id != scen.id:
+                                continue
+                            self._next_scenario_id = None
+
                         # Execute actions
                         self._execute_actions(scen)
                         if scen.post_delay_seconds > 0 and self._is_running:
-                            if not self.sleep_interruptible(scen.post_delay_seconds):
-                                break
+                            if not self.sleep_interruptible(scen.post_delay_seconds, abort_on_pause=True):
+                                if self._is_paused:
+                                    if not self._wait_while_paused():
+                                        break
+                                if not self._is_running:
+                                    break
                         current_index += 1
 
                     elif scen.on_match == "break_loop":
@@ -488,14 +597,11 @@ class WorkflowRunner(QThread):
                 break
 
             # Handle pause
-            while self._is_running and self._is_paused:
-                self.sleep_interruptible(0.05)
-
-            if not self._is_running:
+            if not self._wait_while_paused():
                 break
 
             # If during pause a jump was requested to another scenario
-            if self._next_scenario_id:
+            if self._next_scenario_id and self._next_scenario_id != scenario.id:
                 break
 
             # Signal action visualizer overlay that this action is about to execute
@@ -545,15 +651,19 @@ class WorkflowRunner(QThread):
                 min_delay=0.0,
                 max_delay=offset_sec,
                 precomputed_jitter=jitter,
-                stop_checker=lambda: not self._is_running,
+                stop_checker=lambda: not self._is_running or self._is_paused,
                 background=getattr(self, "background_mode", False)
             )
 
             self.sig_action_finished.emit(act)
 
             # Small safety delay between actions
-            if not self.sleep_interruptible(0.05):
-                break
+            if not self.sleep_interruptible(0.05, abort_on_pause=True):
+                if self._is_paused:
+                    if not self._wait_while_paused():
+                        break
+                if not self._is_running:
+                    break
 
         if actions:
             self.sig_action_sequence_finished.emit()

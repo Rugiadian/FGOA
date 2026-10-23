@@ -124,53 +124,111 @@ QPushButton#btn_run:disabled,
 QPushButton#btn_run_selected:disabled,
 QPushButton#btn_stop:disabled,
 QPushButton#btn_pause:disabled,
+QPushButton#btn_step:disabled,
 QPushButton#btn_primary:disabled {{
     background-color: #f1f5f9;
     color: #94a3b8;
-    border: 1px solid #e2e8f0;
+    border: 1px solid #cbd5e1;
+}}
+
+/* Playback Control Buttons (하단 시나리오 재생 컨트롤 - 누르기 쉬운 버튼형) */
+QPushButton#btn_run,
+QPushButton#btn_run_selected,
+QPushButton#btn_pause,
+QPushButton#btn_stop,
+QPushButton#btn_step {{
+    min-height: 28px;
+    padding: 5px 14px;
+    border-radius: 6px;
+    font-size: 9.5pt;
+    font-weight: bold;
 }}
 
 QPushButton#btn_run {{
     background-color: #16a34a;
     color: #ffffff;
     border: 1px solid #15803d;
-    font-size: 9.5pt;
-    font-weight: bold;
 }}
 QPushButton#btn_run:hover {{
     background-color: #15803d;
+    border-color: #166534;
+}}
+QPushButton#btn_run:pressed {{
+    background-color: #166534;
 }}
 
 QPushButton#btn_run_selected {{
     background-color: #0d9488;
     color: #ffffff;
     border: 1px solid #0f766e;
-    font-size: 9.5pt;
-    font-weight: bold;
 }}
 QPushButton#btn_run_selected:hover {{
     background-color: #0f766e;
+    border-color: #115e59;
 }}
-
-QPushButton#btn_stop {{
-    background-color: #dc2626;
-    color: #ffffff;
-    border: 1px solid #b91c1c;
-    font-size: 9.5pt;
-    font-weight: bold;
-}}
-QPushButton#btn_stop:hover {{
-    background-color: #b91c1c;
+QPushButton#btn_run_selected:pressed {{
+    background-color: #115e59;
 }}
 
 QPushButton#btn_pause {{
     background-color: #ea580c;
     color: #ffffff;
     border: 1px solid #c2410c;
-    font-weight: bold;
 }}
 QPushButton#btn_pause:hover {{
     background-color: #c2410c;
+    border-color: #9a3412;
+}}
+QPushButton#btn_pause:pressed {{
+    background-color: #9a3412;
+}}
+
+QPushButton#btn_stop {{
+    background-color: #dc2626;
+    color: #ffffff;
+    border: 1px solid #b91c1c;
+}}
+QPushButton#btn_stop:hover {{
+    background-color: #b91c1c;
+    border-color: #991b1b;
+}}
+QPushButton#btn_stop:pressed {{
+    background-color: #991b1b;
+}}
+
+QPushButton#btn_step {{
+    background-color: #0284c7;
+    color: #ffffff;
+    border: 1px solid #0369a1;
+}}
+QPushButton#btn_step:hover {{
+    background-color: #0369a1;
+    border-color: #075985;
+}}
+QPushButton#btn_step:pressed {{
+    background-color: #075985;
+}}
+
+QPushButton#btn_anti_ban,
+QPushButton#btn_test_anti_burn {{
+    min-height: 22px;
+    background-color: #f8fafc;
+    border: 1px solid #cbd5e1;
+    color: #334155;
+    border-radius: 5px;
+    padding: 3px 10px;
+    font-size: 8.5pt;
+    font-weight: 600;
+}}
+QPushButton#btn_anti_ban:hover,
+QPushButton#btn_test_anti_burn:hover {{
+    background-color: #f1f5f9;
+    border-color: #94a3b8;
+    color: #0f172a;
+}}
+QPushButton#btn_anti_ban:pressed,
+QPushButton#btn_test_anti_burn:pressed {{
+    background-color: #e2e8f0;
 }}
 
 QPushButton#btn_primary {{
@@ -594,53 +652,111 @@ QPushButton#btn_run:disabled,
 QPushButton#btn_run_selected:disabled,
 QPushButton#btn_stop:disabled,
 QPushButton#btn_pause:disabled,
+QPushButton#btn_step:disabled,
 QPushButton#btn_primary:disabled {{
     background-color: #23232b;
     color: #555566;
     border: 1px solid #2e2e38;
 }}
 
+/* Playback Control Buttons (하단 시나리오 재생 컨트롤 - 누르기 쉬운 버튼형) */
+QPushButton#btn_run,
+QPushButton#btn_run_selected,
+QPushButton#btn_pause,
+QPushButton#btn_stop,
+QPushButton#btn_step {{
+    min-height: 28px;
+    padding: 5px 14px;
+    border-radius: 6px;
+    font-size: 9.5pt;
+    font-weight: bold;
+}}
+
 QPushButton#btn_run {{
     background-color: #1b5e20;
     color: #ffffff;
     border: 1px solid #2e7d32;
-    font-size: 9.5pt;
-    font-weight: bold;
 }}
 QPushButton#btn_run:hover {{
     background-color: #2e7d32;
+    border-color: #388e3c;
+}}
+QPushButton#btn_run:pressed {{
+    background-color: #144a18;
 }}
 
 QPushButton#btn_run_selected {{
     background-color: #00695c;
     color: #ffffff;
     border: 1px solid #00897b;
-    font-size: 9.5pt;
-    font-weight: bold;
 }}
 QPushButton#btn_run_selected:hover {{
     background-color: #00897b;
+    border-color: #009688;
 }}
-
-QPushButton#btn_stop {{
-    background-color: #b71c1c;
-    color: #ffffff;
-    border: 1px solid #c62828;
-    font-size: 9.5pt;
-    font-weight: bold;
-}}
-QPushButton#btn_stop:hover {{
-    background-color: #c62828;
+QPushButton#btn_run_selected:pressed {{
+    background-color: #004d40;
 }}
 
 QPushButton#btn_pause {{
     background-color: #e65100;
     color: #ffffff;
     border: 1px solid #ef6c00;
-    font-weight: bold;
 }}
 QPushButton#btn_pause:hover {{
     background-color: #ef6c00;
+    border-color: #f57c00;
+}}
+QPushButton#btn_pause:pressed {{
+    background-color: #bf360c;
+}}
+
+QPushButton#btn_stop {{
+    background-color: #b71c1c;
+    color: #ffffff;
+    border: 1px solid #c62828;
+}}
+QPushButton#btn_stop:hover {{
+    background-color: #c62828;
+    border-color: #d32f2f;
+}}
+QPushButton#btn_stop:pressed {{
+    background-color: #880e4f;
+}}
+
+QPushButton#btn_step {{
+    background-color: #0277bd;
+    color: #ffffff;
+    border: 1px solid #0288d1;
+}}
+QPushButton#btn_step:hover {{
+    background-color: #0288d1;
+    border-color: #039be5;
+}}
+QPushButton#btn_step:pressed {{
+    background-color: #01579b;
+}}
+
+QPushButton#btn_anti_ban,
+QPushButton#btn_test_anti_burn {{
+    min-height: 22px;
+    background-color: #2b2b36;
+    border: 1px solid #4a4a5a;
+    color: #f0f0f5;
+    border-radius: 5px;
+    padding: 3px 10px;
+    font-size: 8.5pt;
+    font-weight: 600;
+}}
+QPushButton#btn_anti_ban:hover,
+QPushButton#btn_test_anti_burn:hover {{
+    background-color: #383848;
+    border-color: #636378;
+    color: #ffffff;
+}}
+QPushButton#btn_anti_ban:pressed,
+QPushButton#btn_test_anti_burn:pressed {{
+    background-color: #1e1e24;
 }}
 
 QPushButton#btn_primary {{

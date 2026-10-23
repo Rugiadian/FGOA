@@ -711,18 +711,18 @@ class MainWindow(
         ctrl_frame.setObjectName("card_frame")
         ctrl_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         c_layout = QVBoxLayout(ctrl_frame)
-        c_layout.setContentsMargins(10, 6, 10, 6)
-        c_layout.setSpacing(6)
+        c_layout.setContentsMargins(12, 8, 12, 8)
+        c_layout.setSpacing(8)
 
         # ----------------------------------------------------
         # Row 1: 시나리오 재생 실행 제어 & 시각화/플로팅 & 상태
         # ----------------------------------------------------
         row1_ctrl = QHBoxLayout()
         row1_ctrl.setContentsMargins(0, 0, 0, 0)
-        row1_ctrl.setSpacing(6)
+        row1_ctrl.setSpacing(8)
 
         lbl_playback_title = QLabel("▶ 시나리오 재생:")
-        lbl_playback_title.setStyleSheet("font-weight: bold; font-size: 9.5pt;")
+        lbl_playback_title.setStyleSheet("font-weight: bold; font-size: 9.5pt; margin-right: 2px;")
         row1_ctrl.addWidget(lbl_playback_title)
 
         self.btn_run = QPushButton("▶ 전체 시작 (F5)")
@@ -751,9 +751,15 @@ class MainWindow(
         row1_ctrl.addWidget(self.btn_stop)
 
         self.btn_step = QPushButton("⏭ 단일 스텝 (F7)")
+        self.btn_step.setObjectName("btn_step")
         self.btn_step.setToolTip("선택한 시나리오 노드부터 1단계를 실행하고 다음 노드로 포인터를 이동한 뒤 일시정지합니다. (단축키: F7)")
         self.btn_step.clicked.connect(self._on_step_execution)
         row1_ctrl.addWidget(self.btn_step)
+
+        # 누르기 쉬운 버튼형 높이(min-height: 32px) 및 손가락(포인터) 커서 일괄 적용
+        for btn in (self.btn_run, self.btn_run_selected, self.btn_pause, self.btn_stop, self.btn_step):
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setMinimumHeight(32)
 
         sep_c1 = QFrame()
         sep_c1.setFrameShape(QFrame.VLine)
@@ -763,12 +769,14 @@ class MainWindow(
 
         self.chk_action_overlay = QCheckBox("🎯 조작 시각화")
         self.chk_action_overlay.setChecked(True)
+        self.chk_action_overlay.setCursor(Qt.PointingHandCursor)
         self.chk_action_overlay.setToolTip("오토 실행 중 조작할 좌표나 범위를 앱 화면 위에 점선 박스/화살표로 시각화 표시합니다.")
         self.chk_action_overlay.toggled.connect(self._on_toggle_action_overlay)
         row1_ctrl.addWidget(self.chk_action_overlay)
 
         self.chk_floating_stop = QCheckBox("🛑 전역 플로팅 정지")
         self.chk_floating_stop.setChecked(False)
+        self.chk_floating_stop.setCursor(Qt.PointingHandCursor)
         self.chk_floating_stop.setToolTip("오토 실행 시 화면 최상위에 어디서나 마우스로 원클릭 정지 가능한 빨간색 플로팅 버튼을 자동 표시합니다.")
         self.chk_floating_stop.toggled.connect(self._on_toggle_floating_stop)
         row1_ctrl.addWidget(self.chk_floating_stop)
@@ -776,6 +784,7 @@ class MainWindow(
         self.chk_background_mode = QCheckBox("👻 백그라운드 제어")
         self.chk_background_mode.setObjectName("chk_background_mode")
         self.chk_background_mode.setChecked(False)
+        self.chk_background_mode.setCursor(Qt.PointingHandCursor)
         self.chk_background_mode.setToolTip(
             "물리 마우스 커서를 움직이지 않고(PostMessage) 타겟 창에 직접 비활성 입력을 전송하며,\n"
             "창이 다른 프로그램에 가려져 있어도 백그라운드에서 화면을 인식합니다.\n"
@@ -840,6 +849,8 @@ class MainWindow(
 
         self.btn_anti_ban = QPushButton("🛡️ 안티밴 설정...")
         self.btn_anti_ban.setObjectName("btn_anti_ban")
+        self.btn_anti_ban.setCursor(Qt.PointingHandCursor)
+        self.btn_anti_ban.setMinimumHeight(26)
         self.btn_anti_ban.setToolTip("타임 지연 및 좌표 오프셋 안티밴 설정을 엽니다.")
         self.btn_anti_ban.clicked.connect(self._on_open_anti_ban_dialog)
         row2_ctrl.addWidget(self.btn_anti_ban)
@@ -853,6 +864,7 @@ class MainWindow(
         # Monitor Burn-in Prevention
         self.chk_anti_burn = QCheckBox("🖥️ 번인 방지")
         self.chk_anti_burn.setChecked(False)
+        self.chk_anti_burn.setCursor(Qt.PointingHandCursor)
         self.chk_anti_burn.setToolTip("지정한 n분 주기마다 화면을 서서히 블랙으로 전환하여 모니터 번인을 방지합니다. (조작 간섭 없음, 긴급탈출: F12)")
         self.chk_anti_burn.toggled.connect(self._on_toggle_anti_burn)
         row2_ctrl.addWidget(self.chk_anti_burn)
@@ -882,6 +894,8 @@ class MainWindow(
 
         self.btn_test_anti_burn = QPushButton("🧪 테스트")
         self.btn_test_anti_burn.setObjectName("btn_test_anti_burn")
+        self.btn_test_anti_burn.setCursor(Qt.PointingHandCursor)
+        self.btn_test_anti_burn.setMinimumHeight(26)
         self.btn_test_anti_burn.setToolTip("선택한 번인 방지 모드의 화면 전환 효과를 즉시 1회 테스트합니다. (실행 중 클릭 시 중지, 긴급탈출: F12)")
         self.btn_test_anti_burn.clicked.connect(self._on_test_anti_burn)
         row2_ctrl.addWidget(self.btn_test_anti_burn)

@@ -109,7 +109,14 @@ class ActionOverlayWindow(QWidget):
 
         self.update_geometry()
         if not self.isVisible():
-            self.show()
+            try:
+                hwnd = int(self.winId())
+                if hwnd:
+                    win32gui.ShowWindow(hwnd, win32con.SW_SHOWNOACTIVATE)
+                else:
+                    self.show()
+            except Exception:
+                self.show()
         self._apply_native_click_through()
         self.update()
 
@@ -137,7 +144,14 @@ class ActionOverlayWindow(QWidget):
 
         self.update_geometry()
         if not self.isVisible():
-            self.show()
+            try:
+                hwnd = int(self.winId())
+                if hwnd:
+                    win32gui.ShowWindow(hwnd, win32con.SW_SHOWNOACTIVATE)
+                else:
+                    self.show()
+            except Exception:
+                self.show()
         self._apply_native_click_through()
         self.update()
 

@@ -32,6 +32,14 @@ class MainWindowPlaybackMixin:
     def _set_paused_state(self, scenario_id: Optional[str]):
         """Records paused scenario ID and visually marks it in header and scenario list."""
         self._paused_scenario_id = scenario_id
+        if hasattr(self, "project") and self.project and scenario_id:
+            p_idx = next((i for i, s in enumerate(self.project.scenarios) if s.id == scenario_id), None)
+            if p_idx is not None:
+                self._highlight_running_row_header(p_idx)
+                if hasattr(self, "tbl_scenarios") and self.tbl_scenarios:
+                    it = self.tbl_scenarios.item(p_idx, 0)
+                    if it:
+                        self.tbl_scenarios.scrollToItem(it)
         if hasattr(self, "_refresh_scenario_table"):
             self._refresh_scenario_table()
 
@@ -118,8 +126,9 @@ class MainWindowPlaybackMixin:
         if hasattr(self, "runner") and self.runner and self.runner.isRunning():
             if self.runner._is_paused:
                 # Resuming execution from paused node
-                if getattr(self, "_paused_scenario_id", None):
-                    self.runner.set_next_scenario_id(self._paused_scenario_id)
+                target_id = getattr(self, "_paused_scenario_id", None) or getattr(self.runner, "current_scenario_id", None)
+                if target_id:
+                    self.runner.set_next_scenario_id(target_id)
                 self.runner.resume()
                 self._clear_paused_state()
                 self.btn_pause.setText("⏸ 일시정지 (Shift+F6)")
@@ -228,6 +237,9 @@ class MainWindowPlaybackMixin:
 
     def _on_action_sequence_started_visual(self, actions: list, scenario_name: str):
         """전체 액션 시퀀스의 모든 포인트들을 오버레이 화면상에 동시 시각화"""
+        is_bg = getattr(self, "chk_background_mode", None) and self.chk_background_mode.isChecked()
+        if is_bg:
+            return  # 백그라운드 모드 시 사용자의 채팅/작업 포커스 방해를 원천 차단하기 위해 오버레이 팝업 억제
         if hasattr(self, "action_overlay") and self.action_overlay and hasattr(self, "chk_action_overlay") and self.chk_action_overlay.isChecked():
             self.action_overlay.set_target_hwnd(self.target_hwnd)
             self.action_overlay.show_sequence(actions, 1, scenario_name)
@@ -239,7 +251,8 @@ class MainWindowPlaybackMixin:
 
     def _on_action_executing_visual(self, action, index, total):
         # 1. Action overlay for click/drag coordinates on target screen (completely click-through)
-        if hasattr(self, "action_overlay") and self.action_overlay and hasattr(self, "chk_action_overlay") and self.chk_action_overlay.isChecked():
+        is_bg = getattr(self, "chk_background_mode", None) and self.chk_background_mode.isChecked()
+        if not is_bg and hasattr(self, "action_overlay") and self.action_overlay and hasattr(self, "chk_action_overlay") and self.chk_action_overlay.isChecked():
             self.action_overlay.set_target_hwnd(self.target_hwnd)
             self.action_overlay.set_current_action_index(index, action)
 
@@ -278,6 +291,8 @@ class MainWindowPlaybackMixin:
     def _on_toggle_background_mode(self, checked: bool):
         if hasattr(self, "runner") and self.runner and self.runner.isRunning():
             self.runner.set_background_mode(checked)
+        if checked and hasattr(self, "action_overlay") and self.action_overlay:
+            self.action_overlay.clear_action()
         status_text = "활성화 (마우스 독립 조작 가능, 비활성 PostMessage/PrintWindow)" if checked else "비활성화 (물리 마우스 조작 모드)"
         self._append_log("INFO", f"👻 백그라운드 제어 모드 {status_text}")
         if hasattr(self, "_save_app_config"):

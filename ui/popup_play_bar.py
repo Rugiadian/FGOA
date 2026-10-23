@@ -90,6 +90,7 @@ class PopupPlayBar(QWidget):
             | Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
 
         self._drag_pos: Optional[QPoint] = None
         self._user_moved: bool = False
@@ -100,6 +101,17 @@ class PopupPlayBar(QWidget):
 
         self._init_ui()
         self.resize(380, 100)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        try:
+            hwnd = int(self.winId())
+            if hwnd:
+                import win32gui, win32con
+                style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+                win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style | 0x08000000)
+        except Exception:
+            pass
 
     def _init_ui(self):
         root_layout = QVBoxLayout(self)

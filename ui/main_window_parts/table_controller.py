@@ -49,6 +49,12 @@ class MainWindowTableMixin:
         row = rows[0].row()
         if 0 <= row < len(self.project.scenarios):
             target_scen = self.project.scenarios[row]
+            # When paused, allow user to click any scenario row to set it as the resume target
+            if hasattr(self, "runner") and self.runner and self.runner.isRunning() and self.runner._is_paused:
+                self._set_paused_state(target_scen.id)
+                self.runner.set_next_scenario_id(target_scen.id)
+                self._highlight_running_row_header(row)
+
             # If current inspector has unsaved changes for a different scenario, ask user
             if (self.inspector.is_dirty and self.inspector.original_scenario and
                     self.inspector.original_scenario.id != target_scen.id):

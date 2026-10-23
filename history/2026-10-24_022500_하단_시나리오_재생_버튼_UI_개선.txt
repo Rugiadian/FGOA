@@ -1,0 +1,58 @@
+================================================================================
+FGOA Work History Log
+================================================================================
+
+[일시 / Timestamp]
+- 시작 일시: 2026-10-24 02:00:00
+- 완료 일시: 2026-10-24 02:25:00
+
+[요청 내용 / User Request]
+하단 시나리오 재생 메뉴 버튼을 누르기 쉽게 버튼형으로 변경
+
+[문제 분석 / Analysis]
+1. 기존 하단 시나리오 재생 버튼 크기 및 시각적 클릭 편의성 부족:
+   - ui/main_window.py 하단 툴바(BottomToolBar)의 시나리오 재생 컨트롤 영역에 위치한 버튼들(전체 시작, 선택부터 시작, 일시정지, 정지, 단일 스텝)이 기본 테마의 작은 버튼 높이(min-height: 20px, padding: 3px 8px)를 사용하여 터치 및 마우스 클릭 타겟이 협소함.
+   - 단일 스텝 버튼(self.btn_step)에 objectName("btn_step")이 지정되지 않아 고유 컬러 없이 일반 기본 버튼으로 평평하게 표시됨.
+   - 마우스 호버 시 손가락 포인터 커서(PointingHandCursor)가 적용되어 있지 않아 인터랙티브한 반응성이 부족함.
+   - 눌림 상태(:pressed)에 대한 CSS 피드백이 없어 물리적인 클릭 감각이 미흡함.
+
+[해결 및 개선 내역 / Implementation Details]
+1. 하단 시나리오 재생 제어 버튼 크기 및 커서 개편 (ui/main_window.py):
+   - self.btn_run ("▶ 전체 시작 (F5)")
+   - self.btn_run_selected ("▶ 선택부터 시작 (Shift+F5)")
+   - self.btn_pause ("⏸ 일시정지 (Shift+F6)")
+   - self.btn_stop ("⏹ 정지 (F6)")
+   - self.btn_step ("⏭ 단일 스텝 (F7)")
+   - 각 재생 제어 버튼에 min-height: 32px 및 Qt.PointingHandCursor 일괄 적용.
+   - self.btn_step.setObjectName("btn_step")을 명시적으로 부여하여 스타일시트 테마 바인딩 완료.
+   - 하단 프레임 여백(ContentsMargins: 12, 8, 12, 8) 및 버튼 간격(Spacing: 8)을 여유 있게 조정하여 오클릭 방지.
+   - 하단 툴바 내 체크박스(조작 시각화, 전역 플로팅 정지, 백그라운드 제어, 번인 방지) 및 보조 버튼(안티밴 설정, 번인 테스트)에도 PointingHandCursor 및 최적 높이 적용.
+
+2. 라이트 및 다크 테마 QSS 스타일시트 전면 강화 (ui/theme.py):
+   - 라이트 모드 (LIGHT_THEME) 및 다크 모드 (DARK_THEME) 공통:
+     - 재생 제어 버튼군(btn_run, btn_run_selected, btn_pause, btn_stop, btn_step)에 min-height: 28px, padding: 5px 14px, border-radius: 6px, font-weight: bold 전용 스타일링 규칙 추가.
+     - btn_run: 에메랄드 그린 배경, 호버/눌림(:pressed) 시 톤다운 피드백 적용.
+     - btn_run_selected: 틸/청록 배경, 호버/눌림(:pressed) 색상 전환 적용.
+     - btn_pause: 앰버/오렌지 배경, 호버/눌림(:pressed) 색상 전환 적용.
+     - btn_stop: 크림슨 레드 배경, 호버/눌림(:pressed) 색상 전환 적용.
+     - btn_step: 딥 스카이블루 배경, 호버/눌림(:pressed) 색상 전환 적용.
+     - 비활성화(:disabled) 상태 시 시각적 일관성 유지.
+     - 안티밴 및 번인 테스트 버튼(#btn_anti_ban, #btn_test_anti_burn)에 min-height: 22px 및 깔끔한 보조 버튼 스타일 적용.
+
+3. 전용 회귀 방지 단위 테스트 추가 (tests/test_bottom_playback_buttons_ui.py):
+   - test_01_playback_button_sizes_and_cursors: 모든 재생 버튼의 minimumHeight >= 30 및 PointingHandCursor 검증.
+   - test_02_btn_step_object_name: btn_step의 objectName 설정 검증.
+   - test_03_theme_styles_include_playback_buttons: 라이트/다크 테마 내 hover/pressed/disabled CSS 포함 검증.
+   - test_04_bottom_bar_secondary_controls_cursor: 하단 툴바 체크박스 및 보조 버튼 커서 검증.
+
+[테스트 검증 결과 / Verification]
+- tests/test_bottom_playback_buttons_ui.py: 4/4 통과 (OK, 0.8s)
+- tests/test_loop_warning_playback_and_pointer.py & tests/test_latest_5_user_enhancements.py & tests/test_hotkey_pause_and_custom_spinbox.py & tests/test_burn_in_mode2_and_playbar.py & tests/test_background_mode.py & tests/test_presets_and_layouts.py: 96/96 통과 (OK, 16.7s)
+- 기존 기능 100% 하위 호환성 유지.
+
+[영향 파일 목록 / Affected Files]
+- ui/main_window.py (수정: 하단 컨트롤 바 재생 버튼 높이, 커서, 여백 및 btn_step objectName 지정)
+- ui/theme.py (수정: 라이트/다크 테마 재생 버튼군 QSS, pressed 상태, btn_step 및 보조 버튼 스타일 추가)
+- tests/test_bottom_playback_buttons_ui.py (신규 생성: 하단 재생 버튼 UI 검증 테스트)
+- history/2026-10-24_022500_하단_시나리오_재생_버튼_UI_개선.txt (신규 생성)
+================================================================================

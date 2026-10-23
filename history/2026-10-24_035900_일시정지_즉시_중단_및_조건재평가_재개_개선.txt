@@ -1,0 +1,60 @@
+================================================================================
+FGOA Work History Log
+================================================================================
+
+[일시 / Timestamp]
+- 시작 일시: 2026-10-24 03:48:05
+- 완료 일시: 2026-10-24 03:59:00
+
+[요청 내용 / User Request]
+일시 정지를 하면 바로 다 정지가 되어야 하는데 조건 재평가 중인 노드는 계속 실행되고, 재개할 때도 거기서부터 시작이 안 되는 현상 분석 및 개선
+
+[원인 분석 / Root Cause Analysis]
+1. 조건 평가 및 재시도 루프 내 일시정지(_is_paused) 미감지:
+   - core/runner.py의 시나리오 조건 평가 및 재시도 루프(`while attempt < max_attempts and self._is_running:`)에서 `self._is_paused` 상태를 검사하지 않았음.
+   - 조건 불일치 시 대기하는 `self.sleep_interruptible(scen.retry_interval_sec)`가 오직 `self._is_running`만 검사하여, 일시정지를 눌러도 재시도 간격(예: 2~5초)을 끝까지 대기하고 다음 재시도를 계속해서 실행함.
+   - 그 결과 사용자가 일시정지를 눌렀음에도 백그라운드에서 재시도가 모두 소진될 때까지 계속 실행되다가 결국 "재시도 실패로 오토 정지"되거나 다음 시나리오로 넘어가 버림.
+
+2. 재개(Resume) 시 일시정지된 노드 복원 불일치:
+   - 일시정지 중 백그라운드에서 재시도가 계속 돌다 보니, 사용자가 '재개'를 누르는 시점에는 이미 러너가 정지되었거나 다음 노드로 진행된 상태였음.
+   - 또한 재개 시 재시도 횟수(`attempt`)가 리셋되지 않아 남은 재시도가 없거나 올바른 시점에서 조건 재검사가 이루어지지 않음.
+
+[해결 및 개선 내역 / Implementation Details]
+1. `core/runner.py` - 즉시 일시정지 및 재평가 재개 아키텍처 구축:
+   - `sleep_interruptible(seconds, abort_on_pause=True)`:
+     - `abort_on_pause=True` 매개변수를 추가하여, 일시정지 호출 즉시(최대 20ms 이내) 모든 대기 루프를 즉각 탈출하고 `False`를 반환하도록 개선.
+   - `_wait_while_paused()` 메서드 신설:
+     - 일시정지 상태 감지 시 즉각 진입하여 재개(Resume) 또는 정지(Stop)될 때까지 안전하게 대기.
+   - 조건 평가 및 재시도 루프 즉시 반응성 적용:
+     - 조건 평가 직전, 조건 평가 직후, 재시도 대기 슬립 직후, 결과 처리 직전 총 4개 체크포인트에서 `_is_paused` 즉시 감지 및 대기.
+     - 재개 시 `attempt = 0`으로 초기화하여, 일시정지된 노드의 조건을 즉각 처음부터 온전하게 재평가(Fresh Retry)하도록 보장.
+     - 일시정지 중 사용자가 다른 시나리오 노드를 선택한 경우(`_next_scenario_id`), 즉시 해당 노드로 안전하게 점프하여 재개되도록 처리.
+   - 액션 시퀀스 및 지연 실행 일시정지 연동:
+     - `InputController.execute_action`의 `stop_checker`에 `lambda: not self._is_running or self._is_paused`를 연결하여 긴 딜레이 액션 중 일시정지 시 즉시 정지.
+
+2. `ui/main_window_parts/playback_controller.py`:
+   - `_on_pause_execution`:
+     - 재개 시 일시정지된 노드 ID(`_paused_scenario_id` 또는 `runner.current_scenario_id`)를 `runner.set_next_scenario_id()`로 명시 전달하여 일시정지된 바로 그 위치에서 재개되도록 보장.
+   - `_set_paused_state`:
+     - 일시정지 발생 시 해당 노드의 번호와 테이블 행을 노란색/앰버 헤더로 명확히 하이라이트하고 자동 스크롤(`scrollToItem`).
+
+3. `ui/main_window_parts/table_controller.py`:
+   - `_on_table_selection_changed`:
+     - 일시정지 상태에서 사용자가 시나리오 목록의 임의의 행을 클릭하면, 즉시 해당 노드가 재개 대상(`_paused_scenario_id` 및 `set_next_scenario_id`)으로 갱신되고 헤더 강조가 이동하도록 지원.
+
+4. 단위 테스트 추가 및 전체 검증 (`tests/test_pause_resume_immediate_behavior.py`):
+   - `test_01_pause_halts_condition_retry_immediately_without_background_calls`: 재시도 대기 중 일시정지 시 100ms 이내 즉각 중단 및 재개 시 즉시 재평가 검증 (통과).
+   - `test_02_pause_and_select_different_node_resumes_at_selected_node`: 일시정지 중 다른 노드 선택 후 재개 시 해당 노드로 점프 검증 (통과).
+   - `test_03_sleep_interruptible_aborts_on_pause`: 일시정지 시 슬립 즉시 탈출 검증 (통과).
+
+[테스트 검증 결과 / Verification]
+- tests/test_pause_resume_immediate_behavior.py: 3/3 통과 (OK, 2.3s)
+- 관련 테스트 스위트 (7개 파일, 37개 테스트) 전체 통과 (Ran 37 tests, OK, 0 Regression)
+
+[영향 파일 목록 / Affected Files]
+- core/runner.py (수정: sleep_interruptible 일시정지 즉시 탈출, _wait_while_paused 구현, 조건 재평가 루프 일시정지/재개 보장)
+- ui/main_window_parts/playback_controller.py (수정: 일시정지 노드 포인터 및 재개 연동)
+- ui/main_window_parts/table_controller.py (수정: 일시정지 중 행 클릭 시 재개 대상 즉시 갱신)
+- tests/test_pause_resume_immediate_behavior.py (신규 생성: 일시정지 즉시 반응성 및 재개 검증)
+- history/2026-10-24_035900_일시정지_즉시_중단_및_조건재평가_재개_개선.txt (신규 생성)
+================================================================================

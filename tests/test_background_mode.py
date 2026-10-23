@@ -154,6 +154,42 @@ class TestBackgroundMode(unittest.TestCase):
         finally:
             win.close()
 
+    @patch("core.input_controller.win32gui.IsWindow", return_value=True)
+    @patch("core.input_controller.win32gui.ChildWindowFromPoint", return_value=0)
+    @patch("core.input_controller.win32api.PostMessage")
+    @patch("core.input_controller.InputController.restore_foreground_window")
+    @patch("core.input_controller.win32gui.GetForegroundWindow")
+    def test_post_click_preserves_foreground_window(self, mock_get_fg, mock_restore_fg, mock_post, mock_child, mock_is_win):
+        """Verify that if foreground changes during click delivery, focus is restored to user's window."""
+        # First call (before click) returns 9999 (e.g. Chat window)
+        # Second call (after click) returns 1234 (Target app tried to steal focus)
+        mock_get_fg.side_effect = [9999, 1234]
+
+        res = InputController.post_click_at(hwnd=1234, rel_x=100, rel_y=200)
+        self.assertTrue(res)
+        mock_restore_fg.assert_called_once_with(9999)
+
+    def test_background_mode_suppresses_action_overlay(self):
+        """Verify that action visual overlay popup is suppressed during background mode to prevent focus theft."""
+        from ui.main_window import MainWindow
+        win = MainWindow()
+        try:
+            win.chk_action_overlay.setChecked(True)
+            win.chk_background_mode.setChecked(True)
+            mock_overlay = MagicMock()
+            win.action_overlay = mock_overlay
+
+            win._on_action_sequence_started_visual([Action(action_type="mouse_click")], "테스트 시나리오")
+            # Should NOT show overlay in background mode
+            mock_overlay.show_sequence.assert_not_called()
+
+            # When background mode is unchecked, overlay is shown
+            win.chk_background_mode.setChecked(False)
+            win._on_action_sequence_started_visual([Action(action_type="mouse_click")], "테스트 시나리오")
+            mock_overlay.show_sequence.assert_called_once()
+        finally:
+            win.close()
+
 
 if __name__ == "__main__":
     unittest.main()
