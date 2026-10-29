@@ -1,0 +1,41 @@
+================================================================================
+작업 일시: 2026-10-27 21:55:00
+작업 내용: 스크린샷 팝업창 마우스 커서 멈춤(프리징) 현상 해결, WH_MOUSE_LL 저수준 훅 완전 제거 및 모달리스 이벤트 루프 전환
+작업자: Antigravity
+================================================================================
+
+[1. 작업 배경 및 원인 분석]
+1) 증상:
+   - 강력로그 스크린샷 팝업창을 띄우면 마우스 커서가 해당 자리에 멈춰 있거나 버벅거리는 현상 발생.
+2) 원인:
+   - 이전 작업에서 팝업창 외부 클릭을 감지하기 위해 추가했던 Windows 전역 저수준 마우스 훅(WH_MOUSE_LL / SetWindowsHookExW)이 원인.
+   - WH_MOUSE_LL은 마우스 클릭뿐만 아니라 마우스의 1픽셀 이동(WM_MOUSEMOVE)마다 시스템 전체의 마우스 인터럽트 스레드를 멈추고 파이썬(GIL) 콜백을 동기 호출함.
+   - 고주사율 게이밍 마우스(1000Hz 폴링레이트 등) 환경에서 초당 수천 건의 컨텍스트 스위칭 및 인터럽트 지연이 발생하여 하드웨어 마우스 커서 렌더링이 정지/버벅거림.
+
+[2. 주요 해결 및 구현 내역]
+
+1) WH_MOUSE_LL 전역 마우스 훅 완전 제거 (ui/image_preview_dialog.py)
+   - ctypes, user32.SetWindowsHookExW, UnhookWindowsHookEx 및 _ll_mouse_proc 콜백을 모두 완전히 제거.
+   - 시스템 마우스 인터럽트에 대한 일체의 개입을 없애 하드웨어 마우스 커서가 1000Hz/144Hz/240Hz 원래 속도 그대로 100% 부드럽게 동작하도록 복원.
+
+2) 무간섭 모달리스 + 이벤트 루프(Modeless EventLoop) 기반 닫기 설계
+   - exec_() 오버라이드:
+     * QDialog의 기본 exec_()가 부모 창을 Win32 모달 비활성화(EnableWindow(FALSE)) 시키는 문제를 해결하기 위해, 창을 모달리스(show())로 띄우고 내부적으로 독립 QEventLoop를 사용하여 블로킹 대기.
+     * 부모 창이 비활성화되지 않으므로 윈도우 딩(경고음) 소리가 나지 않고 메인창의 마우스 클릭 이벤트가 정상 전달됨.
+   - QApplication.eventFilter() 연동:
+     * 메인창을 포함한 앱 내부 어디를 클릭하든 eventFilter에서 MouseButtonPress를 즉시 감지하여 팝업창을 자동 닫기(accept()) 처리.
+     * '📁 폴더 열기' 버튼 및 스크롤바 조작은 예외로 두어 정상 작동 유지.
+   - changeEvent() 윈도우 비활성화 감지:
+     * 바탕화면, 작업표시줄, 다른 프로그램(Chrome, MuMu 등)을 클릭하여 창 활성화가 변경될 때 ActivationChange / WindowDeactivate를 통해 팝업창이 즉시 닫힘.
+
+[3. 테스트 및 검증]
+- tests/test_image_preview_and_condition_list_height.py:
+  * test_01_image_preview_dialog_lifecycle_and_main_window_click_close:
+    - 팝업창 오픈 시 저수준 마우스 훅(WH_MOUSE_LL)이 전혀 등록되지 않음을 확인 (커서 지연 0ms).
+    - 메인 창 클릭 시 팝업창이 즉시 닫히고 result() == 1 반환 검증 통과.
+  * test_02_image_preview_deactivation_closes_dialog: 외부 창 전환 시 자동 닫힘 검증 통과.
+  * test_03_image_preview_open_folder_button_keeps_dialog_open: 폴더 열기 버튼 클릭 시 유지 검증 통과.
+- tests/test_robust_trace_logger.py:
+  * test_08_image_preview_dialog_auto_close_and_open_folder: QWindow 네이티브 이벤트 필터링 및 닫기 검증 통과.
+- 통합 회귀 테스트 35건 전체 통과 (OK, 18.935s).
+================================================================================

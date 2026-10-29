@@ -68,6 +68,7 @@ class TestBottomPlaybackButtonsUI(unittest.TestCase):
             self.assertIn("QPushButton#btn_step:hover", css)
             self.assertIn("QPushButton#btn_step:pressed", css)
             self.assertIn("QPushButton#btn_step:disabled", css)
+            self.assertIn("QPushButton#btn_prevent_screensaver", css)
 
     def test_04_bottom_bar_secondary_controls_cursor(self):
         """Verify checkboxes and secondary buttons have interactive hand cursors."""
@@ -77,6 +78,7 @@ class TestBottomPlaybackButtonsUI(unittest.TestCase):
         self.assertEqual(self.win.chk_anti_burn.cursor().shape(), Qt.PointingHandCursor)
         self.assertEqual(self.win.btn_anti_ban.cursor().shape(), Qt.PointingHandCursor)
         self.assertEqual(self.win.btn_test_anti_burn.cursor().shape(), Qt.PointingHandCursor)
+        self.assertEqual(self.win.btn_prevent_screensaver.cursor().shape(), Qt.PointingHandCursor)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,67 @@
+================================================================================
+작업 일시: 2026-10-24 22:16:00
+작업 명: 트레이스 로그 시나리오 실행별 독립 폴더 생성, 이미지 팝업 아무곳 클릭 닫기 및 폴더 열기 추가, 플레이바 기능 제거
+작업자: Antigravity
+================================================================================
+
+[1. 작업 배경 및 요구사항]
+1) 트레이스 로그 폴더 생성 규칙 개선:
+   - 각 시나리오 실행 시작(시나리오 실행 세션)마다 고유한 새 폴더(scenario_{프로젝트명}_{timestamp})를 생성.
+   - 루프 회차마다 디렉터리가 파편화되거나 첫 로그 시 불필요한 분할 디렉터리가 생기던 문제 해결.
+   - 1회 시나리오 실행 세션 내의 모든 루프와 스텝의 스크린샷이 해당 실행 폴더에 온전히 순서대로(#0001, #0002...) 보존.
+2) 스크린샷 이미지 팝업 UI 개선:
+   - 로그의 스크린샷을 클릭해 열린 이미지 크게 보기 창을 일일이 '닫기' 버튼을 누르지 않아도, 화면 아무 곳이나(이미지 영역, 배경, 메인 창 등) 클릭하면 즉시 자동 닫힘 처리.
+   - 이미지 팝업 상단에 해당 스크린샷 파일이 저장되어 있는 폴더를 Windows 탐색기로 바로 열고 파일을 강조 표시해 주는 '📁 폴더 열기' 버튼 추가.
+3) 플레이바 기능 제거:
+   - 메인 윈도우 상단 툴바의 '🎮 플레이바 (F4)' 토글 버튼 및 F4 단축키 제거.
+   - 백그라운드 PopupPlayBar 인스턴스 생성, 동기화 및 컨트롤러(playback_controller, config_lifecycle, table_controller, target_manager) 연동 코드 완전 제거.
+
+[2. 주요 수정 내역]
+1) core/trace_logger.py
+   - `start_scenario_execution(scenario_name: Optional[str]) -> str` 메서드 추가:
+     * 시나리오 실행 시 `scenario_{name}_{YYYYMMDD_HHMMSS}` 형식의 독립 폴더 생성.
+     * 동일 초 내 중복 실행 시 `_1`, `_2` 접미사 충돌 방지 로직 적용.
+   - `capture_screenshot_if_eligible`:
+     * 폴더 미설정 상태에서 캡처 시 fallback으로 `start_scenario_execution()` 호출.
+
+2) core/runner.py
+   - `WorkflowRunner.run()`:
+     * 실행 시작 시점에 즉시 `self.trace_logger.start_scenario_execution(self.project.name)`을 호출하여 실행 세션 전용 디렉터리 확정.
+     * 루프 반복문(`while self._is_running:`) 내부에서 매 루프마다 `start_loop`를 호출하여 폴더를 파편화하던 로직 제거 (`current_loop_index`만 갱신).
+
+3) ui/image_preview_dialog.py
+   - `ImagePreviewDialog`:
+     * '📁 폴더 열기' 버튼(`btn_open_folder`) 및 힌트 라벨(`lbl_hint: (아무 곳이나 클릭하면 닫힙니다)`) 추가.
+     * `_open_folder()`: Windows 탐색기를 실행하여 해당 스크린샷 파일을 선택(`explorer /select,"{path}"`)하거나 상위 폴더 열기.
+     * `QApplication.instance().installEventFilter(self)` 및 `mousePressEvent` 구현:
+       - '📁 폴더 열기' 버튼 클릭이나 스크롤바 조작 외에 이미지, 배경, 대화상자, 앱 내 다른 영역 클릭 시 즉시 `self.accept()` 호출되어 대화상자 자동 닫힘.
+       - QWindow 대상 이벤트 전달 시 `isAncestorOf`에 QWindow가 인자로 넘어가 발생하던 TypeError 방지: `event.globalPos()`의 버튼 바운딩 박스 판정 및 `isinstance(obj, QWidget)` 방어 로직 적용.
+
+4) ui/main_window.py, ui/main_window_parts/*, core/runner.py
+   - `core/runner.py`:
+     * `skip_to_next()` 메서드 및 `_skip_requested` 플래그 추가. 조건 재검사 대기(`sleep_interruptible`) 및 액션 실행 루프 즉시 탈출 후 다음 시나리오 ID로 이동.
+   - `ui/main_window_parts/playback_controller.py`:
+     * `_on_skip_to_next_scenario()` 구현:
+       - 실행 중: 현재 진행/재시도 중인 시나리오 즉시 건너뛰고 다음 노드로 진행.
+       - 일시정지 중: 일시정지 대기 타깃 및 표 선택을 다음 시나리오 노드로 이동.
+       - 정지 상태: 시나리오 표의 행 포인터/선택을 다음 노드로 이동 및 스크롤.
+   - `ui/main_window.py`:
+     * 하단 실행 제어 툴바에 '⏩ 다음 시나리오 (F9)' 버튼(`self.btn_skip_scenario`) 및 F9 단축키 추가.
+     * 툴바의 플레이바 버튼(`self.btn_popup_playbar`) 및 구분선(`sep3`) 제거.
+     * PopupPlayBar 인스턴스 생성 및 F4 단축키 바인딩 제거.
+   - `ui/theme.py`:
+     * `QPushButton#btn_skip_scenario` 인디고/보라 계열 스타일 추가 (Light/Dark 테마 지원).
+   - `ui/main_window_parts/playback_controller.py`:
+     * 실행/일시정지/정지/스텝 진행 시 `popup_play_bar.set_runner_state` 및 `set_action_status` 호출 제거.
+     * `_on_playbar_closed`, `_toggle_popup_playbar`, `_on_playbar_start`, `_on_playbar_step`, `_on_playbar_select_scenario` 메서드 제거.
+   - `ui/main_window_parts/config_lifecycle.py`, `table_controller.py`, `target_manager.py`:
+     * 플레이바 닫기, 시나리오 목록 갱신, 타깃 창 HWND 전달 등의 플레이바 연동 코드 제거.
+
+5) tests/
+   - `tests/test_robust_trace_logger.py`:
+     * `test_07_scenario_execution_folder_creation`: 시나리오 실행별 독립 고유 폴더 생성 검증 추가.
+     * `test_08_image_preview_dialog_auto_close_and_open_folder`: 아무 곳 클릭 시 자동 닫힘 및 폴더 열기 기능 검증 추가.
+     * `test_09_skip_to_next_scenario`: 다음 시나리오 이동 버튼 및 러너 건너뛰기 플래그 검증 추가.
+   - `tests/test_30_comprehensive_features.py`, `tests/test_burn_in_mode2_and_playbar.py`:
+     * MainWindow에서 플레이바 및 토글 버튼이 완전히 제거되었음을 확인하는 테스트로 업데이트.
+================================================================================

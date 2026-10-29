@@ -1,0 +1,43 @@
+================================================================================
+작업 일시: 2026-10-27 21:45:00
+작업 내용: 액션 시퀀스 표 대기 노드 및 로그 노드의 '좌표 / 키 / 텍스트' 열 공백 처리 및 입력 불가 설정
+작업자: Antigravity
+================================================================================
+
+[1. 작업 배경 및 요구사항]
+1) 액션 시퀀스 목록 표에서 '로그' 노드가 2열('좌표 / 키 / 텍스트')과 5열('로그') 양쪽에 중복으로 표기 및 입력되던 문제 해결.
+2) '대기' 노드 역시 2열('좌표 / 키 / 텍스트')과 4열('대기') 양쪽에 중복 표기되던 불필요한 정보 노출 방지.
+3) 대기 노드와 로그 노드의 2열('좌표 / 키 / 텍스트') 셀을 완전히 공백("")으로 비우고 더블클릭 및 수정을 포함한 모든 입력이 불가하도록 개선.
+
+[2. 주요 구현 내역]
+
+1) ui/inspector_widget.py
+   - _refresh_actions_table():
+     * 액션 유형이 "delay" 또는 "log_message"인 경우 2열('좌표 / 키 / 텍스트')의 target_str을 빈 문자열("")로 설정.
+     * it_target 셀의 편집 플래그에서 Qt.ItemIsEditable을 제거하여 인라인 및 직접 편집 차단.
+   - _on_action_cell_double_clicked():
+     * 2열(col == 2) 셀을 더블클릭했을 때 해당 행의 액션이 "delay" 또는 "log_message"인 경우 즉시 리턴하여 좌표 피커나 다이얼로그가 불필요하게 열리지 않도록 차단.
+   - _on_inline_log_changed():
+     * 로그 노드의 custom_log 수정 시 log_text와 양방향으로 일관되게 동기화되도록 보강.
+   - _on_quick_add_action():
+     * 퀵 로그 추가 시 log_text와 custom_log 모두 동기화 초기화.
+
+2) ui/inspector_action_table.py
+   - ActionColumnDelegate.setModelData():
+     * 5열('로그') 인라인 편집 시 log_message 액션의 log_text와 custom_log가 항상 동기화되도록 처리.
+
+3) ui/action_editor_dialog.py
+   - SingleActionDialog._on_ok():
+     * log_message 저장 시 log_text를 custom_log에도 복사하여 두 필드의 일관성 유지.
+
+[3. 테스트 및 검증]
+- tests/test_inspector_action_table.py 신규 단위 테스트 추가 및 검증:
+  * test_delay_and_log_action_column_display_and_disabled:
+    - 대기 노드 및 로그 노드의 2열 텍스트가 빈 문자열("")인지 검증 (PASS).
+    - 대기 노드 및 로그 노드의 2열에 Qt.ItemIsEditable 플래그가 비활성화되어 있는지 검증 (PASS).
+    - 2열 더블클릭 시 _on_edit_action이 호출되지 않고 무시되는지 검증 (PASS).
+    - 마우스 클릭 액션의 2열 더블클릭 시에는 정상적으로 _on_edit_action이 호출되는지 검증 (PASS).
+    - 5열 인라인 로그 수정 시 log_text 및 custom_log가 일관되게 반영되는지 검증 (PASS).
+  * 7개 전체 단위 테스트 정상 통과 (OK, 1.174s).
+- 전체 관련 회귀 테스트 35건 통과 (OK, 18.661s).
+================================================================================

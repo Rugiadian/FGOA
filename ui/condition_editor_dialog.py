@@ -22,6 +22,7 @@ from core.evaluator import ConditionEvaluator
 from ui.canvas_view import CanvasView
 from ui.magnifier_widget import MagnifierWidget
 from ui.widgets.color_badge import ColorChipWidget, WarningBadge
+from ui.widgets.dynamic_table import DynamicPointsTableWidget
 from core.path_utils import get_references_dir, to_relative_path, to_absolute_path
 from ui.reference_gallery_dialog import ReferenceGalleryDialog
 from ui.qt_image_utils import qimage_to_pil
@@ -204,7 +205,7 @@ class ConditionEditorDialog(QDialog):
         logic_row.addWidget(self.combo_logic, 1)
         grp_layout.addLayout(logic_row)
 
-        self.tbl_points = QTableWidget()
+        self.tbl_points = DynamicPointsTableWidget()
         self.tbl_points.setColumnCount(6)
         self.tbl_points.setHorizontalHeaderLabels(["ID", "좌표", "색상", "오차", "모드", "삭제"])
         self.tbl_points.verticalHeader().setVisible(False)  # Remove duplicate vertical row numbering!
@@ -220,13 +221,13 @@ class ConditionEditorDialog(QDialog):
         hdr.setSectionResizeMode(2, QHeaderView.Fixed)
         self.tbl_points.setColumnWidth(2, 38)
         hdr.setSectionResizeMode(3, QHeaderView.Fixed)
-        self.tbl_points.setColumnWidth(3, 50)
+        self.tbl_points.setColumnWidth(3, 62)
         hdr.setSectionResizeMode(4, QHeaderView.Fixed)
         self.tbl_points.setColumnWidth(4, 58)
         hdr.setSectionResizeMode(5, QHeaderView.Fixed)
         self.tbl_points.setColumnWidth(5, 28)
 
-        grp_layout.addWidget(self.tbl_points)
+        grp_layout.addWidget(self.tbl_points, 0)
 
         # Table buttons
         btn_row_layout = QHBoxLayout()
@@ -239,7 +240,8 @@ class ConditionEditorDialog(QDialog):
         btn_row_layout.addWidget(btn_clear_all)
         grp_layout.addLayout(btn_row_layout)
 
-        side_layout.addWidget(grp_points)
+        side_layout.addWidget(grp_points, 0)
+        side_layout.addStretch(1)
         self.splitter.addWidget(sidebar)
 
         self.splitter.setStretchFactor(0, 1)
@@ -334,6 +336,8 @@ class ConditionEditorDialog(QDialog):
             spin_tol = NoWheelSpinBox()
             spin_tol.setRange(0, 255)
             spin_tol.setValue(pt.tolerance)
+            spin_tol.setAlignment(Qt.AlignCenter)
+            spin_tol.setToolTip(f"색상 허용 오차 (0~255, 현재: {pt.tolerance})")
             spin_tol.valueChanged.connect(lambda val, p=pt: self._on_point_tolerance_changed(p, val))
             self.tbl_points.setCellWidget(row, 3, spin_tol)
 
@@ -351,6 +355,7 @@ class ConditionEditorDialog(QDialog):
             btn_del.clicked.connect(lambda _, p=pt: self._remove_point(p))
             self.tbl_points.setCellWidget(row, 5, btn_del)
 
+        self.tbl_points.update_dynamic_height()
         self.canvas.update()
         self._check_uniqueness()
 

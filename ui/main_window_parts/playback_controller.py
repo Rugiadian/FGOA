@@ -1,7 +1,7 @@
 """
 Playback & Execution Controller Mixin for MainWindow.
 Handles scenario execution (start all / start selected / step / pause / resume / stop),
-WorkflowRunner lifecycle and signal handlers, visual action overlays, and popup playbar sync.
+WorkflowRunner lifecycle and signal handlers, and visual action overlays.
 """
 from typing import Optional, List
 from PyQt5.QtWidgets import QMessageBox
@@ -28,6 +28,56 @@ class MainWindowPlaybackMixin:
             if 0 <= row < len(self.project.scenarios):
                 selected_scen_id = self.project.scenarios[row].id
         self._on_start_execution(start_scenario_id=selected_scen_id)
+
+    def _update_playback_status(self, state: str, reason: str = ""):
+        """
+        Updates the playback status display in both the playback toolbar and the bottom-right status bar.
+        States:
+          - 'idle' / 'stopped' / 'finished': '⚪ 대기중'
+          - 'running': '▶ 재생중'
+          - 'paused': '⏸ 일시 정지중'
+          - 'stepping': '⏭ 단일스탭 실행중'
+        """
+        self._current_playback_state = state
+        is_dark = getattr(self, "current_theme", "light") == "dark"
+
+        if state == "running":
+            text = "▶ 재생중"
+            color = "#4ade80" if is_dark else "#15803d"
+            bg = "#064e3b" if is_dark else "#dcfce7"
+            border = "#059669" if is_dark else "#86efac"
+        elif state == "paused":
+            text = "⏸ 일시 정지중"
+            color = "#fb923c" if is_dark else "#c2410c"
+            bg = "#7c2d12" if is_dark else "#ffedd5"
+            border = "#ea580c" if is_dark else "#fed7aa"
+        elif state == "stepping":
+            text = "⏭ 단일스탭 실행중"
+            color = "#38bdf8" if is_dark else "#0369a1"
+            bg = "#0c4a6e" if is_dark else "#e0f2fe"
+            border = "#0284c7" if is_dark else "#bae6fd"
+        else:
+            # Idle / Stopped / Finished
+            text = f"⚪ 대기중 ({reason})" if reason else "⚪ 대기중"
+            color = "#94a3b8" if is_dark else "#64748b"
+            bg = "#1e293b" if is_dark else "#f1f5f9"
+            border = "#334155" if is_dark else "#cbd5e1"
+
+        badge_style = f"""
+            QLabel {{
+                background-color: {bg};
+                color: {color};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 3px 12px;
+                font-weight: bold;
+                font-size: 9.5pt;
+            }}
+        """
+
+        if hasattr(self, "lbl_run_status") and self.lbl_run_status:
+            self.lbl_run_status.setText(text)
+            self.lbl_run_status.setStyleSheet(badge_style)
 
     def _set_paused_state(self, scenario_id: Optional[str]):
         """Records paused scenario ID and visually marks it in header and scenario list."""
@@ -59,14 +109,18 @@ class MainWindowPlaybackMixin:
         if hasattr(self, "runner") and self.runner and self.runner.isRunning():
             if self.runner._is_paused:
                 target_id = start_scenario_id or getattr(self, "_paused_scenario_id", None)
-                if target_id:
+                if target_id and target_id != getattr(self.runner, "current_scenario_id", None):
                     self.runner.set_next_scenario_id(target_id)
+                elif not start_scenario_id:
+                    self.runner.set_next_scenario_id(None)
                 self.runner.resume()
                 self._clear_paused_state()
-                self.lbl_run_status.setText("실행 중...")
+                if hasattr(self, "btn_run_selected"):
+                    self.btn_run_selected.setEnabled(False)
+                self._update_playback_status("running")
                 self.btn_pause.setText("⏸ 일시정지 (Shift+F6)")
-                if hasattr(self, "popup_play_bar") and self.popup_play_bar:
-                    self.popup_play_bar.set_runner_state("running", "재개되어 실행 중...")
+                if hasattr(self, "floating_stop") and self.floating_stop:
+                    self.floating_stop.set_paused_state(False)
                 return
             else:
                 self.runner.stop()
@@ -78,6 +132,7 @@ class MainWindowPlaybackMixin:
         self._clear_paused_state()
 
         bg_en = bool(getattr(self, "chk_background_mode", None) and self.chk_background_mode.isChecked())
+        prevent_ss = bool(getattr(self, "btn_prevent_screensaver", None) and self.btn_prevent_screensaver.isChecked()) if hasattr(self, "btn_prevent_screensaver") else True
         self.runner = WorkflowRunner(
             self.project,
             self.target_hwnd,
@@ -85,7 +140,8 @@ class MainWindowPlaybackMixin:
             anti_burn_overlay=getattr(self, "anti_burn_overlay", None),
             parent=self,
             robust_trace_enabled=getattr(self, "chk_robust_trace", None) and self.chk_robust_trace.isChecked(),
-            background_mode=bg_en
+            background_mode=bg_en,
+            prevent_screensaver_enabled=prevent_ss
         )
         self.runner.sig_log.connect(self._append_log)
         self.runner.sig_scenario_started.connect(self._on_scenario_started)
@@ -110,10 +166,7 @@ class MainWindowPlaybackMixin:
             self.btn_run_selected.setEnabled(False)
         self.btn_pause.setEnabled(True)
         self.btn_stop.setEnabled(True)
-        self.lbl_run_status.setText("실행 중 (F5/F6)")
-        self.lbl_run_status.setStyleSheet("color: #16a34a; font-weight: bold;")
-        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
-            self.popup_play_bar.set_runner_state("running", "시나리오 실행 중...")
+        self._update_playback_status("running")
 
         if hasattr(self, "chk_floating_stop") and self.chk_floating_stop.isChecked():
             if hasattr(self, "floating_stop") and self.floating_stop:
@@ -127,15 +180,16 @@ class MainWindowPlaybackMixin:
             if self.runner._is_paused:
                 # Resuming execution from paused node
                 target_id = getattr(self, "_paused_scenario_id", None) or getattr(self.runner, "current_scenario_id", None)
-                if target_id:
+                if target_id and target_id != getattr(self.runner, "current_scenario_id", None):
                     self.runner.set_next_scenario_id(target_id)
+                else:
+                    self.runner.set_next_scenario_id(None)
                 self.runner.resume()
                 self._clear_paused_state()
+                if hasattr(self, "btn_run_selected"):
+                    self.btn_run_selected.setEnabled(False)
                 self.btn_pause.setText("⏸ 일시정지 (Shift+F6)")
-                self.lbl_run_status.setText("실행 중...")
-                self.lbl_run_status.setStyleSheet("color: #16a34a; font-weight: bold;")
-                if hasattr(self, "popup_play_bar") and self.popup_play_bar:
-                    self.popup_play_bar.set_runner_state("running", "재개되어 실행 중...")
+                self._update_playback_status("running")
                 if hasattr(self, "floating_stop") and self.floating_stop:
                     self.floating_stop.set_paused_state(False)
             else:
@@ -143,11 +197,10 @@ class MainWindowPlaybackMixin:
                 self.runner.pause()
                 paused_id = getattr(self.runner, "current_scenario_id", None) or getattr(self, "_last_running_scenario_id", None)
                 self._set_paused_state(paused_id)
+                if hasattr(self, "btn_run_selected"):
+                    self.btn_run_selected.setEnabled(True)
                 self.btn_pause.setText("▶ 재개 (Shift+F6)")
-                self.lbl_run_status.setText("일시정지됨")
-                self.lbl_run_status.setStyleSheet("color: #ea580c; font-weight: bold;")
-                if hasattr(self, "popup_play_bar") and self.popup_play_bar:
-                    self.popup_play_bar.set_runner_state("paused", "일시정지됨")
+                self._update_playback_status("paused")
                 if hasattr(self, "floating_stop") and self.floating_stop:
                     self.floating_stop.set_paused_state(True)
 
@@ -163,13 +216,10 @@ class MainWindowPlaybackMixin:
         self.btn_pause.setEnabled(False)
         self.btn_stop.setEnabled(False)
         self.btn_pause.setText("⏸ 일시정지 (Shift+F6)")
-        self.lbl_run_status.setText("정지됨")
-        self.lbl_run_status.setStyleSheet("color: #dc2626; font-weight: bold;")
+        self._update_playback_status("stopped")
         self._highlight_running_row_header(None)
         if hasattr(self, "floating_stop") and self.floating_stop:
             self.floating_stop.hide()
-        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
-            self.popup_play_bar.set_runner_state("stopped", "정지됨")
         if hasattr(self, "action_overlay") and self.action_overlay:
             self.action_overlay.clear_action()
         if hasattr(self, "lbl_loop_progress"):
@@ -200,20 +250,18 @@ class MainWindowPlaybackMixin:
             self._on_start_execution(start_scenario_id=selected_scen_id)
             if hasattr(self, "runner") and self.runner:
                 self.runner.step_forward()
-                self.lbl_run_status.setText("단일 스텝 (F7)")
-                self.lbl_run_status.setStyleSheet("color: #0284c7; font-weight: bold;")
+                self._update_playback_status("stepping")
         else:
             if selected_scen_id:
                 self.runner.set_next_scenario_id(selected_scen_id)
             self.runner.step_forward()
-            self.lbl_run_status.setText("단일 스텝 (F7)")
-            self.lbl_run_status.setStyleSheet("color: #0284c7; font-weight: bold;")
-        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
-            self.popup_play_bar.set_runner_state("stepping", "단일 스텝 실행 중...")
+            self._update_playback_status("stepping")
 
     def _on_step_completed(self, next_index: int):
         """단일 스텝 실행 완료 시 다음 노드로 포인터(헤더 번호) 이동 및 하이라이트 갱신"""
         if 0 <= next_index < len(self.project.scenarios):
+            next_scen = self.project.scenarios[next_index]
+            self._set_paused_state(next_scen.id)
             self.tbl_scenarios.blockSignals(True)
             self.tbl_scenarios.setCurrentCell(next_index, 0)
             self.tbl_scenarios.clearSelection()
@@ -222,11 +270,13 @@ class MainWindowPlaybackMixin:
             if it:
                 self.tbl_scenarios.scrollToItem(it)
             self._highlight_running_row_header(next_index)
-            next_scen = self.project.scenarios[next_index]
-            if hasattr(self, "popup_play_bar") and self.popup_play_bar:
-                self.popup_play_bar.set_runner_state("paused", f"대기: s{next_scen.scenario_number} [{next_scen.name}]")
         else:
             self._highlight_running_row_header(None)
+        self.btn_pause.setText("▶ 재개 (Shift+F6)")
+        self.btn_pause.setEnabled(True)
+        if hasattr(self, "btn_run_selected"):
+            self.btn_run_selected.setEnabled(True)
+        self._update_playback_status("paused")
 
     def _highlight_running_row_header(self, row: Optional[int]):
         """시나리오 목록 표의 행 넘버링(세로 헤더) 셀 컬러로 현재 진행 중인 노드 강조 표기"""
@@ -256,11 +306,7 @@ class MainWindowPlaybackMixin:
             self.action_overlay.set_target_hwnd(self.target_hwnd)
             self.action_overlay.set_current_action_index(index, action)
 
-        # 2. Real-time sequence action progress output on play bar
-        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
-            self.popup_play_bar.set_action_status(action, index, total)
-
-        # 3. Virtual canvas target visual click effect
+        # 2. Virtual canvas target visual click effect
         if hasattr(self, "virtual_canvas_window") and self.virtual_canvas_window and self.virtual_canvas_window.isVisible():
             if hasattr(action, "action_type") and action.action_type in ("mouse_click", "mouse_drag"):
                 cx = getattr(action, "x", getattr(action, "start_x", 0))
@@ -311,8 +357,6 @@ class MainWindowPlaybackMixin:
                 if it:
                     self.tbl_scenarios.scrollToItem(it)
                 self._highlight_running_row_header(row)
-                if hasattr(self, "popup_play_bar") and self.popup_play_bar:
-                    self.popup_play_bar.set_runner_state("running", f"s{s.scenario_number} [{s.name}] 실행 중...")
                 if hasattr(self, "floating_stop") and self.floating_stop:
                     self.floating_stop.set_status(f"s{s.scenario_number} [{s.name}]")
                 break
@@ -329,13 +373,10 @@ class MainWindowPlaybackMixin:
         self.btn_pause.setEnabled(False)
         self.btn_stop.setEnabled(False)
         self.btn_pause.setText("⏸ 일시정지 (Shift+F6)")
-        self.lbl_run_status.setText(f"완료 ({reason})")
-        self.lbl_run_status.setStyleSheet("font-weight: bold;")
+        self._update_playback_status("idle", reason=reason)
         self._highlight_running_row_header(None)
         if hasattr(self, "floating_stop") and self.floating_stop:
             self.floating_stop.hide()
-        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
-            self.popup_play_bar.set_runner_state("stopped", f"완료 ({reason})")
         if hasattr(self, "action_overlay") and self.action_overlay:
             self.action_overlay.clear_action()
         if hasattr(self, "lbl_loop_progress"):
@@ -366,49 +407,3 @@ class MainWindowPlaybackMixin:
             else:
                 self.lbl_loop_progress.setText(f"({current_loop}회 진행 중{dur_str})")
             self.lbl_loop_progress.setStyleSheet("font-weight: bold; color: #16a34a; font-size: 8.5pt;")
-
-    # ==========================================
-    # Popup Play Bar Controls & Signal Handlers
-    # ==========================================
-    def _on_playbar_closed(self):
-        if hasattr(self, "btn_popup_playbar") and self.btn_popup_playbar:
-            self.btn_popup_playbar.setChecked(False)
-
-    def _toggle_popup_playbar(self):
-        if not hasattr(self, "popup_play_bar") or not self.popup_play_bar:
-            return
-        if self.popup_play_bar.isVisible():
-            self.popup_play_bar.hide()
-            if hasattr(self, "btn_popup_playbar"):
-                self.btn_popup_playbar.setChecked(False)
-        else:
-            self.popup_play_bar.refresh_scenarios(self.project.scenarios)
-            self.popup_play_bar.position_relative_to_target(self.target_hwnd, self.geometry())
-            self.popup_play_bar.show()
-            self.popup_play_bar.raise_()
-            if hasattr(self, "btn_popup_playbar"):
-                self.btn_popup_playbar.setChecked(True)
-
-    def _on_playbar_start(self, scenario_id: Optional[str] = None):
-        if scenario_id:
-            for row, s in enumerate(self.project.scenarios):
-                if s.id == scenario_id:
-                    self.tbl_scenarios.selectRow(row)
-                    break
-            self._on_start_execution(start_scenario_id=scenario_id)
-        else:
-            self._on_start_execution()
-
-    def _on_playbar_step(self, scenario_id: Optional[str] = None):
-        if scenario_id:
-            for row, s in enumerate(self.project.scenarios):
-                if s.id == scenario_id:
-                    self.tbl_scenarios.selectRow(row)
-                    break
-        self._on_step_execution()
-
-    def _on_playbar_select_scenario(self, scenario_id: str):
-        for row, s in enumerate(self.project.scenarios):
-            if s.id == scenario_id:
-                self.tbl_scenarios.selectRow(row)
-                break

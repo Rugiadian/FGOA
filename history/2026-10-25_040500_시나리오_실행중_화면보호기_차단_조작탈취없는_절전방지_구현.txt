@@ -1,0 +1,74 @@
+================================================================================
+작업 일시: 2026-10-25 04:05:00 (추가 갱신: 05:19:00)
+작업 명: 시나리오 실행 중 화면보호기 차단 (SetThreadExecutionState) 구현 및 ON/OFF 토글 버튼 추가
+작업자: Antigravity
+================================================================================
+
+[1. 작업 배경 및 요구사항]
+1) 문제 상황:
+   - FGOA 오토 매크로 시나리오가 백그라운드 또는 장시간 동작할 때 Windows 화면보호기(ScreenSaver) 또는 모니터 절전/화면 꺼짐이 활성화되면 DWM 및 Direct3D/GDI 화면 캡처가 블랙 스크린이 되거나 프리징되어 ConditionEvaluator의 컬러 인식 판정이 실패하는 문제 발생.
+2) 사용자 핵심 요구사항:
+   - 시나리오가 진행되는 동안에는 화면보호기가 동작하지 않도록 방지.
+   - **조작 탈취가 절대 일어나지 않는 방식**: 가짜 마우스 움직임(pyautogui.move, mouse_event 등)이나 합성 키보드 입력을 발생시켜 사용자의 마우스 커서를 가로채거나 백그라운드 입력을 교란하지 말 것.
+   - 시나리오가 종료되거나 일시정지(Pause) 또는 정지(Stop)되면 정상적으로 화면보호기가 켜지도록 복원.
+   - **화면보호기 차단 온/오프 버튼 추가**: UI 하단 바에서 필요에 따라 사용자가 즉시 화면보호기 차단 기능을 켜고 끌 수 있는 토글 버튼 제공 및 설정 유지.
+
+[2. 기술적 해결 방식]
+1) Windows 공식 커널 전원/유휴 타이머 제어 (SetThreadExecutionState API):
+   - Win32 API `ctypes.windll.kernel32.SetThreadExecutionState` 사용.
+   - `ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED` (0x80000003):
+     * OS 유휴 타이머 카운트를 디스플레이 필요 상태로 설정하여 화면보호기 및 디스플레이 절전 진입을 원천 차단.
+     * 마우스나 키보드 커서에 어떠한 인위적 이벤트도 생성하지 않으므로 사용자의 마우스 조작을 가로채거나 뺏지 않음.
+   - 시나리오 종료, 정지, 일시정지 또는 사용자가 버튼을 OFF로 설정 시:
+     * `SetThreadExecutionState(ES_CONTINUOUS)` 호출로 즉시 기본 전원 절전 및 화면보호기 타이머 복원.
+2) 이중 방어선:
+   - 이미 실행 중인 화면보호기가 있는 경우: `SystemParametersInfoW(SPI_GETSCREENSAVERRUNNING)` 및 `FindWindowW("WindowsScreenSaverClass")` 탐색 후 `PostMessageW(WM_CLOSE)`로 조작 없이 닫기.
+   - 공격적인 로컬 그룹 정책/도메인 보안에 의한 차단 방어: `MainWindow.nativeEvent`에서 `WM_SYSCOMMAND`의 `SC_SCREENSAVE` (0xF140) 및 `SC_MONITORPOWER` (0xF170) 메시지 가로채기(Intercept & Drop). (버튼이 OFF일 경우 통과)
+
+[3. 주요 수정 내역]
+1) core/power_manager.py (신규 모듈 생성)
+   - `PowerManager` 클래스 구현:
+     * `prevent_screensaver()`: Windows에 화면 및 시스템 유지 플래그 통지, 실행 중 플래그 활성화.
+     * `allow_screensaver()`: 기본 전원 관리 상태 복원, 실행 중 플래그 비활성화.
+     * `is_preventing()`: 현재 절전 방지 활성 여부 반환.
+     * `dismiss_active_screensaver()`: 실행 중인 화면보호기 윈도우 조용히 닫기.
+     * `should_block_syscommand(message, wparam)`: nativeEvent용 SC_SCREENSAVE, SC_MONITORPOWER 필터링.
+
+2) core/__init__.py
+   - `PowerManager` export 추가.
+
+3) core/runner.py
+   - `WorkflowRunner`:
+     * `prevent_screensaver_enabled: bool = True` 파라미터 및 `set_prevent_screensaver_enabled(enabled)` 메서드 추가.
+     * `run()` 메서드를 `try: self._run_internal() finally: PowerManager.allow_screensaver()` 구조로 보호하여 시나리오 완료, 오류, 중단 시 100% 화면보호기 복원 보장.
+     * `prevent_screensaver_enabled`가 True일 때만 `PowerManager.prevent_screensaver()` 호출.
+     * `pause()` 및 `_wait_while_paused()`: 일시정지 중에는 `PowerManager.allow_screensaver()` 호출하여 절전/화면보호기 허용.
+     * `resume()` 및 일시정지 복귀: 플래그 활성 시 `PowerManager.prevent_screensaver()` 호출하여 다시 절전 방지 활성화.
+     * `stop()`: `PowerManager.allow_screensaver()` 호출.
+
+4) ui/main_window.py & ui/main_window_parts/
+   - **하단 제어 툴바 온/오프 버튼 추가**:
+     * `self.btn_prevent_screensaver = QPushButton("☕ 화면보호기 차단: ON")` (checkable=True).
+     * `self.chk_prevent_screensaver` 별칭 제공.
+     * 클릭 시 ON/OFF 즉시 전환:
+       - ON: 초록색 강조 테마, 실행 중인 경우 즉시 `prevent_screensaver()` 적용.
+       - OFF: 중립 회색 테마, 실행 중인 경우 즉시 `allow_screensaver()`로 해제.
+   - `playback_controller.py`: 시나리오 시작 시 `btn_prevent_screensaver.isChecked()` 상태를 `WorkflowRunner`에 전달.
+   - `config_lifecycle.py`: 앱 설정 파일(`fgoa_config.json`)에 `prevent_screensaver_enabled` 로드 및 저장 영속화.
+   - `MainWindow.nativeEvent`: 버튼이 ON일 때만 `SC_SCREENSAVE` 및 `SC_MONITORPOWER`를 차단하고, OFF일 때는 차단하지 않음.
+
+5) ui/theme.py
+   - Light Mode & Dark Mode 스타일시트에 `QPushButton#btn_prevent_screensaver` 추가.
+   - Checked 상태(`:checked`) 시 선명한 에메랄드 그린(`#059669`) 및 볼드체 적용으로 직관적인 식별 보장.
+
+6) tests/
+   - `tests/test_robust_trace_logger.py`:
+     * `test_10_power_manager_screensaver_lifecycle`: 버튼 ON/OFF 토글, 상태 텍스트 갱신, `nativeEvent` 필터링 바이패스, 러너 비활성화 모드 동작 검증.
+   - `tests/test_bottom_playback_buttons_ui.py`:
+     * 버튼 포인팅 핸드 커서 및 테마 스타일시트 포함 여부 검증.
+
+[4. 단위 테스트 검증 결과]
+- `tests.test_bottom_playback_buttons_ui tests.test_robust_trace_logger`: 14개 테스트 모두 통과 (OK)
+- `tests.test_burn_in_mode2_and_playbar tests.test_playbar_and_action_sequence tests.test_scenarios_3cases tests.test_30_comprehensive_features`: 50개 테스트 모두 통과 (OK)
+- 종합 64개 단위 테스트 전원 통과 확인.
+================================================================================

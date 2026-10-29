@@ -11,6 +11,7 @@ from core.window_manager import WindowManager
 from core.evaluator import ConditionEvaluator
 from core.input_controller import InputController
 from core.trace_logger import TraceLogger
+from core.power_manager import PowerManager
 
 
 class WorkflowRunner(QThread):
@@ -37,7 +38,8 @@ class WorkflowRunner(QThread):
         anti_burn_overlay=None,
         parent=None,
         robust_trace_enabled: bool = False,
-        background_mode: bool = False
+        background_mode: bool = False,
+        prevent_screensaver_enabled: bool = True
     ):
         super().__init__(parent)
         self.project = project
@@ -46,13 +48,19 @@ class WorkflowRunner(QThread):
         self.anti_burn_overlay = anti_burn_overlay or getattr(parent, "anti_burn_overlay", None)
         self.robust_trace_enabled = robust_trace_enabled
         self.background_mode = background_mode
+        self.prevent_screensaver_enabled = prevent_screensaver_enabled
         self.trace_logger = TraceLogger()
         self._next_scenario_id: Optional[str] = None
         self.current_scenario_id: Optional[str] = None
+        self._skip_requested: bool = False
 
         self._is_running = False
         self._is_paused = False
         self._step_mode = False  # If True, runs one step then pauses
+
+    def skip_to_next(self):
+        """Immediately interrupt current scenario actions/retries and advance to the next scenario."""
+        self._skip_requested = True
 
     def set_robust_trace_enabled(self, enabled: bool):
         """Toggle robust trace mode dynamically during runtime."""
@@ -61,6 +69,15 @@ class WorkflowRunner(QThread):
     def set_background_mode(self, enabled: bool):
         """Toggle background execution mode dynamically during runtime."""
         self.background_mode = enabled
+
+    def set_prevent_screensaver_enabled(self, enabled: bool):
+        """Toggle screensaver prevention dynamically during runtime."""
+        self.prevent_screensaver_enabled = enabled
+        if self._is_running and not self._is_paused:
+            if enabled:
+                PowerManager.prevent_screensaver()
+            else:
+                PowerManager.allow_screensaver()
 
     def _log(self, level: str, msg: str):
         """Emits a log message with optional trace screenshot link if robust trace is active."""
@@ -124,11 +141,15 @@ class WorkflowRunner(QThread):
         while time.time() < end_time and self._is_running:
             if abort_on_pause and self._is_paused:
                 return False
+            if getattr(self, "_skip_requested", False):
+                return False
             if is_main and app:
                 app.processEvents()
             rem = end_time - time.time()
             time.sleep(min(0.02, max(0.001, rem)))
         if abort_on_pause and self._is_paused:
+            return False
+        if getattr(self, "_skip_requested", False):
             return False
         return self._is_running
 
@@ -144,12 +165,18 @@ class WorkflowRunner(QThread):
             return True
 
         self._log("INFO", f"⏸️ [일시정지] 실행이 즉시 일시정지되었습니다. (재개 대기 중...)")
+        PowerManager.allow_screensaver()
         while self._is_running and self._is_paused:
+            if getattr(self, "_skip_requested", False):
+                self._skip_requested = False
+                break
             self.sleep_interruptible(0.03, abort_on_pause=False)
 
         if not self._is_running:
             return False
 
+        if self.prevent_screensaver_enabled:
+            PowerManager.prevent_screensaver()
         self._log("INFO", f"▶️ [재개] 일시정지 상태에서 실행을 재개합니다.")
         return True
 
@@ -161,14 +188,18 @@ class WorkflowRunner(QThread):
         """Signal the runner to stop immediately."""
         self._is_running = False
         self._is_paused = False
+        PowerManager.allow_screensaver()
 
     def pause(self):
         """Pause execution."""
         self._is_paused = True
+        PowerManager.allow_screensaver()
 
     def resume(self):
         """Resume execution."""
         self._is_paused = False
+        if self.prevent_screensaver_enabled:
+            PowerManager.prevent_screensaver()
 
     def step_forward(self):
         """Execute one step then pause."""
@@ -176,8 +207,22 @@ class WorkflowRunner(QThread):
         self._is_paused = False
 
     def run(self):
+        if self.prevent_screensaver_enabled:
+            PowerManager.prevent_screensaver()
+        try:
+            self._run_internal()
+        finally:
+            self._is_running = False
+            PowerManager.allow_screensaver()
+
+    def _run_internal(self):
         self._is_running = True
         self._is_paused = False
+
+        # Create a new unique trace log folder for this scenario execution
+        if getattr(self, "robust_trace_enabled", False) and hasattr(self, "trace_logger"):
+            proj_name = getattr(self.project, "name", None)
+            self.trace_logger.start_scenario_execution(proj_name)
 
         mode_tag = " [👻 백그라운드 모드]" if getattr(self, "background_mode", False) else ""
         self._log("INFO", f"=== 시나리오 실행 시작 (타겟 HWND: {self.hwnd}){mode_tag} ===")
@@ -195,9 +240,11 @@ class WorkflowRunner(QThread):
         current_loop = 1
 
         while self._is_running:
+            if self.prevent_screensaver_enabled:
+                PowerManager.prevent_screensaver()
             loop_start_time = time.time()
-            if self.robust_trace_enabled and hasattr(self, "trace_logger"):
-                self.trace_logger.start_loop(current_loop)
+            if getattr(self, "robust_trace_enabled", False) and hasattr(self, "trace_logger"):
+                self.trace_logger.current_loop_index = current_loop
             loop_str = f"{current_loop}/{total_loops}" if total_loops > 0 else f"{current_loop}/무한"
             self.sig_loop_progress.emit(current_loop, total_loops)
             self._log("INFO", f"--- 루프 회차 {loop_str} 시작 ---")
@@ -215,6 +262,9 @@ class WorkflowRunner(QThread):
             loop_counters = {}  # {loop_start_id: int}
 
             while self._is_running and current_index < len(scenarios):
+                scen = scenarios[current_index]
+                self.current_scenario_id = scen.id
+
                 # Check pause
                 was_paused = False
                 if self._is_paused:
@@ -231,18 +281,18 @@ class WorkflowRunner(QThread):
                     if target and target in scenarios:
                         current_index = scenarios.index(target)
                         self._log("INFO", f"[#{target.step_number}] ▶ 선택된 노드 '{target.name}'(으)로 이동하여 진행합니다.")
+                        scen = scenarios[current_index]
+                        self.current_scenario_id = scen.id
                     self._next_scenario_id = None
                 elif was_paused and self.current_scenario_id:
                     # Defensive: if scenario list was reordered while paused, keep current_index pointing to current_scenario_id
                     found_idx = next((i for i, s in enumerate(scenarios) if s.id == self.current_scenario_id), None)
                     if found_idx is not None:
                         current_index = found_idx
+                        scen = scenarios[current_index]
 
                 if current_index >= len(scenarios):
                     break
-
-                scen = scenarios[current_index]
-                self.current_scenario_id = scen.id
 
                 # ----------------------------------------------------
                 # Folder Node: Pure organizational grouping node (zero delay pass-through or skip if disabled)
@@ -308,7 +358,10 @@ class WorkflowRunner(QThread):
                                 continue
                         if scen.loop_mode == "until_match" and matched:
                             end_idx = self.project.find_matching_loop_end(current_index)
-                            self._log("SUCCESS", f"⚡ [루프 탈출 s{scen.scenario_number}] '{scen.name}': 탈출 인식 조건 충족! 루프 즉시 탈출")
+                            fail_count = sum(1 for p in point_results if not p.get("passed", False))
+                            mismatch_info = ConditionEvaluator.format_mismatch_log(point_results) if fail_count > 0 else ""
+                            mismatch_tail = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
+                            self._log("SUCCESS", f"⚡ [루프 탈출 s{scen.scenario_number}] '{scen.name}': 탈출 인식 조건 충족! 루프 즉시 탈출{mismatch_tail}")
                             if scen.id in loop_counters:
                                 del loop_counters[scen.id]
                             current_index = (end_idx + 1) if end_idx is not None else (current_index + 1)
@@ -352,7 +405,14 @@ class WorkflowRunner(QThread):
                 # Standard Scenario Evaluation
                 # ----------------------------------------------------
                 self.sig_scenario_started.emit(scen.id)
-                self._log("INFO", f"[#{scen.step_number}] '{scen.name}' 조건 평가 중...")
+
+                raw_cond = scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition
+                is_cond_en = getattr(scen, "condition_enabled", True)
+                has_points = bool(raw_cond and raw_cond.points)
+                eff_cond = raw_cond if (is_cond_en and has_points) else None
+
+                if is_cond_en and has_points:
+                    self._log("INFO", f"[#{scen.step_number}] '{scen.name}' 조건 평가 중...")
 
                 # Verify window is still valid
                 if not WindowManager.get_window_info(self.hwnd):
@@ -364,8 +424,6 @@ class WorkflowRunner(QThread):
                 matched = False
                 attempt = 0
                 max_attempts = (scen.retry_max_count + 1) if (scen.on_mismatch == "retry") else 1
-                is_cond_en = getattr(scen, "condition_enabled", True)
-                eff_cond = (scen.get_effective_condition(self.project) if hasattr(scen, "get_effective_condition") else scen.condition) if is_cond_en else None
                 point_results = []
                 interrupted_by_pause_jump = False
 
@@ -404,12 +462,35 @@ class WorkflowRunner(QThread):
                         break
 
                     attempt += 1
+                    if getattr(self, "_skip_requested", False):
+                        self._skip_requested = False
+                        interrupted_by_pause_jump = True
+                        next_idx = current_index + 1
+                        if next_idx < len(scenarios):
+                            self._next_scenario_id = scenarios[next_idx].id
+                            self._log("INFO", f"⏩ [건너뛰기] '{scen.name}' 시나리오를 건너뛰고 다음 노드(#{scenarios[next_idx].step_number} '{scenarios[next_idx].name}')로 즉시 이동합니다.")
+                        else:
+                            self._log("INFO", f"⏩ [건너뛰기] '{scen.name}' 시나리오를 건너뛰었습니다. (마지막 시나리오 완료)")
+                            current_index = len(scenarios)
+                        break
+
                     if attempt < max_attempts and self._is_running:
                         mismatch_info = ConditionEvaluator.format_mismatch_log(point_results)
                         fail_count = sum(1 for p in point_results if not p.get("passed", False))
                         mismatch_str = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
                         self._log("INFO", f"[#{scen.step_number}] ⏳ '{scen.name}' 조건 불일치{mismatch_str} - 재시도 대기 ({attempt}/{scen.retry_max_count}회, {scen.retry_interval_sec:.1f}초 후 재검사)...")
                         if not self.sleep_interruptible(scen.retry_interval_sec, abort_on_pause=True):
+                            if getattr(self, "_skip_requested", False):
+                                self._skip_requested = False
+                                interrupted_by_pause_jump = True
+                                next_idx = current_index + 1
+                                if next_idx < len(scenarios):
+                                    self._next_scenario_id = scenarios[next_idx].id
+                                    self._log("INFO", f"⏩ [건너뛰기] '{scen.name}' 시나리오를 건너뛰고 다음 노드(#{scenarios[next_idx].step_number} '{scenarios[next_idx].name}')로 즉시 이동합니다.")
+                                else:
+                                    self._log("INFO", f"⏩ [건너뛰기] '{scen.name}' 시나리오를 건너뛰었습니다. (마지막 시나리오 완료)")
+                                    current_index = len(scenarios)
+                                break
                             if not self._is_running:
                                 break
                             if self._is_paused:
@@ -443,16 +524,24 @@ class WorkflowRunner(QThread):
                 # Handle evaluation outcome
                 if matched:
                     self.sig_scenario_completed.emit(scen.id, "matched")
-                    passed_count = sum(1 for p in point_results if p.get("passed", False))
-                    total_count = len(point_results)
-                    is_or = eff_cond and (str(getattr(eff_cond, "logic_operator", "AND")).strip().upper() in ("OR", "ANY") or "하나라도" in str(getattr(eff_cond, "logic_operator", "AND")))
-                    if is_or and total_count > 0:
-                        rule_tag = f" - {passed_count}/{total_count}개 일치, OR 충족"
-                    elif eff_cond and total_count > 0:
-                        rule_tag = f" - {total_count}/{total_count}개 일치, AND 충족"
+                    if not is_cond_en and has_points:
+                        self._log("INFO", f"[#{scen.step_number}] '{scen.name}' 조건 감지 비활성 (판정: 무조건 실행)")
+                    elif not has_points:
+                        self._log("INFO", f"[#{scen.step_number}] '{scen.name}' 조건 없음 (판정: 무조건 실행)")
                     else:
-                        rule_tag = ""
-                    self._log("SUCCESS", f"[#{scen.step_number}] '{scen.name}' 조건 일치! (판정: 성공{rule_tag})")
+                        passed_count = sum(1 for p in point_results if p.get("passed", False))
+                        total_count = len(point_results)
+                        fail_count = sum(1 for p in point_results if not p.get("passed", False))
+                        is_or = eff_cond and (str(getattr(eff_cond, "logic_operator", "AND")).strip().upper() in ("OR", "ANY") or "하나라도" in str(getattr(eff_cond, "logic_operator", "AND")))
+                        if is_or and total_count > 0:
+                            rule_tag = f" - {passed_count}/{total_count}개 일치, OR 충족"
+                        elif eff_cond and total_count > 0:
+                            rule_tag = f" - {total_count}/{total_count}개 일치, AND 충족"
+                        else:
+                            rule_tag = ""
+                        mismatch_info = ConditionEvaluator.format_mismatch_log(point_results) if fail_count > 0 else ""
+                        mismatch_str = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
+                        self._log("SUCCESS", f"[#{scen.step_number}] '{scen.name}' 조건 일치! (판정: 성공{rule_tag}){mismatch_str}")
 
                     if scen.on_match == "execute":
                         # Check pause before executing actions
@@ -470,6 +559,8 @@ class WorkflowRunner(QThread):
                                 if self._is_paused:
                                     if not self._wait_while_paused():
                                         break
+                                    if self._next_scenario_id and self._next_scenario_id == scen.id:
+                                        self._next_scenario_id = None
                                 if not self._is_running:
                                     break
                         current_index += 1
@@ -594,6 +685,11 @@ class WorkflowRunner(QThread):
 
         for act_idx, act in enumerate(actions):
             if not self._is_running:
+                break
+
+            if getattr(self, "_skip_requested", False):
+                self._skip_requested = False
+                self._log("INFO", f"⏩ [건너뛰기] '{scenario.name}' 액션 실행을 중단하고 다음 시나리오로 즉시 이동합니다.")
                 break
 
             # Handle pause

@@ -1,0 +1,58 @@
+================================================================================
+작업 일시: 2026-10-27 21:30:00
+작업 내용: 강력로그 스크린샷 팝업창 외부 클릭 자동 닫기 구현, 인식 조건창(인스펙터 및 편집기) 조건 수에 맞춘 목록 높이 유동 조절
+작업자: Antigravity
+================================================================================
+
+[1. 작업 배경 및 요구사항]
+1) 강력로그 스크린샷 팝업창 클릭 닫기 개선:
+   - 팝업 창 내부뿐만 아니라 팝업 창 외부(FGOA 메인창, 바탕화면, 타 프로그램 등 화면 어디든)를 클릭해도 팝업이 닫히도록 개선.
+   - 단, 스크린샷 폴더 열기('📁 폴더 열기') 버튼 및 이미지 스크롤바 조작 시에는 팝업이 유지되어야 함.
+2) 인식 조건창 조건 리스트 개선:
+   - 등록된 인식 조건이 1개뿐인 경우에도 테이블이 기본 크기(192px 등)로 고정되어 하단에 불필요한 빈칸 공간을 크게 차지하던 문제 해결.
+   - 등록된 조건 포인트 수(1개, 2개, 3개 등)에 비례하여 조건 리스트 창의 세로 길이가 딱 맞게 유동 조절되도록 구현.
+   - 조건 수가 많아질 경우(최대 기준 초과 시) 자동으로 스크롤바가 활성화되도록 처리하여 화면 공간 낭비 방지.
+
+[2. 주요 구현 내역]
+
+1) 스크린샷 팝업창 창 안팎 무관 클릭 닫기 구현 (ui/image_preview_dialog.py)
+   - Windows 전역 저수준 마우스 훅(WH_MOUSE_LL / SetWindowsHookExW) 연동:
+     * 팝업창 오픈 시 시스템 전역 마우스 클릭(WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, 비클라이언트 영역 포함) 감지 훅 등록.
+     * 클릭 위치가 '📁 폴더 열기' 버튼(btn_open_folder) 내부인 경우 정상 동작하도록 통과.
+     * 클릭 위치가 이미지 스크롤바(QScrollBar) 영역인 경우 드래그 및 스크롤을 위해 통과.
+     * 그 외 창 내부/외부 어디를 클릭하든 QTimer.singleShot(0, self.accept)를 호출하여 부드럽고 즉각적으로 팝업 닫기 처리.
+   - 윈도우 비활성화(ActivationChange, WindowDeactivate) 감지:
+     * 사용자가 타 창을 클릭하거나 Alt-Tab 등으로 포커스를 전환할 때도 자동으로 팝업 닫힘.
+   - 폴더 열기 플래그(_is_opening_folder) 보호:
+     * '📁 폴더 열기' 클릭으로 탐색기가 포그라운드로 뜰 때 premature한 닫힘 충돌 방지.
+   - 자원 해제:
+     * done(), closeEvent(), __del__()에서 UnhookWindowsHookEx를 확실히 호출하여 메모리 누수 방지.
+
+2) 인식 조건 리스트 수량 맞춤형 유동 높이 구현 (ui/widgets/dynamic_table.py, ui/inspector_widget.py, ui/condition_editor_dialog.py)
+   - DynamicPointsTableWidget 컴포넌트 신규 분리 및 구현:
+     * 헤더 높이 + 각 행 높이(rowHeight) * 수량 + 테두리 패딩을 정밀 계산하는 calculate_ideal_height() 메서드 제공.
+     * sizeHint() 및 update_dynamic_height()를 통해 조건이 1개일 때는 헤더+1행 높이(~53px)로 압축.
+     * 조건 포인트가 2개, 3개로 늘어날 때마다 정확히 행 높이만큼 테이블 길이가 늘어나 빈칸 공간 제거.
+     * 최대 높이(max_dynamic_height = 360px) 초과 시에만 수직 스크롤바가 나타나도록 설정.
+   - ui/inspector_widget.py (인식 조건 및 분기 인스펙터 패널):
+     * self.tbl_points를 DynamicPointsTableWidget으로 전환하고 vertical sizePolicy를 Preferred로 설정, layout.addWidget(self.tbl_points, 0)으로 신축성 부여.
+     * 기존의 고정 setMinimumHeight(100) 제거로 1개 조건 등록 시 불필요하게 스크롤해야 했던 하단 분기 판단(branch_card)이 즉시 한눈에 노출.
+     * elasticity 테스트(maximumHeight > 1000)와의 하위 호환성 100% 유지.
+   - ui/condition_editor_dialog.py (화면 인식 조건 편집기):
+     * 우측 포인트 목록 테이블도 DynamicPointsTableWidget으로 교체.
+     * side_layout 하단에 유동 Spacer(addStretch(1))를 배치하여 1개 포인트 등록 시 거대한 빈 영역 차지 방지.
+
+[3. 테스트 및 검증]
+- tests/test_image_preview_and_condition_list_height.py 단위 테스트 신규 작성:
+  * test_01_image_preview_dialog_hook_installed_and_cleaned: 전역 마우스 훅 설치 및 종료 시 정상 해제 확인 (PASS).
+  * test_02_image_preview_deactivation_closes_dialog: 외부 창 활성화/비활성화 시 팝업 자동 닫힘 검증 (PASS).
+  * test_03_image_preview_open_folder_button_keeps_dialog_open: '📁 폴더 열기' 클릭 시 팝업 유지 검증 (PASS).
+  * test_04_dynamic_points_table_widget_calculations: 0개, 1개, 3개 조건 수량별 이상적 높이 계산 공식 검증 (PASS).
+  * test_05_inspector_condition_table_height_scales_with_conditions: 인스펙터 조건 테이블 1개(~53px) 및 3개(~101px) 동적 신축 및 축소 검증 (PASS).
+  * test_06_condition_editor_dialog_table_height_scales_with_conditions: 조건 편집 다이얼로그 1개(~55px) 및 3개(~107px) 동적 신축 검증 (PASS).
+- 기존 핵심 회귀 테스트 전체 통과:
+  * tests/test_user_enhancements_20260927.py (테이블 elasticity 포함) 12/12 PASS
+  * tests/test_robust_trace_logger.py 10/10 PASS
+  * tests/test_scenario_hierarchy_and_custom_colors.py 10/10 PASS
+  * tests/test_bottom_playback_buttons_ui.py 4/4 PASS
+================================================================================

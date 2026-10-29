@@ -352,6 +352,7 @@ class SingleActionDialog(QDialog):
 
         elif self.action.action_type == "log_message":
             self.action.log_text = self.txt_log.text().strip()
+            self.action.custom_log = self.action.log_text
 
         # 대기 시간: 모든 액션에서 설정된 값 저장
         self.action.delay_seconds = self.spin_delay.value()

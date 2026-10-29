@@ -63,7 +63,7 @@ class ActionOverlayWindow(QWidget):
     def nativeEvent(self, eventType, message):
         """Intercepts WM_NCHITTEST (0x0084) to return HTTRANSPARENT (-1) for 100% click pass-through."""
         try:
-            if eventType == "windows_generic_MSG":
+            if eventType in (b"windows_generic_MSG", "windows_generic_MSG"):
                 import ctypes
                 from ctypes import wintypes
                 msg = wintypes.MSG.from_address(int(message))

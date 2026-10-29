@@ -25,6 +25,9 @@ class TestMismatchToggleAndOrCondition(unittest.TestCase):
         """Verify clicking mismatch toggle expands and collapses details properly."""
         win = MainWindow()
         win.show()
+        win._log_records.clear()
+        win.txt_log.clear()
+        win._next_log_id = 0
 
         # Emit log with MISMATCH tags
         log_msg = "시나리오 조건 불일치 [MISMATCH:2]• #1 (100, 200) 감지 RGB(10,20,30) ≠ 기준 RGB(100,200,50) [오차: R90, G180, B20 / 허용: ±15]\n• #2 (300, 400) 감지 RGB(0,0,0) ≠ 기준 RGB(255,255,255) [오차: R255, G255, B255 / 허용: ±15][/MISMATCH]"
@@ -177,6 +180,116 @@ class TestMismatchToggleAndOrCondition(unittest.TestCase):
 
         self.assertIn("1/2개 일치, OR 충족", msg)
         self.assertIn("조건 일치! (판정: 성공", msg)
+
+    def test_06_runner_partial_match_mismatch_tag(self):
+        """Verify WorkflowRunner attaches [MISMATCH:count] tag even when OR condition matched (partial success)."""
+        from unittest.mock import patch
+        proj = Project()
+        pt1 = ColorPoint(x=5, y=5, r=100, g=100, b=100)
+        pt2 = ColorPoint(x=15, y=15, r=200, g=200, b=200)
+        cond = Condition(logic_operator="OR", points=[pt1, pt2])
+        scen = Scenario(name="OR 부분일치 테스트", condition=cond, on_match="stop")
+        proj.scenarios.append(scen)
+
+        logs = []
+        runner = WorkflowRunner(project=proj, hwnd=123)
+        runner.sig_log.connect(lambda lvl, msg: logs.append((lvl, msg)))
+
+        mock_eval = (True, [
+            {"point_id": pt1.id, "target_rgb": (100, 100, 100), "actual_rgb": (100, 100, 100), "passed": True, "match_mode": "match"},
+            {"point_id": pt2.id, "target_rgb": (200, 200, 200), "actual_rgb": (0, 0, 0), "passed": False, "match_mode": "match"}
+        ])
+
+        from core.window_manager import WindowInfo
+        win_info = WindowInfo(hwnd=123, title="Test", client_width=800, client_height=600, screen_x=0, screen_y=0)
+
+        with patch("core.runner.WindowManager.get_window_info", return_value=win_info), \
+             patch("core.runner.ConditionEvaluator.evaluate", return_value=mock_eval):
+            runner.run()
+
+        success_logs = [msg for lvl, msg in logs if lvl == "SUCCESS"]
+        self.assertTrue(len(success_logs) > 0)
+        self.assertIn("[MISMATCH:1]", success_logs[0])
+        self.assertIn("1/2개 일치, OR 충족", success_logs[0])
+        self.assertIn("조건 일치! (판정: 성공", success_logs[0])
+
+    def test_07_runner_condition_disabled_unconditional_log(self):
+        """Verify WorkflowRunner logs '조건 감지 비활성 (판정: 무조건 실행)' when condition_enabled is False."""
+        from unittest.mock import patch
+        proj = Project()
+        pt1 = ColorPoint(x=5, y=5, r=100, g=100, b=100)
+        cond = Condition(points=[pt1])
+        scen = Scenario(name="조건 비활성 테스트", condition=cond, condition_enabled=False, on_match="stop")
+        proj.scenarios.append(scen)
+
+        logs = []
+        runner = WorkflowRunner(project=proj, hwnd=123)
+        runner.sig_log.connect(lambda lvl, msg: logs.append((lvl, msg)))
+
+        from core.window_manager import WindowInfo
+        win_info = WindowInfo(hwnd=123, title="Test", client_width=800, client_height=600, screen_x=0, screen_y=0)
+
+        with patch("core.runner.WindowManager.get_window_info", return_value=win_info):
+            runner.run()
+
+        # Should NOT log "조건 평가 중..."
+        eval_logs = [msg for lvl, msg in logs if "조건 평가 중" in msg]
+        self.assertEqual(len(eval_logs), 0)
+
+        # Should log INFO "조건 감지 비활성 (판정: 무조건 실행)"
+        info_logs = [msg for lvl, msg in logs if "무조건 실행" in msg]
+        self.assertTrue(len(info_logs) > 0)
+        self.assertIn("조건 감지 비활성 (판정: 무조건 실행)", info_logs[0])
+        self.assertNotIn("조건 일치! (판정: 성공)", " ".join([m for _, m in logs]))
+
+    def test_08_runner_no_condition_unconditional_log(self):
+        """Verify WorkflowRunner logs '조건 없음 (판정: 무조건 실행)' when condition has no points."""
+        from unittest.mock import patch
+        proj = Project()
+        scen = Scenario(name="조건 없음 테스트", condition=None, on_match="stop")
+        proj.scenarios.append(scen)
+
+        logs = []
+        runner = WorkflowRunner(project=proj, hwnd=123)
+        runner.sig_log.connect(lambda lvl, msg: logs.append((lvl, msg)))
+
+        from core.window_manager import WindowInfo
+        win_info = WindowInfo(hwnd=123, title="Test", client_width=800, client_height=600, screen_x=0, screen_y=0)
+
+        with patch("core.runner.WindowManager.get_window_info", return_value=win_info):
+            runner.run()
+
+        # Should log INFO "조건 없음 (판정: 무조건 실행)"
+        info_logs = [msg for lvl, msg in logs if "무조건 실행" in msg]
+        self.assertTrue(len(info_logs) > 0)
+        self.assertIn("조건 없음 (판정: 무조건 실행)", info_logs[0])
+
+    def test_09_partial_match_html_accordion(self):
+        """Verify SUCCESS log with [MISMATCH] accordion renders amber box and expands nicely."""
+        win = MainWindow()
+        win.show()
+        win._log_records.clear()
+        win.txt_log.clear()
+        win._next_log_id = 0
+
+        log_msg = "[#1] '테스트' 조건 일치! (판정: 성공 - 1/2개 일치, OR 충족) [MISMATCH:1]• #1 기준: RGB 255,0,0 / 감지: RGB 255,0,0 / 오차 0,0,0 [일치]\n• #2 기준: RGB 0,255,0 / 감지: RGB 0,0,0 / 오차 0,255,0 [불일치][/MISMATCH]"
+        win._append_log("SUCCESS", log_msg)
+
+        self.assertEqual(len(win._log_records), 1)
+        record = win._log_records[0]
+        self.assertTrue(record["has_mismatch"])
+        self.assertIn("[▶ 불일치 1건 세부내역 열기]", win.txt_log.toHtml())
+
+        # Expand
+        win._on_log_anchor_clicked(QUrl("toggle-mismatch:0"))
+        self.assertTrue(record["expanded"])
+        html_expanded = win.txt_log.toHtml()
+        self.assertIn("세부 포인트 판정 내역", html_expanded)
+        self.assertIn("[일치]", html_expanded)
+        self.assertIn("[불일치]", html_expanded)
+        self.assertIn("[▼ 불일치 1건 세부내역 닫기]", html_expanded)
+
+        win.close()
 
 
 if __name__ == "__main__":

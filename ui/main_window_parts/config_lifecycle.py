@@ -14,6 +14,7 @@ from core.version import __version__
 from core.config import get_config_filepath
 from core.models import Project
 from core.global_hotkey import GlobalHotkeyListener
+from core.power_manager import PowerManager
 from ui.floating_stop_widget import GlobalFloatingStopWidget
 from ui.anti_burn_in_overlay import AntiBurnInOverlay
 
@@ -224,6 +225,15 @@ class MainWindowConfigLifecycleMixin:
             self.chk_robust_trace.setChecked(robust_trace_en)
             self.chk_robust_trace.blockSignals(False)
 
+        # 5-2. Prevent Screensaver Mode (화면보호기 차단)
+        prevent_ss_en = cfg.get("prevent_screensaver_enabled", True)
+        if hasattr(self, "btn_prevent_screensaver") and self.btn_prevent_screensaver:
+            self.btn_prevent_screensaver.blockSignals(True)
+            self.btn_prevent_screensaver.setChecked(prevent_ss_en)
+            if hasattr(self, "_update_prevent_screensaver_btn_ui"):
+                self._update_prevent_screensaver_btn_ui(prevent_ss_en)
+            self.btn_prevent_screensaver.blockSignals(False)
+
         # 6. Scenario Table Column Visibility (시나리오 테이블 열 표시 여부)
         cols_vis = cfg.get("scenario_columns_visible")
         if isinstance(cols_vis, dict) and hasattr(self, "tbl_scenarios") and self.tbl_scenarios:
@@ -290,6 +300,8 @@ class MainWindowConfigLifecycleMixin:
                 cfg["autoscroll_enabled"] = self.chk_autoscroll.isChecked()
             if hasattr(self, "chk_robust_trace") and self.chk_robust_trace:
                 cfg["robust_trace_enabled"] = self.chk_robust_trace.isChecked()
+            if hasattr(self, "btn_prevent_screensaver") and self.btn_prevent_screensaver:
+                cfg["prevent_screensaver_enabled"] = self.btn_prevent_screensaver.isChecked()
             if hasattr(self, "tbl_scenarios") and self.tbl_scenarios:
                 cfg["scenario_columns_visible"] = self.tbl_scenarios.get_column_visibility_state()
 
@@ -310,6 +322,7 @@ class MainWindowConfigLifecycleMixin:
             pass
 
     def closeEvent(self, event):
+        PowerManager.allow_screensaver()
         if hasattr(self, "runner") and self.runner and self.runner.isRunning():
             try:
                 self.runner.stop()
@@ -326,11 +339,6 @@ class MainWindowConfigLifecycleMixin:
         if hasattr(self, "floating_stop") and self.floating_stop:
             try:
                 self.floating_stop.close()
-            except Exception:
-                pass
-        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
-            try:
-                self.popup_play_bar.close()
             except Exception:
                 pass
         if hasattr(self, "action_overlay") and self.action_overlay:

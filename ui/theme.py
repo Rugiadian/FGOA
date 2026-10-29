@@ -231,6 +231,35 @@ QPushButton#btn_test_anti_burn:pressed {{
     background-color: #e2e8f0;
 }}
 
+QPushButton#btn_prevent_screensaver {{
+    min-height: 22px;
+    background-color: #f8fafc;
+    border: 1px solid #cbd5e1;
+    color: #64748b;
+    border-radius: 5px;
+    padding: 3px 10px;
+    font-size: 8.5pt;
+    font-weight: 600;
+}}
+QPushButton#btn_prevent_screensaver:hover {{
+    background-color: #f1f5f9;
+    border-color: #94a3b8;
+    color: #1e293b;
+}}
+QPushButton#btn_prevent_screensaver:checked {{
+    background-color: #059669;
+    border: 1px solid #047857;
+    color: #ffffff;
+    font-weight: bold;
+}}
+QPushButton#btn_prevent_screensaver:checked:hover {{
+    background-color: #047857;
+    border-color: #065f46;
+}}
+QPushButton#btn_prevent_screensaver:checked:pressed {{
+    background-color: #065f46;
+}}
+
 QPushButton#btn_primary {{
     background-color: #2563eb;
     color: #ffffff;
@@ -326,17 +355,42 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
 }}
 
 QSpinBox, QDoubleSpinBox {{
-    padding-right: 22px;
+    padding-right: 18px;
 }}
 
 QSpinBox::up-button, QDoubleSpinBox::up-button {{
-    width: 22px;
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 16px;
     padding: 1px 2px;
 }}
 
 QSpinBox::down-button, QDoubleSpinBox::down-button {{
-    width: 22px;
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 16px;
     padding: 1px 2px;
+}}
+
+QTableWidget QSpinBox, QTableWidget QDoubleSpinBox {{
+    padding: 1px 2px 1px 2px;
+    padding-right: 15px;
+    min-height: 18px;
+    font-size: 8.5pt;
+}}
+
+QTableWidget QSpinBox::up-button, QTableWidget QDoubleSpinBox::up-button {{
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 14px;
+    padding: 0px;
+}}
+
+QTableWidget QSpinBox::down-button, QTableWidget QDoubleSpinBox::down-button {{
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 14px;
+    padding: 0px;
 }}
 
 QSpinBox#spin_loops {{
@@ -759,6 +813,35 @@ QPushButton#btn_test_anti_burn:pressed {{
     background-color: #1e1e24;
 }}
 
+QPushButton#btn_prevent_screensaver {{
+    min-height: 22px;
+    background-color: #2b2b36;
+    border: 1px solid #4a4a5a;
+    color: #94a3b8;
+    border-radius: 5px;
+    padding: 3px 10px;
+    font-size: 8.5pt;
+    font-weight: 600;
+}}
+QPushButton#btn_prevent_screensaver:hover {{
+    background-color: #383848;
+    border-color: #636378;
+    color: #f0f0f5;
+}}
+QPushButton#btn_prevent_screensaver:checked {{
+    background-color: #059669;
+    border: 1px solid #10b981;
+    color: #ffffff;
+    font-weight: bold;
+}}
+QPushButton#btn_prevent_screensaver:checked:hover {{
+    background-color: #10b981;
+    border-color: #34d399;
+}}
+QPushButton#btn_prevent_screensaver:checked:pressed {{
+    background-color: #047857;
+}}
+
 QPushButton#btn_primary {{
     background-color: #1976d2;
     color: #ffffff;
@@ -854,17 +937,42 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
 }}
 
 QSpinBox, QDoubleSpinBox {{
-    padding-right: 22px;
+    padding-right: 18px;
 }}
 
 QSpinBox::up-button, QDoubleSpinBox::up-button {{
-    width: 22px;
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 16px;
     padding: 1px 2px;
 }}
 
 QSpinBox::down-button, QDoubleSpinBox::down-button {{
-    width: 22px;
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 16px;
     padding: 1px 2px;
+}}
+
+QTableWidget QSpinBox, QTableWidget QDoubleSpinBox {{
+    padding: 1px 2px 1px 2px;
+    padding-right: 15px;
+    min-height: 18px;
+    font-size: 8.5pt;
+}}
+
+QTableWidget QSpinBox::up-button, QTableWidget QDoubleSpinBox::up-button {{
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 14px;
+    padding: 0px;
+}}
+
+QTableWidget QSpinBox::down-button, QTableWidget QDoubleSpinBox::down-button {{
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 14px;
+    padding: 0px;
 }}
 
 QSpinBox#spin_loops {{

@@ -1,0 +1,24 @@
+[작업 일시] 2026-10-28 04:05:00
+[작업 내용] 컬러 인식조건 판정 리스트에서 허용 오차 칸 숫자 시인성 및 텍스트 클리핑 개선
+
+1. 원인 분석
+   - [ui/theme.py]의 전역 QSpinBox 스타일시트에서 `padding-right: 22px`, `padding: 2px 6px`로 인해 좁은 테이블 셀 내부에서 텍스트 공간이 좌우로 과도하게 축소되었음.
+   - `QSpinBox::up-button` / `down-button`에 `subcontrol-origin: border` 및 `subcontrol-position` 명시가 누락되어 Qt 스타일 엔진이 내부 lineEdit 영역을 비정상적으로 계산함.
+   - 기본 QSpinBox 텍스트 정렬이 우측 정렬(AlignRight)로 설정되어 있어 화살표 버튼/우측 패딩에 숫자가 밀려 좌측 텍스트가 잘리는 현상 발생.
+   - 인스펙터의 허용 오차 컬럼 폭(70px) 및 조건 편집기의 컬럼 폭(50px)이 스핀박스 화살표 버튼 크기 대비 다소 협소했음.
+
+2. 수정 및 개선 사항
+   - [ui/theme.py]
+     * QSpinBox 및 QDoubleSpinBox의 `up-button` / `down-button`에 `subcontrol-origin: border; subcontrol-position: top/bottom right;`를 명시하여 버튼이 우측 경계에 정확히 정렬되도록 수정.
+     * 테이블 셀 전용 컴팩트 스핀박스 스타일(`QTableWidget QSpinBox`)을 신설하여 내부 패딩을 `1px 2px 1px 2px`, `padding-right: 15px`, 버튼 너비를 14px로 최적화 (라이트/다크 모드 공통 적용).
+   - [ui/inspector_widget.py]
+     * `spin_tol`: `setAlignment(Qt.AlignCenter)` 적용하여 숫자가 중앙에 또렷하게 표시되도록 개선. 툴팁 추가.
+     * 허용 오차 컬럼 너비를 70px -> 78px로 확장하여 충분한 가시성 확보.
+     * 판정 모드 콤보박스 텍스트를 "일치", "불일치"로 간결화하고 툴팁에 설명 표기하여 드롭다운 화살표와 텍스트가 겹치지 않도록 개선.
+   - [ui/condition_editor_dialog.py]
+     * `spin_tol`: `setAlignment(Qt.AlignCenter)` 적용 및 툴팁 추가.
+     * 오차 컬럼 너비를 50px -> 62px로 확장.
+
+3. 검증 결과
+   - 라이트 모드 및 다크 모드 스크린샷 렌더링 확인 완료 (`20`, `15` 숫자가 정중앙에 완전하고 또렷하게 표시됨).
+   - 단위 테스트 20건 전체 통과 (`20 passed, OK`).

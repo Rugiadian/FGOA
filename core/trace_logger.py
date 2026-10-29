@@ -33,12 +33,41 @@ class TraceLogger:
         self.current_loop_index: int = 1
         self.shot_counter: int = 0
 
+    def start_scenario_execution(self, scenario_name: Optional[str] = None) -> str:
+        """
+        Creates and sets a new directory for this scenario execution session.
+        A dedicated unique directory is created each time scenario execution begins.
+        """
+        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        prefix = "scenario"
+        if scenario_name:
+            clean = "".join(c for c in scenario_name if c.isalnum() or c in ("-", "_")).strip()
+            if clean:
+                prefix = f"scenario_{clean}"
+        folder_name = f"{prefix}_{now_str}"
+        candidate_dir = os.path.join(self.trace_base_dir, folder_name)
+        counter = 1
+        while os.path.exists(candidate_dir):
+            candidate_dir = os.path.join(self.trace_base_dir, f"{folder_name}_{counter}")
+            counter += 1
+
+        self.current_loop_dir = candidate_dir
+        os.makedirs(self.current_loop_dir, exist_ok=True)
+        self.shot_counter = 0
+        return self.current_loop_dir
+
     def start_loop(self, loop_index: int) -> str:
         """Creates and sets the directory for the current overall scenario loop."""
         self.current_loop_index = loop_index
         now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         folder_name = f"loop_{loop_index:03d}_{now_str}"
-        self.current_loop_dir = os.path.join(self.trace_base_dir, folder_name)
+        candidate_dir = os.path.join(self.trace_base_dir, folder_name)
+        counter = 1
+        while os.path.exists(candidate_dir):
+            candidate_dir = os.path.join(self.trace_base_dir, f"{folder_name}_{counter}")
+            counter += 1
+
+        self.current_loop_dir = candidate_dir
         os.makedirs(self.current_loop_dir, exist_ok=True)
         self.shot_counter = 0
         return self.current_loop_dir
@@ -58,9 +87,9 @@ class TraceLogger:
         if (now - self.last_capture_time) < self.min_interval_sec:
             return None
 
-        # Ensure loop folder exists (fallback if start_loop was not explicitly called)
+        # Ensure execution folder exists (fallback if start_scenario_execution was not explicitly called)
         if not self.current_loop_dir or not os.path.isdir(self.current_loop_dir):
-            self.start_loop(self.current_loop_index)
+            self.start_scenario_execution()
 
         try:
             # Capture target window client area

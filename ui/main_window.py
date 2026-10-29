@@ -13,6 +13,7 @@ import json
 import copy
 import re
 import html
+from ctypes import wintypes
 from typing import Optional, Dict, List, Tuple, Any
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -30,6 +31,7 @@ from core.models import Project, Scenario, Condition, Action, ColorPoint, Action
 from core.window_manager import WindowManager, WindowInfo
 from core.evaluator import ConditionEvaluator
 from core.runner import WorkflowRunner
+from core.power_manager import PowerManager
 from core.preset_manager import PresetManager
 from core.version import __version__
 from ui.theme import get_stylesheet, get_theme_colors, CHECK_ICON_PATH
@@ -367,18 +369,6 @@ class MainWindow(
         btn_error_log.setToolTip("오류 발생 기록(fgoa_crash.log)을 텍스트 편집기로 엽니다.")
         btn_error_log.clicked.connect(self._on_open_crash_log)
         row2_layout.addWidget(btn_error_log)
-
-        sep3 = QFrame()
-        sep3.setFrameShape(QFrame.VLine)
-        sep3.setFrameShadow(QFrame.Sunken)
-        sep3.setStyleSheet("color: #94a3b8; margin: 2px 4px;")
-        row2_layout.addWidget(sep3)
-
-        self.btn_popup_playbar = QPushButton("🎮 플레이바 (F4)")
-        self.btn_popup_playbar.setCheckable(True)
-        self.btn_popup_playbar.setToolTip("항상 위에 떠 있는 미니 플레이바 창을 열거나 닫습니다. (단축키: F4)")
-        self.btn_popup_playbar.clicked.connect(self._toggle_popup_playbar)
-        row2_layout.addWidget(self.btn_popup_playbar)
 
         row2_layout.addStretch()
 
@@ -795,8 +785,10 @@ class MainWindow(
 
         row1_ctrl.addStretch()
 
-        self.lbl_run_status = QLabel("대기 중")
-        self.lbl_run_status.setStyleSheet("font-weight: bold; font-size: 10pt;")
+        self.lbl_run_status = QLabel("⚪ 대기중")
+        self.lbl_run_status.setObjectName("lbl_run_status")
+        self.lbl_run_status.setAlignment(Qt.AlignCenter)
+        self.lbl_run_status.setToolTip("현재 시나리오 오토 실행 상태 (대기중 / 재생중 / 일시 정지중 / 단일스탭 실행중)")
         row1_ctrl.addWidget(self.lbl_run_status)
 
         c_layout.addLayout(row1_ctrl)
@@ -904,6 +896,25 @@ class MainWindow(
             self.anti_burn_overlay.sig_transition_started.connect(self._on_anti_burn_started)
             self.anti_burn_overlay.sig_transition_finished.connect(self._on_anti_burn_finished)
 
+        sep_c5 = QFrame()
+        sep_c5.setFrameShape(QFrame.VLine)
+        sep_c5.setFrameShadow(QFrame.Sunken)
+        sep_c5.setStyleSheet("color: #94a3b8; margin: 2px 4px;")
+        row2_ctrl.addWidget(sep_c5)
+
+        self.btn_prevent_screensaver = QPushButton("☕ 화면보호기 차단: ON")
+        self.btn_prevent_screensaver.setObjectName("btn_prevent_screensaver")
+        self.btn_prevent_screensaver.setCheckable(True)
+        self.btn_prevent_screensaver.setChecked(True)
+        self.btn_prevent_screensaver.setCursor(Qt.PointingHandCursor)
+        self.btn_prevent_screensaver.setMinimumHeight(26)
+        self.btn_prevent_screensaver.setToolTip("시나리오 실행 중 Windows 화면보호기 및 디스플레이 절전을 자동 차단합니다. (조작 탈취 없음, 클릭하여 ON/OFF 전환)")
+        self.btn_prevent_screensaver.toggled.connect(self._on_toggle_prevent_screensaver)
+        row2_ctrl.addWidget(self.btn_prevent_screensaver)
+
+        # Alias for consistency with checkbox attributes
+        self.chk_prevent_screensaver = self.btn_prevent_screensaver
+
         row2_ctrl.addStretch()
         c_layout.addLayout(row2_ctrl)
 
@@ -921,6 +932,9 @@ class MainWindow(
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage(f"준비 완료 - FGOA v{__version__} 화면 인식 스마트 오토 툴")
 
+
+        self._update_playback_status("idle")
+
         # Shortcuts
         self.sc_reload = QShortcut(QKeySequence("Ctrl+R"), self)
         self.sc_reload.activated.connect(self._reload_application)
@@ -937,22 +951,6 @@ class MainWindow(
 
         # Action sequence visualizer overlay window
         self.action_overlay = ActionOverlayWindow(target_hwnd=self.target_hwnd, parent=self)
-
-        # Popup Play Bar (Floating Mini Control Bar)
-        from ui.popup_play_bar import PopupPlayBar
-        self.popup_play_bar = PopupPlayBar(self)
-        self.popup_play_bar.set_target_hwnd(self.target_hwnd)
-        self.popup_play_bar.sig_start_requested.connect(self._on_playbar_start)
-        self.popup_play_bar.sig_start_selected_requested.connect(self._on_start_selected_execution)
-        self.popup_play_bar.sig_pause_requested.connect(self._on_pause_execution)
-        self.popup_play_bar.sig_stop_requested.connect(self._on_stop_execution)
-        self.popup_play_bar.sig_step_requested.connect(self._on_playbar_step)
-        self.popup_play_bar.sig_select_scenario_requested.connect(self._on_playbar_select_scenario)
-        self.popup_play_bar.sig_closed.connect(self._on_playbar_closed)
-
-        # F4 Shortcut to toggle popup play bar
-        self.sc_f4 = QShortcut(QKeySequence("F4"), self)
-        self.sc_f4.activated.connect(self._toggle_popup_playbar)
 
         self.sc_preset_load = QShortcut(QKeySequence("Ctrl+L"), self)
         self.sc_preset_load.activated.connect(self._on_open_preset_manager)
@@ -1147,7 +1145,8 @@ class MainWindow(
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_F5:
             if event.modifiers() & Qt.ShiftModifier:
-                if not self.runner or not self.runner.isRunning():
+                # Shift+F5: 선택부터 시작 (정지 중이거나 일시정지 중일 때 선택된 노드부터 시작/재개)
+                if not self.runner or not self.runner.isRunning() or self.runner._is_paused:
                     self._on_start_selected_execution()
                 else:
                     self._on_pause_execution()
@@ -1169,3 +1168,47 @@ class MainWindow(
             event.accept()
         else:
             super().keyPressEvent(event)
+
+    def _update_prevent_screensaver_btn_ui(self, enabled: bool):
+        """Updates text and tooltip of the prevent screensaver button according to state."""
+        if hasattr(self, "btn_prevent_screensaver") and self.btn_prevent_screensaver:
+            if enabled:
+                self.btn_prevent_screensaver.setText("☕ 화면보호기 차단: ON")
+                self.btn_prevent_screensaver.setToolTip(
+                    "시나리오 실행 중 Windows 화면보호기 및 디스플레이 절전을 자동 차단합니다. (클릭하여 OFF 전환)"
+                )
+            else:
+                self.btn_prevent_screensaver.setText("☕ 화면보호기 차단: OFF")
+                self.btn_prevent_screensaver.setToolTip(
+                    "화면보호기 차단이 비활성화되었습니다. (클릭하여 ON 전환)"
+                )
+
+    def _on_toggle_prevent_screensaver(self, checked: bool):
+        """Handler for screensaver prevention toggle button."""
+        self._update_prevent_screensaver_btn_ui(checked)
+        if hasattr(self, "runner") and self.runner and self.runner.isRunning():
+            self.runner.set_prevent_screensaver_enabled(checked)
+        elif not checked:
+            PowerManager.allow_screensaver()
+
+        status_str = "활성화(ON)" if checked else "비활성화(OFF)"
+        self._append_log("INFO", f"☕ [화면보호기 차단] 화면보호기 차단 기능이 {status_str}되었습니다.")
+        self._save_app_config()
+
+    def nativeEvent(self, eventType, message):
+        """
+        Intercepts native Windows messages.
+        If SC_SCREENSAVE or SC_MONITORPOWER is signaled while execution is running,
+        blocks it to prevent screensaver / display power down from disrupting color recognition.
+        """
+        if eventType == b"windows_generic_MSG":
+            try:
+                # If screensaver prevention is disabled via button, do not block
+                if hasattr(self, "btn_prevent_screensaver") and not self.btn_prevent_screensaver.isChecked():
+                    return super().nativeEvent(eventType, message)
+                msg = wintypes.MSG.from_address(int(message))
+                if PowerManager.should_block_syscommand(msg.message, msg.wParam):
+                    return True, 0
+            except Exception:
+                pass
+        return super().nativeEvent(eventType, message)

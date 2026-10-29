@@ -1,0 +1,23 @@
+[작업 일시] 2026-10-27 22:45:00
+[작업 내용] 일시정지 시 진행 중인 노드 보존, 재개 시 정지 노드에서 실행, 다른 노드 선택 시에도 일시정지 노드 기억 및 '선택부터 시작' 기능 연동
+
+1. 문제점 분석 및 원인
+   - 일시정지(pause) 수행 시 `_set_paused_state()`가 `_refresh_scenario_table()`을 호출함.
+   - 이때 실행 중이어서 선택 행이 없던 상태(`selected_row = -1`)였기 때문에, `_refresh_scenario_table()`의 마지막 부분에서 무조건 첫 번째 노드(`selectRow(0)`)를 선택해버림.
+   - 0번 행이 선택되면서 `_on_table_selection_changed()`가 트리거되었고, 기존 코드의 `if self.runner._is_paused: self._set_paused_state(target_scen.id)` 로직에 의해 정지된 노드가 0번 노드로 덮어써져 러너가 시나리오 처음으로 돌아가버리는 문제가 발생함.
+   - 또한 일시정지 중 사용자가 다른 노드를 확인/편집하기 위해 테이블 행을 클릭할 때도 정지 대상 노드가 클릭된 행으로 덮어써져 정지했던 노드 위치가 유실되었음.
+   - 일시정지 중 '▶ 선택부터 시작 (Shift+F5)' 버튼이 비활성화(disabled) 상태로 방치되어 다른 노드에서부터 시작할 수 없었음.
+
+2. 수정 및 개선 사항
+   - [table_controller.py]
+     * `_on_table_selection_changed()`: 일시정지 중 사용자가 다른 노드를 클릭하더라도 일시정지 대상 노드(`_paused_scenario_id`, 헤더의 `paused_row`)가 덮어써지지 않도록 해당 로직 제거. 사용자는 자유롭게 다른 노드를 선택하여 인스펙터를 확인/편집할 수 있으며, 일시정지된 노드는 그대로 유지됨.
+     * `_refresh_scenario_table()`: 선택 복원 로직에서 일시정지 중(`_paused_scenario_id` 존재)일 때는 일시정지된 노드의 인덱스를 선택하도록 개선하여 0번 행으로 강제 초기화되던 현상 원천 차단. 러너 실행 중에는 선택을 강제하지 않고 비워둠.
+   - [playback_controller.py]
+     * `_on_pause_execution()`: 일시정지 진입 시 '▶ 선택부터 시작 (`btn_run_selected`)' 버튼을 활성화하여 사용자가 다른 노드를 선택한 뒤 그 노드부터 시작할 수 있도록 허용. 재개 시에는 테이블에서 다른 노드를 선택하고 있더라도 원래 정지했던 노드(`_paused_scenario_id`)에서 안전하게 재개.
+     * `_on_start_execution()`: 일시정지 상태에서 '선택부터 시작'을 눌렀을 때 선택된 노드의 ID로 즉시 점프하여 재개되도록 완벽 연동.
+   - [main_window.py]
+     * `keyPressEvent`: Shift+F5 단축키를 러너가 완전히 정지된 상태뿐 아니라 '일시정지 중'인 상태에서도 `_on_start_selected_execution()`으로 동작하도록 개선. F5는 일시정지 중 원래 정지했던 곳에서 재개되도록 유지.
+   - [runner.py]
+     * `_run_internal()`: 루프 시작 시 `current_index`에 해당하는 `scen`과 `self.current_scenario_id`를 즉시 일치시켜 일시정지 감지 시 항상 정확한 노드를 가리키도록 정밀화. post_delay 중 일시정지 후 재개 시 동일 노드 중복 실행 방지 처리.
+   - [tests/test_pause_resume_node_memory.py]
+     * 일시정지 시 진행 노드 기억, 다른 노드 선택 시에도 일시정지 노드 보존, 재개 시 원래 노드 재개, 선택부터 시작 시 선택 노드로 점프 재개, 테이블 리프레시 시 0번 노드 리셋 방지 등 5종 종합 단위 테스트 작성 및 통과 확인.

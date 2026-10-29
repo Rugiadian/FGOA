@@ -88,21 +88,13 @@ class Test30ComprehensiveFeatures(unittest.TestCase):
         win.close()
 
     # ----------------------------------------------------------------------
-    # Test 4: Popup Play Bar Toggle (F4 / Button)
+    # Test 4: Popup Play Bar Removed from MainWindow
     # ----------------------------------------------------------------------
     def test_04_popup_playbar_toggle_shortcut_f4(self):
-        """[Test 04] Verify F4 shortcut and toolbar button toggle popup play bar."""
+        """[Test 04] Verify PopupPlayBar and its toggle button are removed from MainWindow."""
         win = MainWindow()
-        self.assertIsNotNone(win.popup_play_bar)
-        self.assertFalse(win.popup_play_bar.isVisible())
-
-        win._toggle_popup_playbar()
-        self.assertTrue(win.popup_play_bar.isVisible())
-        self.assertTrue(win.btn_popup_playbar.isChecked())
-
-        win._toggle_popup_playbar()
-        self.assertFalse(win.popup_play_bar.isVisible())
-        self.assertFalse(win.btn_popup_playbar.isChecked())
+        self.assertFalse(hasattr(win, "popup_play_bar"))
+        self.assertFalse(hasattr(win, "btn_popup_playbar"))
         win.close()
 
     # ----------------------------------------------------------------------

@@ -117,6 +117,8 @@ class MainWindowLayoutThemeMixin:
             self._update_target_label(win_info)
         else:
             self._update_target_label(None)
+        if hasattr(self, "_update_playback_status"):
+            self._update_playback_status(getattr(self, "_current_playback_state", "idle"))
 
     # ==========================================
     # Unity-Style Dynamic Layout Management

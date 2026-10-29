@@ -1,5 +1,7 @@
 import unittest
 from PyQt5.QtWidgets import QApplication, QHeaderView, QComboBox, QDoubleSpinBox, QLineEdit, QPushButton
+from PyQt5.QtCore import Qt
+from unittest.mock import patch
 from core.models import Scenario, Action
 from ui.inspector_widget import InspectorWidget
 from ui.action_editor_dialog import SingleActionDialog
@@ -114,7 +116,7 @@ class TestInspectorActionTable(unittest.TestCase):
         # Row 4: act5 (a5)
         self.assertEqual(table.item(4, 0).text(), "a5")
         self.assertEqual(table.item(4, 1).text(), "📋 로그")
-        self.assertEqual(table.item(4, 2).text(), "시스템 상태 정상")
+        self.assertEqual(table.item(4, 2).text(), "")  # 대기/로그 노드는 좌표/키/텍스트 열에 아무것도 표기하지 않음
         self.assertEqual(table.item(4, 3).text(), "-")
         self.assertEqual(table.item(4, 4).text(), "-")
         self.assertEqual(table.item(4, 5).text(), "시스템 상태 정상")
@@ -225,6 +227,49 @@ class TestInspectorActionTable(unittest.TestCase):
         self.assertEqual(win.project.scenarios[0].name, "시나리오3")
         self.assertEqual(win.project.scenarios[1].name, "시나리오1")
         self.assertEqual(win.project.scenarios[2].name, "시나리오2")
+
+    def test_delay_and_log_action_column_display_and_disabled(self):
+        """Verify delay and log nodes do not display target in col 2, and are uneditable in col 2."""
+        scen = Scenario(name="대기/로그 열 표시 테스트")
+        act_delay = Action(action_type="delay", delay_seconds=3.0)
+        act_log = Action(action_type="log_message", log_text="테스트 알림 로그")
+        act_click = Action(action_type="mouse_click", x=123, y=456)
+        scen.actions = [act_delay, act_log, act_click]
+
+        self.inspector.set_scenario(scen)
+        table = self.inspector.tbl_actions
+
+        # Row 0: delay
+        # Col 2 (좌표/키/텍스트) must be empty string and uneditable
+        self.assertEqual(table.item(0, 2).text(), "")
+        self.assertFalse(bool(table.item(0, 2).flags() & Qt.ItemIsEditable))
+        # Col 4 (대기) must show delay
+        self.assertEqual(table.item(0, 4).text(), "3.0s")
+
+        # Row 1: log_message
+        # Col 2 (좌표/키/텍스트) must be empty string and uneditable
+        self.assertEqual(table.item(1, 2).text(), "")
+        self.assertFalse(bool(table.item(1, 2).flags() & Qt.ItemIsEditable))
+        # Col 5 (로그) must show log text
+        self.assertEqual(table.item(1, 5).text(), "테스트 알림 로그")
+
+        # Row 2: mouse_click
+        # Col 2 must display coordinates
+        self.assertEqual(table.item(2, 2).text(), "(123, 456)")
+
+        # Verify double clicking col 2 on delay or log does NOT trigger edit
+        with patch.object(self.inspector, "_on_edit_action") as mock_edit:
+            self.inspector._on_action_cell_double_clicked(0, 2)
+            self.inspector._on_action_cell_double_clicked(1, 2)
+            mock_edit.assert_not_called()
+
+            self.inspector._on_action_cell_double_clicked(2, 2)
+            mock_edit.assert_called_once()
+
+        # Verify inline editing on log updates both log_text and custom_log
+        self.inspector._on_inline_log_changed(act_log, "인라인 수정 로그")
+        self.assertEqual(act_log.log_text, "인라인 수정 로그")
+        self.assertEqual(act_log.custom_log, "인라인 수정 로그")
 
 if __name__ == "__main__":
     unittest.main()

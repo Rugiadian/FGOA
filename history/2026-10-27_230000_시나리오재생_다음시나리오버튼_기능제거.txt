@@ -1,0 +1,14 @@
+[작업 일시] 2026-10-27 23:00:00
+[작업 내용] 시나리오 재생의 '다음 시나리오 버튼' 기능 제거
+
+1. 수정 내역
+   - [ui/main_window.py]
+     * 하단 재생 컨트롤 바의 '⏩ 다음 시나리오 (F9)' 버튼 (`btn_skip_scenario`) 생성 및 레이아웃 추가 코드 제거.
+     * 버튼 스타일 일괄 적용 리스트에서 `btn_skip_scenario` 제거.
+     * 단축키 `F9` (`self.sc_f9`) 매핑 제거.
+   - [ui/main_window_parts/playback_controller.py]
+     * `_on_skip_to_next_scenario()` 핸들러 메서드 제거.
+   - [ui/theme.py]
+     * 라이트 모드 및 다크 모드 스타일시트에서 `QPushButton#btn_skip_scenario` 관련 CSS 규칙 정리.
+   - [tests/test_robust_trace_logger.py]
+     * `test_09_skip_to_next_scenario` 테스트를 버튼 및 F9 단축키가 제거되었음을 검증하도록 업데이트.

@@ -141,7 +141,9 @@ class MainWindowLogMixin:
                 return f"<div id='mismatch_{log_id}' style='margin: 1px 0;'>{tag_prefix} <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span>{shot_badge}</div>"
             else:
                 # Expanded: Show clickable badge link to collapse, and formatted details indented per-point
-                btn_link = f"<a href='toggle-mismatch:{log_id}' style='color: #f87171; text-decoration: none; font-weight: bold;'>[▼ {cnt_str} 세부내역 닫기]</a>"
+                is_partial_success = (level == "SUCCESS")
+                btn_close_color = "#eab308" if is_partial_success else "#f87171"
+                btn_link = f"<a href='toggle-mismatch:{log_id}' style='color: {btn_close_color}; text-decoration: none; font-weight: bold;'>[▼ {cnt_str} 세부내역 닫기]</a>"
                 header_line = f"{tag_prefix} <span style='color: {color};'>{prefix_t} {btn_link}{suffix_part}</span>{shot_badge}"
 
                 # Format per-point detail lines
@@ -155,15 +157,16 @@ class MainWindowLogMixin:
                     formatted_items.append(f"<div style='margin: 2px 0;'>&bull; {escaped_l}</div>")
                 inner_details = "".join(formatted_items)
 
-                box_bg = "rgba(239, 68, 68, 0.12)" if not pal["is_light"] else "#fee2e2"
-                box_border = "#ef4444"
-                text_detail_color = "#fca5a5" if not pal["is_light"] else "#991b1b"
+                box_bg = ("rgba(245, 158, 11, 0.12)" if is_partial_success else "rgba(239, 68, 68, 0.12)") if not pal["is_light"] else ("#fef3c7" if is_partial_success else "#fee2e2")
+                box_border = "#f59e0b" if is_partial_success else "#ef4444"
+                text_detail_color = ("#fde68a" if is_partial_success else "#fca5a5") if not pal["is_light"] else ("#92400e" if is_partial_success else "#991b1b")
+                header_title = "🔍 세부 포인트 판정 내역 (OR 일부 일치):" if is_partial_success else "🔍 불일치 세부 포인트 목록:"
 
                 detail_box = (
                     f"<div style='margin-left: 18px; margin-top: 3px; margin-bottom: 4px; padding: 6px 10px; "
                     f"background-color: {box_bg}; border-left: 3px solid {box_border}; border-radius: 4px; "
                     f"font-family: Consolas, monospace; font-size: 8.5pt; color: {text_detail_color}; line-height: 1.45;'>"
-                    f"<div style='font-weight: bold; margin-bottom: 3px; color: {box_border};'>🔍 불일치 세부 포인트 목록:</div>"
+                    f"<div style='font-weight: bold; margin-bottom: 3px; color: {box_border};'>{header_title}</div>"
                     f"{inner_details}"
                     f"</div>"
                 )

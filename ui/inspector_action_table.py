@@ -173,4 +173,7 @@ class ActionColumnDelegate(QStyledItemDelegate):
         elif col == 5 and isinstance(editor, QLineEdit):
             new_log = editor.text().strip()
             self.inspector._on_inline_log_changed(act, new_log)
+            if act.action_type == "log_message":
+                act.log_text = new_log
+                act.custom_log = new_log
             model.setData(index, new_log if new_log else "-", Qt.DisplayRole)

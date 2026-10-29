@@ -1,0 +1,20 @@
+[작업 일시] 2026-10-28 06:00:00
+[작업 내용] 우측 하단 상태알림 버튼 중복 제거 (백그라운드 버튼 옆 알림만 유지, 상태바 영구 위젯 배지 제거)
+
+1. 요청 배경
+   - 이전 작업에서 우측 하단 상태 표기를 위해 재생 제어 툴바(백그라운드 모드 체크박스 옆)와 메인 윈도우 QStatusBar(최하단 상태표시줄 영구 위젯) 양쪽에 상태 배지를 추가함.
+   - 우측 하단에 상태알림 버튼이 2개 중복되어 표시되는 현상 발생.
+   - 사용자 요청: "우측 하단에 상태알림 버튼이 2개가 떠있어. 하나만 뜨게 해줘. 백그라운드 버튼 옆에 있는거 남기고 더 아래 있는거 제거"
+
+2. 수정 내용
+   - `ui/main_window.py`:
+     - 최하단 `self.status_bar`에 추가되어 있던 영구 위젯 `self.lbl_status_badge` 제거.
+     - 백그라운드 모드 옆 재생 제어 툴바의 `self.lbl_run_status`만 유지하고 툴팁("현재 시나리오 오토 실행 상태 (대기중 / 재생중 / 일시 정지중 / 단일스탭 실행중)") 설정.
+   - `ui/main_window_parts/playback_controller.py`:
+     - `_update_playback_status()`에서 제거된 `lbl_status_badge` 참조 로직 정리. `lbl_run_status`만 단일 갱신.
+   - `tests/test_pause_resume_node_memory.py`:
+     - `test_06_bottom_right_playback_status_labels()`에서 `lbl_run_status`의 상태 전환 검증 및 `lbl_status_badge`가 제거되었음을 확인하는 테스트로 업데이트.
+
+3. 검증 결과
+   - 단위 테스트 및 회귀 테스트(31개 테스트) 전체 통과 (OK, 0 failed, 0 error).
+   - 실제 UI 렌더링 캡처(`references/crop_single_status_badge.png`) 확인: 백그라운드 버튼 옆에 단 하나의 깔끔한 상태 배지(`⚪ 대기중`)만 노출됨을 확인.

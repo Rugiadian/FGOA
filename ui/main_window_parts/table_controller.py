@@ -25,6 +25,7 @@ from core.models import Scenario, Condition, ActionSequence, make_block_palette
 from core.path_utils import to_absolute_path
 from ui.theme import CHECK_ICON_PATH
 from ui.image_preview_dialog import show_image_preview
+from ui.clickable_thumbnail import ClickableLabel
 
 
 class MainWindowTableMixin:
@@ -49,11 +50,6 @@ class MainWindowTableMixin:
         row = rows[0].row()
         if 0 <= row < len(self.project.scenarios):
             target_scen = self.project.scenarios[row]
-            # When paused, allow user to click any scenario row to set it as the resume target
-            if hasattr(self, "runner") and self.runner and self.runner.isRunning() and self.runner._is_paused:
-                self._set_paused_state(target_scen.id)
-                self.runner.set_next_scenario_id(target_scen.id)
-                self._highlight_running_row_header(row)
 
             # If current inspector has unsaved changes for a different scenario, ask user
             if (self.inspector.is_dirty and self.inspector.original_scenario and
@@ -344,12 +340,16 @@ class MainWindowTableMixin:
         # Restore selection
         if 0 <= selected_row < len(self.project.scenarios):
             self.tbl_scenarios.selectRow(selected_row)
+        elif getattr(self, "_paused_scenario_id", None):
+            paused_idx = next((i for i, s in enumerate(self.project.scenarios) if s.id == self._paused_scenario_id), None)
+            if paused_idx is not None and 0 <= paused_idx < len(self.project.scenarios):
+                self.tbl_scenarios.selectRow(paused_idx)
+        elif hasattr(self, "runner") and self.runner and self.runner.isRunning():
+            # 러너 실행 중(not paused)에는 테이블 행 선택을 강제하지 않고 비워둠
+            self.tbl_scenarios.clearSelection()
         elif self.project.scenarios:
+            # 대기(완전 정지) 상태에서만 기본으로 첫 번째 행 선택
             self.tbl_scenarios.selectRow(0)
-
-        # Notify popup play bar of scenario changes
-        if hasattr(self, "popup_play_bar") and self.popup_play_bar:
-            self.popup_play_bar.refresh_scenarios(self.project.scenarios)
 
     def _update_table_row(self, row: int, scen: Scenario, depth: int = 0, loop_info: Optional[Dict[str, Any]] = None, folder_info: Optional[Dict[str, Any]] = None, is_in_disabled_folder: bool = False, thread_colors: Optional[List[str]] = None):
         is_folder_start = getattr(scen, "is_folder_start", scen.node_type in ("folder", "folder_start"))
@@ -447,13 +447,13 @@ class MainWindowTableMixin:
                 pix = QPixmap(abs_ref)
                 if not pix.isNull():
                     thumb = pix.scaled(44, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    lbl_thumb = QLabel()
+                    lbl_thumb = ClickableLabel()
                     lbl_thumb.setPixmap(thumb)
                     lbl_thumb.setAlignment(Qt.AlignCenter)
                     lbl_thumb.setToolTip(f"📸 레퍼런스 스냅샷: {os.path.basename(abs_ref)}\n클릭 시 이미지 크게 보기")
                     lbl_thumb.setStyleSheet("background-color: transparent;")
                     lbl_thumb.setCursor(Qt.PointingHandCursor)
-                    lbl_thumb.mousePressEvent = lambda e, p=abs_ref, s=scen: (show_image_preview(p, title=f"📸 [s{s.scenario_number}] {s.name} 레퍼런스 스냅샷", parent=self) if e.button() == Qt.LeftButton else None)
+                    lbl_thumb.clicked.connect(lambda p=abs_ref, s=scen: show_image_preview(p, title=f"📸 [s{s.scenario_number}] {s.name} 레퍼런스 스냅샷", parent=self))
 
                     box = QWidget()
                     bl = QHBoxLayout(box)

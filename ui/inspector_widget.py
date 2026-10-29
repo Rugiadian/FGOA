@@ -30,6 +30,7 @@ from core.screen_capture import ScreenCapture
 from core.input_controller import InputController
 from core.evaluator import ConditionEvaluator
 from ui.widgets.color_badge import ColorChipWidget
+from ui.widgets.dynamic_table import DynamicPointsTableWidget
 from ui.condition_editor_dialog import ConditionEditorDialog
 from ui.action_editor_dialog import SingleActionDialog
 
@@ -586,8 +587,8 @@ class InspectorWidget(QWidget):
 
         layout.addWidget(top_flow_widget)
 
-        # Points Table
-        self.tbl_points = QTableWidget()
+        # Points Table (Dynamic height sized to actual condition point count)
+        self.tbl_points = DynamicPointsTableWidget()
         self.tbl_points.setColumnCount(6)
         self.tbl_points.setHorizontalHeaderLabels(["ID", "상대 좌표 (X, Y)", "목표 색상", "허용 오차", "판정 모드", "삭제"])
         hdr_pts = self.tbl_points.horizontalHeader()
@@ -596,15 +597,14 @@ class InspectorWidget(QWidget):
         hdr_pts.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         hdr_pts.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         hdr_pts.setSectionResizeMode(3, QHeaderView.Fixed)
-        hdr_pts.resizeSection(3, 70)
+        hdr_pts.resizeSection(3, 78)
         hdr_pts.setSectionResizeMode(4, QHeaderView.Stretch)
         hdr_pts.setSectionResizeMode(5, QHeaderView.Fixed)
         hdr_pts.resizeSection(5, 38)
         self.tbl_points.verticalHeader().setDefaultSectionSize(24)
         self.tbl_points.setSelectionBehavior(QTableWidget.SelectRows)
-        self.tbl_points.setMinimumHeight(100)
-        self.tbl_points.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        layout.addWidget(self.tbl_points, 1)
+        self.tbl_points.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        layout.addWidget(self.tbl_points, 0)
 
         # Points Action Buttons (Responsive FlowLayout with wrapping)
         btn_flow_widget = QWidget()
@@ -1397,6 +1397,7 @@ class InspectorWidget(QWidget):
         eff_cond = self._get_active_condition()
         if not self.current_scenario or not eff_cond:
             self.tbl_points.setRowCount(0)
+            self.tbl_points.update_dynamic_height()
             return
 
         pts = eff_cond.points
@@ -1429,13 +1430,16 @@ class InspectorWidget(QWidget):
             spin_tol = NoWheelSpinBox()
             spin_tol.setRange(0, 255)
             spin_tol.setValue(pt.tolerance)
+            spin_tol.setAlignment(Qt.AlignCenter)
+            spin_tol.setToolTip(f"색상 허용 오차 (0~255, 현재: {pt.tolerance})")
             spin_tol.valueChanged.connect(lambda val, p=pt: self._on_point_tolerance_changed(p, val))
             self.tbl_points.setCellWidget(row, 3, spin_tol)
 
             # 4. Mode Combo (Inline edit)
             combo_m = NoWheelComboBox()
-            combo_m.addItem("일치 (Match)", "match")
-            combo_m.addItem("불일치 (Invert)", "not_match")
+            combo_m.addItem("일치", "match")
+            combo_m.addItem("불일치", "not_match")
+            combo_m.setToolTip("판정 모드: 일치 (Match) 또는 불일치 (Invert)")
             combo_m.setCurrentIndex(1 if pt.match_mode == "not_match" else 0)
             combo_m.currentIndexChanged.connect(lambda idx, p=pt: self._on_point_mode_changed(p, idx))
             self.tbl_points.setCellWidget(row, 4, combo_m)
@@ -1447,6 +1451,8 @@ class InspectorWidget(QWidget):
             btn_del.setStyleSheet("color: #ef4444; font-weight: bold; border: 1px solid #fca5a5; border-radius: 3px; background-color: #fef2f2; padding: 0;")
             btn_del.clicked.connect(lambda _, p=pt: self._on_delete_single_point(p))
             self.tbl_points.setCellWidget(row, 5, btn_del)
+
+        self.tbl_points.update_dynamic_height()
 
     # ==========================================
     # Condition (Module) Management Methods
@@ -1834,11 +1840,11 @@ class InspectorWidget(QWidget):
             elif act.action_type == "text_type":
                 target_str = f'"{act.text}"'
             elif act.action_type == "delay":
-                target_str = f"{act.delay_seconds:.1f}초"
+                target_str = ""  # 대기 노드는 대기 열에 표기되므로 좌표/키/텍스트 열은 공백 처리
             elif act.action_type == "sound_beep":
                 target_str = f"{act.beep_freq}Hz ({act.beep_duration_ms}ms)"
             elif act.action_type == "log_message":
-                target_str = act.log_text if act.log_text else "-"
+                target_str = ""  # 로그 노드는 로그 열에 표기되므로 좌표/키/텍스트 열은 공백 처리
             else:
                 target_str = "-"
 
@@ -1903,6 +1909,10 @@ class InspectorWidget(QWidget):
 
     def _on_action_cell_double_clicked(self, row: int, col: int):
         """Double clicking type/coord columns opens SingleActionDialog."""
+        if col == 2:
+            act = self._get_action_at(row)
+            if act and act.action_type in ("delay", "log_message"):
+                return  # 대기/로그 노드는 좌표/키/텍스트 열 입력 불가
         if col in (0, 1, 2):
             self._on_edit_action()
 
@@ -1931,9 +1941,11 @@ class InspectorWidget(QWidget):
         if self._is_loading or not self.current_scenario:
             return
         clean_log = new_log.strip()
-        if getattr(act, "custom_log", "") != clean_log:
+        if getattr(act, "custom_log", "") != clean_log or (act.action_type == "log_message" and getattr(act, "log_text", "") != clean_log):
             self._record_undo_state()
             act.custom_log = clean_log
+            if act.action_type == "log_message":
+                act.log_text = clean_log
             if edit_widget:
                 edit_widget.setToolTip(clean_log if clean_log else "로그 문구 (비워두면 꺼짐)")
             self._mark_dirty()
@@ -2324,7 +2336,10 @@ class InspectorWidget(QWidget):
                 match_desc = f"{passed_count}/{total_count}개 일치 ({rule_str})" if total_count > 0 else "무조건 일치"
                 self.lbl_cond_test_result.setText(f"✅ [일치] {match_desc}: 조건 부합!")
                 self.lbl_cond_test_result.setStyleSheet("color: #16a34a; font-weight: bold;")
-                self.sig_log.emit("SUCCESS", f"[{self.current_scenario.name}] 실시간 판정 테스트: 조건 일치! ({match_desc})")
+                fail_count = total_count - passed_count
+                mismatch_info = ConditionEvaluator.format_mismatch_log(details) if fail_count > 0 else ""
+                mismatch_str = f" [MISMATCH:{fail_count}]{mismatch_info}[/MISMATCH]" if mismatch_info else ""
+                self.sig_log.emit("SUCCESS", f"[{self.current_scenario.name}] 실시간 판정 테스트: 조건 일치! ({match_desc}){mismatch_str}")
             else:
                 fail_count = total_count - passed_count
                 match_desc = f"{passed_count}/{total_count}개 일치 ({rule_str})"

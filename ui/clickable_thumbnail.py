@@ -10,13 +10,24 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPixmap
 
 
-class ClickableThumbnailLabel(QLabel):
+class ClickableLabel(QLabel):
+    """
+    Generic clickable QLabel that emits a clicked signal on left mouse button click.
+    Avoids monkey-patching mousePressEvent with lambda, which causes sipBadCatcherResult crashes in PyQt.
+    """
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class ClickableThumbnailLabel(ClickableLabel):
     """
     Compact clickable 50px thumbnail widget for reference images.
     Preserves aspect ratio and scales smoothly to width 50px.
     """
-    clicked = pyqtSignal()
-
     def __init__(self, border_color: str = "#3b82f6", tooltip: str = "", parent=None):
         super().__init__(parent)
         self.border_color = border_color
@@ -30,11 +41,6 @@ class ClickableThumbnailLabel(QLabel):
             f"QLabel:hover {{ border: 2px solid #60a5fa; background-color: #1e293b; }}"
         )
         self.image_path: Optional[str] = None
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(event)
 
     def set_image(self, path: Optional[str], hide_on_empty: bool = True, max_w: Optional[int] = None, max_h: Optional[int] = None) -> bool:
         """Sets and scales reference image. If hide_on_empty is False, displays a clean placeholder when empty."""
